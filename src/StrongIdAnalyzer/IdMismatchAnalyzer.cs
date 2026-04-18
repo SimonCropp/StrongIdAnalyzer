@@ -610,82 +610,142 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType, INamedTypeSymbol idType)
     {
-        // Explicit [Id] (own attribute or inherited via override/interface) wins and
-        // collapses to a single tag — user intent overrides the convention's broadening.
-        var direct = GetIdFromAttributes(member.GetAttributes(), idType);
-        if (direct.State == IdState.Present)
-        {
-            return direct;
-        }
+        var tags = ImmutableArray.CreateBuilder<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var coveredTypes = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
 
-        if (member is IPropertySymbol property)
+        // 1. Walk the property's override + interface chain. At every level contribute
+        //    the level's explicit [Id] tag, or — if the level has none — the convention
+        //    tag for that level (type name for `Id`, prefix for `XxxId`). Explicit and
+        //    convention tags merge into one set; users who want to broaden a convention
+        //    tag stack explicit [Id]s on base / override members.
+        foreach (var level in EnumerateMemberChain(member))
         {
-            var inherited = GetPropertyIdFromHierarchy(property, idType);
-            if (inherited.State == IdState.Present)
+            if (level.ContainingType is { } ct)
             {
-                return inherited;
+                coveredTypes.Add(ct.OriginalDefinition);
+            }
+
+            var explicitInfo = GetIdFromAttributes(level.GetAttributes(), idType);
+            if (explicitInfo.State == IdState.Present)
+            {
+                foreach (var tag in explicitInfo.Tags)
+                {
+                    if (seen.Add(tag))
+                    {
+                        tags.Add(tag);
+                    }
+                }
+
+                continue;
+            }
+
+            // Convention only applies to user-declared members. Library-declared levels
+            // in the chain (e.g. an interface member in a referenced assembly) are
+            // silently skipped — the user can't attach a tag to them.
+            if (level.DeclaringSyntaxReferences.IsEmpty)
+            {
+                continue;
+            }
+
+            if (level is IPropertySymbol { IsIndexer: true })
+            {
+                continue;
+            }
+
+            if (TryGetConventionName(level, out var convName))
+            {
+                if (seen.Add(convName))
+                {
+                    tags.Add(convName);
+                }
             }
         }
 
-        if (member.DeclaringSyntaxReferences.IsEmpty)
+        // 2. Receiver-type walk adds `Id`-convention tags for types in the static-receiver
+        //    chain that were NOT covered by the member-chain walk. This catches the case
+        //    where a derived type inherits `Id` without redeclaring it — the receiver-type
+        //    contributes its conventional tag so `child1.Id` still carries "Child1".
+        //    Only the `Id` rule applies here; `XxxId` is name-based and already captured.
+        //    Stop at System.Object so "Object" never leaks into the tag set — relevant
+        //    when the declaring type is an interface and `.BaseType` walks past it.
+        if (member.Name == "Id" &&
+            member.ContainingType is { } memberContaining &&
+            receiverType is INamedTypeSymbol rt)
         {
-            return IdInfo.NotPresent;
-        }
-
-        if (member is IPropertySymbol indexerProbe && indexerProbe.IsIndexer)
-        {
-            return IdInfo.NotPresent;
-        }
-
-        var containing = member.ContainingType;
-        var name = member.Name;
-
-        // `Id`-convention collects a tag for each type in the receiver chain between the
-        // static receiver type and the declaring type (inclusive). `new` hide isn't walked
-        // — the resolved member symbol is the hidden declaration, so the chain starts
-        // there and terminates immediately.
-        if (name == "Id" && containing is not null)
-        {
-            var tags = ImmutableArray.CreateBuilder<string>();
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            var start = (receiverType as INamedTypeSymbol) ?? containing;
-            var current = start;
-            // Defensive cap against runaway inheritance walks (ill-formed code, recursive
-            // metadata). 32 is well beyond any real class hierarchy.
+            var boundary = memberContaining.OriginalDefinition;
+            var current = rt;
+            // Defensive cap against runaway walks from ill-formed metadata.
             for (var safety = 32; current is not null && safety > 0; safety--)
             {
-                if (current.Name.Length > 0 && seen.Add(current.Name))
+                if (current.SpecialType == SpecialType.System_Object)
+                {
+                    break;
+                }
+
+                if (!coveredTypes.Contains(current.OriginalDefinition) &&
+                    current.Name.Length > 0 &&
+                    seen.Add(current.Name))
                 {
                     tags.Add(current.Name);
                 }
 
-                if (SymbolEqualityComparer.Default.Equals(
-                        current.OriginalDefinition,
-                        containing.OriginalDefinition))
+                if (SymbolEqualityComparer.Default.Equals(current.OriginalDefinition, boundary))
                 {
                     break;
                 }
 
                 current = current.BaseType;
             }
-
-            return tags.Count == 0
-                ? IdInfo.NotPresent
-                : IdInfo.Present(tags.ToImmutable());
         }
 
-        if (name.Length > 2 && name.EndsWith("Id", StringComparison.Ordinal))
+        return tags.Count == 0
+            ? IdInfo.NotPresent
+            : IdInfo.Present(tags.ToImmutable());
+    }
+
+    // Yields the member and then every override/interface-impl target reachable from it.
+    // `new`-hide is NOT followed (OverriddenProperty returns null for it) — the hidden
+    // declaration is a fresh member that the user has explicitly disconnected from the
+    // base. Parameters are single-tag today and don't pass through this enumerator.
+    static IEnumerable<ISymbol> EnumerateMemberChain(ISymbol member)
+    {
+        yield return member;
+
+        if (member is not IPropertySymbol property)
         {
-            var prefix = name.Substring(0, name.Length - 2);
-            if (char.IsLower(prefix[0]))
-            {
-                prefix = char.ToUpperInvariant(prefix[0]) + prefix.Substring(1);
-            }
-
-            return IdInfo.Present(prefix);
+            yield break;
         }
 
-        return IdInfo.NotPresent;
+        var overridden = property.OverriddenProperty;
+        while (overridden is not null)
+        {
+            yield return overridden;
+            overridden = overridden.OverriddenProperty;
+        }
+
+        foreach (var ifaceMember in property.ExplicitInterfaceImplementations)
+        {
+            yield return ifaceMember;
+        }
+
+        var containingType = property.ContainingType;
+        if (containingType is null)
+        {
+            yield break;
+        }
+
+        foreach (var iface in containingType.AllInterfaces)
+        {
+            foreach (var ifaceMember in iface.GetMembers(property.Name).OfType<IPropertySymbol>())
+            {
+                var impl = containingType.FindImplementationForInterfaceMember(ifaceMember);
+                if (SymbolEqualityComparer.Default.Equals(impl, property))
+                {
+                    yield return ifaceMember;
+                }
+            }
+        }
     }
 
     static IdInfo GetId(ISymbol? symbol, INamedTypeSymbol idType)

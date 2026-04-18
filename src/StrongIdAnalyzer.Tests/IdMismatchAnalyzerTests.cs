@@ -1290,6 +1290,152 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public void Convention_InheritedId_AbstractClassWithExplicitAttributes_UnionsTags()
+    {
+        // Abstract class Base + override properties with explicit [Id] at every level.
+        // Override chain walks Child1.Id -> Base.Id and unions both tags, so child1.Id
+        // carries {"Child1","Base"} and satisfies parameters tagged either way while
+        // child2.Id correctly fails the "Child1" parameter.
+        var source = """
+            public abstract class Base
+            {
+                [Id("Base")]
+                public abstract System.Guid Id { get; set; }
+            }
+
+            public class Child1 : Base
+            {
+                [Id("Child1")]
+                public override System.Guid Id { get; set; }
+            }
+
+            public class Child2 : Base
+            {
+                [Id("Child2")]
+                public override System.Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public static void Foo(System.Guid child1Id, System.Guid baseId) { }
+
+                public void Use()
+                {
+                    var child1 = new Child1();
+                    Foo(child1.Id, child1.Id);
+
+                    var child2 = new Child2();
+                    Foo(child2.Id, child2.Id);
+                }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var flow = diagnostics.Where(_ => _.Id is "SIA001" or "SIA002" or "SIA003").ToArray();
+
+        AreEqual(1, flow.Length);
+        AreEqual("SIA001", flow[0].Id);
+        var message = flow[0].GetMessage();
+        IsTrue(message.Contains("Child2"));
+        IsTrue(message.Contains("Child1"));
+    }
+
+    [Test]
+    public void Convention_InheritedId_InterfaceWithExplicitAttributes_UnionsTags()
+    {
+        // Interface Base + class impls with explicit [Id] at every level. Implicit
+        // interface implementation is walked, so child1.Id carries {"Child1","Base"}.
+        var source = """
+            public interface Base
+            {
+                [Id("Base")]
+                System.Guid Id { get; set; }
+            }
+
+            public class Child1 : Base
+            {
+                [Id("Child1")]
+                public System.Guid Id { get; set; }
+            }
+
+            public class Child2 : Base
+            {
+                [Id("Child2")]
+                public System.Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public static void Foo(System.Guid child1Id, System.Guid baseId) { }
+
+                public void Use()
+                {
+                    var child1 = new Child1();
+                    Foo(child1.Id, child1.Id);
+
+                    var child2 = new Child2();
+                    Foo(child2.Id, child2.Id);
+                }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var flow = diagnostics.Where(_ => _.Id is "SIA001" or "SIA002" or "SIA003").ToArray();
+
+        AreEqual(1, flow.Length);
+        AreEqual("SIA001", flow[0].Id);
+        var message = flow[0].GetMessage();
+        IsTrue(message.Contains("Child2"));
+        IsTrue(message.Contains("Child1"));
+    }
+
+    [Test]
+    public void Convention_InheritedId_InterfaceWithConventionOnly_UnionsTags()
+    {
+        // Interface Base with an abstract Id, children implement without explicit [Id].
+        // Both convention tags (Child1/Child2 + Base) come from the interface walk.
+        var source = """
+            public interface Base
+            {
+                System.Guid Id { get; set; }
+            }
+
+            public class Child1 : Base
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class Child2 : Base
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public static void Foo(System.Guid child1Id, System.Guid baseId) { }
+
+                public void Use()
+                {
+                    var child1 = new Child1();
+                    Foo(child1.Id, child1.Id);
+
+                    var child2 = new Child2();
+                    Foo(child2.Id, child2.Id);
+                }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var flow = diagnostics.Where(_ => _.Id is "SIA001" or "SIA002" or "SIA003").ToArray();
+
+        AreEqual(1, flow.Length);
+        AreEqual("SIA001", flow[0].Id);
+        var message = flow[0].GetMessage();
+        IsTrue(message.Contains("Child2"));
+        IsTrue(message.Contains("Child1"));
+    }
+
+    [Test]
     public void Convention_InheritedId_DeepChain_IncludesAllAncestors()
     {
         // leaf.Id walks Leaf → Mid → Root and carries all three tags.

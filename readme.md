@@ -250,6 +250,211 @@ SIA003 is suppressed when the tag can't meaningfully survive:
  * **Equality comparisons** — `==` / `!=` operands are symmetric, so only SIA001 / SIA002 apply.
 
 
+## Inheritance and covariant Id tagging
+
+A property (or field) named `Id` inherited from a base type carries tags from **every** level of the chain its receiver walks — the base type's tag **and** the derived type's tag. At an access site like `child1.Id`, the tag set is the union of:
+
+ * Every explicit `[Id("...")]` found on the property, its `override` chain, and its interface impls.
+ * Every naming-convention tag for types in the receiver's static-type chain between the receiver type and the member's declaring type (inclusive), where the member was not redeclared.
+
+Matching rules use set containment — a single-tag parameter is satisfied if its tag appears anywhere in the source's set. So given `public static void Foo(Guid child1Id, Guid baseId)`:
+
+ * `Foo(child1.Id, child1.Id)` is **OK** — `child1.Id`'s set `{"Child1", "Base"}` covers both `"Child1"` and `"Base"`.
+ * `Foo(child2.Id, child2.Id)` fires **SIA001 on the first argument only** — `{"Child2", "Base"}` covers `"Base"` but not `"Child1"`.
+
+The same semantics work across four common shapes:
+
+### Abstract class + explicit `[Id]` on every level
+
+<!-- snippet: InheritanceAbstractClassExplicit -->
+<a id='snippet-InheritanceAbstractClassExplicit'></a>
+```cs
+namespace InheritanceAbstractClassExplicit
+{
+    // Explicit [Id(...)] values match what the convention would infer, so SIA005
+    // would warn on each one. Suppressed here because the whole point of this
+    // snippet is to spell out each tag by hand.
+#pragma warning disable SIA005
+    public abstract class Base
+    {
+        [Id("Base")]
+        public abstract Guid Id { get; set; }
+    }
+
+    public class Child1 : Base
+    {
+        [Id("Child1")]
+        public override Guid Id { get; set; }
+    }
+
+    public class Child2 : Base
+    {
+        [Id("Child2")]
+        public override Guid Id { get; set; }
+    }
+#pragma warning restore SIA005
+
+    public static class Usage
+    {
+        public static void Foo(Guid child1Id, Guid baseId) { }
+
+        public static void Run()
+        {
+            var child1 = new Child1();
+            Foo(child1.Id, child1.Id); // OK: child1.Id is tagged {"Child1","Base"}
+
+            var child2 = new Child2();
+#pragma warning disable SIA001
+            Foo(child2.Id, child2.Id); // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+#pragma warning restore SIA001
+        }
+    }
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L174-L218' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassExplicit' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+### Abstract class + naming convention only
+
+<!-- snippet: InheritanceAbstractClassConvention -->
+<a id='snippet-InheritanceAbstractClassConvention'></a>
+```cs
+namespace InheritanceAbstractClassConvention
+{
+    // SIA004 fires because Base/Child1/Child2 also exist in the interface-convention
+    // scenario below; in real code this would never happen because there's only one
+    // definition per name. Suppressed here so the snippets can showcase every shape.
+#pragma warning disable SIA004
+    public abstract class Base
+    {
+        public abstract Guid Id { get; set; }
+    }
+
+    public class Child1 : Base
+    {
+        public override Guid Id { get; set; }
+    }
+
+    public class Child2 : Base
+    {
+        public override Guid Id { get; set; }
+    }
+#pragma warning restore SIA004
+
+    public static class Usage
+    {
+        public static void Foo(Guid child1Id, Guid baseId) { }
+
+        public static void Run()
+        {
+            var child1 = new Child1();
+            Foo(child1.Id, child1.Id); // OK: override chain gives {"Child1","Base"}
+
+            var child2 = new Child2();
+#pragma warning disable SIA001
+            Foo(child2.Id, child2.Id); // SIA001 on arg 1: convention gives {"Child2","Base"}
+#pragma warning restore SIA001
+        }
+    }
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L220-L261' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassConvention' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+### Interface + explicit `[Id]` on every level
+
+<!-- snippet: InheritanceInterfaceExplicit -->
+<a id='snippet-InheritanceInterfaceExplicit'></a>
+```cs
+namespace InheritanceInterfaceExplicit
+{
+#pragma warning disable SIA005
+    public interface Base
+    {
+        [Id("Base")]
+        Guid Id { get; set; }
+    }
+
+    public class Child1 : Base
+    {
+        [Id("Child1")]
+        public Guid Id { get; set; }
+    }
+
+    public class Child2 : Base
+    {
+        [Id("Child2")]
+        public Guid Id { get; set; }
+    }
+#pragma warning restore SIA005
+
+    public static class Usage
+    {
+        public static void Foo(Guid child1Id, Guid baseId) { }
+
+        public static void Run()
+        {
+            var child1 = new Child1();
+            Foo(child1.Id, child1.Id); // OK: interface walk adds "Base" next to "Child1"
+
+            var child2 = new Child2();
+#pragma warning disable SIA001
+            Foo(child2.Id, child2.Id); // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+#pragma warning restore SIA001
+        }
+    }
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L263-L304' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceExplicit' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+### Interface + naming convention only
+
+<!-- snippet: InheritanceInterfaceConvention -->
+<a id='snippet-InheritanceInterfaceConvention'></a>
+```cs
+namespace InheritanceInterfaceConvention
+{
+    // See the note on InheritanceAbstractClassConvention — same name-collision
+    // suppression rationale.
+#pragma warning disable SIA004
+    public interface Base
+    {
+        Guid Id { get; set; }
+    }
+
+    public class Child1 : Base
+    {
+        public Guid Id { get; set; }
+    }
+
+    public class Child2 : Base
+    {
+        public Guid Id { get; set; }
+    }
+#pragma warning restore SIA004
+
+    public static class Usage
+    {
+        public static void Foo(Guid child1Id, Guid baseId) { }
+
+        public static void Run()
+        {
+            var child1 = new Child1();
+            Foo(child1.Id, child1.Id); // OK: convention tags {"Child1","Base"}
+
+            var child2 = new Child2();
+#pragma warning disable SIA001
+            Foo(child2.Id, child2.Id); // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+#pragma warning restore SIA001
+        }
+    }
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L306-L346' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceConvention' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+
 ## Suppressing namespaces
 
 Diagnostics SIA002 and SIA003 are suppressed when the fix-target lives in a namespace matching the configured list. Defaults:
