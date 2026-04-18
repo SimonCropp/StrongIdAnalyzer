@@ -1725,6 +1725,24 @@ public class IdMismatchAnalyzerTests
         AreEqual(0, diagnostics.Count(_ => _.Id == "SIA006"));
     }
 
+    [Test]
+    public void AnonymousType_PropertyConvention_IsSkipped()
+    {
+        var source = """
+            public class Holder
+            {
+                [Id("ProgramBillBase")]
+                public System.Guid ProgramBillId { get; set; }
+
+                public object Shape() => new { BillId = ProgramBillId };
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
     static ImmutableArray<Diagnostic> GetDiagnostics(string source) =>
         GetDiagnosticsWithOptions(source, new Dictionary<string, string>());
 
