@@ -75,7 +75,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void MethodReturnSource_IsUnknown()
+    public void MethodReturnSource_Untagged_IsUnknown()
     {
         var source =
             """
@@ -92,6 +92,179 @@ public class IdMismatchAnalyzerTests
         var diagnostics = GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void MethodReturnSource_TaggedMatching_NoDiagnostic()
+    {
+        var source =
+            """
+            public class Holder
+            {
+                [return: Id("Order")]
+                public System.Guid GetOrderId() => System.Guid.Empty;
+
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use() => Consume(GetOrderId());
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void MethodReturnSource_TaggedMismatch_FiresSIA001()
+    {
+        var source =
+            """
+            public class Holder
+            {
+                [return: Id("Customer")]
+                public System.Guid GetCustomerId() => System.Guid.Empty;
+
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use() => Consume(GetCustomerId());
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+        var message = diagnostics[0].GetMessage();
+        IsTrue(message.Contains("Customer"));
+        IsTrue(message.Contains("Order"));
+    }
+
+    [Test]
+    public void MethodReturnSource_UnionOverlap_NoDiagnostic()
+    {
+        var source =
+            """
+            public class Holder
+            {
+                [return: UnionId("Customer", "Order")]
+                public System.Guid GetId() => System.Guid.Empty;
+
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use() => Consume(GetId());
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void MethodReturnSource_UnionDisjoint_FiresSIA001()
+    {
+        var source =
+            """
+            public class Holder
+            {
+                [return: UnionId("Customer", "Supplier")]
+                public System.Guid GetId() => System.Guid.Empty;
+
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use() => Consume(GetId());
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void MethodReturnSource_UnwrapsAwait()
+    {
+        var source =
+            """
+            using System.Threading.Tasks;
+
+            public class Holder
+            {
+                [return: Id("Customer")]
+                public Task<System.Guid> LoadCustomerIdAsync() => Task.FromResult(System.Guid.Empty);
+
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public async Task Use() => Consume(await LoadCustomerIdAsync());
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void MethodReturnSource_InheritedFromOverride_FiresSIA001()
+    {
+        var source =
+            """
+            public abstract class Base
+            {
+                [return: Id("Customer")]
+                public abstract System.Guid GetId();
+            }
+
+            public class Derived : Base
+            {
+                public override System.Guid GetId() => System.Guid.Empty;
+            }
+
+            public class Holder
+            {
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use(Derived derived) => Consume(derived.GetId());
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void MethodReturnSource_InheritedFromInterface_FiresSIA001()
+    {
+        var source =
+            """
+            public interface IGetter
+            {
+                [return: Id("Customer")]
+                System.Guid GetId();
+            }
+
+            public class Impl : IGetter
+            {
+                public System.Guid GetId() => System.Guid.Empty;
+            }
+
+            public class Holder
+            {
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use(Impl impl) => Consume(impl.GetId());
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]

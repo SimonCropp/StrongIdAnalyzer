@@ -716,12 +716,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static ISymbol? GetSymbol(IOperation operation)
     {
-        operation = UnwrapConversions(operation);
+        operation = Unwrap(operation);
         return operation switch
         {
             IPropertyReferenceOperation prop => prop.Property,
             IFieldReferenceOperation field => field.Field,
             IParameterReferenceOperation param => param.Parameter,
+            IInvocationOperation invocation => invocation.TargetMethod,
             _ => null
         };
     }
@@ -732,14 +733,74 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // "Base" and can flow into parameters tagged either way.
     static IdInfo GetAccessInfo(IOperation operation, Config config)
     {
-        operation = UnwrapConversions(operation);
+        operation = Unwrap(operation);
         return operation switch
         {
             IPropertyReferenceOperation prop => GetMemberAccessInfo(prop.Property, prop.Instance?.Type, config),
             IFieldReferenceOperation field => GetMemberAccessInfo(field.Field, field.Instance?.Type, config),
             IParameterReferenceOperation param => GetIdWithInheritance(param.Parameter, config),
+            IInvocationOperation invocation => GetReturnInfo(invocation.TargetMethod, config),
             _ => IdInfo.Unknown
         };
+    }
+
+    // Resolve tags on a method's return value. `[return: Id("Order")]` / `[return: UnionId(...)]`
+    // on the method itself, or on any method it overrides / interface member it implements.
+    // No naming convention — method names aren't a reliable tag source. Absence of an
+    // attribute produces Unknown (not NotPresent) so untagged invocations like
+    // `Guid.NewGuid()` stay silent — same policy as local variables and literals.
+    static IdInfo GetReturnInfo(IMethodSymbol method, Config config)
+    {
+        var direct = GetIdFromAttributes(method.GetReturnTypeAttributes(), config);
+        if (direct.State == IdState.Present)
+        {
+            return direct;
+        }
+
+        var overridden = method.OverriddenMethod;
+        while (overridden is not null)
+        {
+            var info = GetIdFromAttributes(overridden.GetReturnTypeAttributes(), config);
+            if (info.State == IdState.Present)
+            {
+                return info;
+            }
+
+            overridden = overridden.OverriddenMethod;
+        }
+
+        foreach (var ifaceMember in method.ExplicitInterfaceImplementations)
+        {
+            var info = GetIdFromAttributes(ifaceMember.GetReturnTypeAttributes(), config);
+            if (info.State == IdState.Present)
+            {
+                return info;
+            }
+        }
+
+        var containingType = method.ContainingType;
+        if (containingType is not null)
+        {
+            foreach (var iface in containingType.AllInterfaces)
+            {
+                foreach (var ifaceMember in iface.GetMembers(method.Name).OfType<IMethodSymbol>())
+                {
+                    var impl = containingType.FindImplementationForInterfaceMember(ifaceMember);
+                    if (!SymbolEqualityComparer.Default.Equals(impl, method))
+                    {
+                        continue;
+                    }
+
+                    var info = GetIdFromAttributes(ifaceMember.GetReturnTypeAttributes(), config);
+                    if (info.State == IdState.Present)
+                    {
+                        return info;
+                    }
+                }
+            }
+        }
+
+        return IdInfo.Unknown;
     }
 
     static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType, Config config)
@@ -1099,13 +1160,25 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return IdInfo.NotPresent;
     }
 
-    static IOperation UnwrapConversions(IOperation operation)
+    // Peel off conversions and `await` so the resolver sees the value-producing operation
+    // underneath. An `await task` result carries the tag of the method that produced the
+    // task, so unwrapping lets `[return: Id]` on an async method flow through the await.
+    static IOperation Unwrap(IOperation operation)
     {
-        while (operation is IConversionOperation conversion)
+        while (true)
         {
-            operation = conversion.Operand;
+            switch (operation)
+            {
+                case IConversionOperation conversion:
+                    operation = conversion.Operand;
+                    continue;
+                case IAwaitOperation await:
+                    operation = await.Operation;
+                    continue;
+                default:
+                    return operation;
+            }
         }
-        return operation;
     }
 
     static IdInfo GetIdFromAttributes(

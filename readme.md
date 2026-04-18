@@ -549,23 +549,33 @@ Consume(copy);          // unknown — local reference
 
 ### Method invocations
 
-The analyzer does not follow return values. Attribute a method's **return value** via `[return: Id("Order")]` on a declaration you own if you need the flow checked at the call site (future work — currently out of scope).
+Untagged return values stay **unknown** — no noise on `Guid.NewGuid()` and friends. To flow a tag through a return value, annotate the method with `[return: Id("...")]` or `[return: UnionId("...", "...")]`. The tag is read from the method's own return attributes, plus any method it overrides or interface member it implements.
 
 ```cs
 Guid GetOrderId() => Guid.NewGuid();
 
-Consume(GetOrderId());   // unknown — invocation result
-Consume(Guid.NewGuid()); // unknown — invocation result
+Consume(GetOrderId());   // unknown — untagged return
+Consume(Guid.NewGuid()); // unknown — untagged return
+
+[return: Id("Order")]
+Guid LoadOrderId() => Guid.NewGuid();
+
+Consume(LoadOrderId());  // OK — tag matches
 ```
 
 ### `await` expressions
 
-Same reason as method invocations: the awaited value originates from a call, and return-value tags aren't tracked.
+The analyzer unwraps `await` to the underlying operation, so `[return: Id]` on an async method flows to the awaited value at the call site.
 
 ```cs
 Task<Guid> LoadOrderIdAsync() => Task.FromResult(Guid.NewGuid());
 
-Consume(await LoadOrderIdAsync()); // unknown — await of invocation
+Consume(await LoadOrderIdAsync()); // unknown — untagged async return
+
+[return: Id("Order")]
+Task<Guid> LoadTaggedOrderIdAsync() => Task.FromResult(Guid.NewGuid());
+
+Consume(await LoadTaggedOrderIdAsync()); // OK — tag flows through await
 ```
 
 ### Compound expressions

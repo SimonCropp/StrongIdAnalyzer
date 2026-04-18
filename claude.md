@@ -43,7 +43,7 @@ Record primary-constructor parameters: `[Id]` on the parameter is bridged onto t
 
 ### Source resolution
 
-SIA001/002/003 only fire when the source expression is a **property / field / parameter reference**. Literals, locals, method invocations, `await`, etc. are treated as unknown and suppressed — this is deliberate, it's what keeps noise down around `Guid.NewGuid()` and `Guid.Empty`. Don't "fix" this by analyzing more expression shapes without understanding why it's restricted.
+SIA001/002/003 fire when the source expression is a **property / field / parameter reference**, or a **method invocation whose target method carries `[return: Id]` / `[return: UnionId]`** (override / interface-impl return attributes are walked). `await` is transparently unwrapped — a tagged async method's result flows through `await`. Literals, locals, untagged invocations, and compound expressions (ternaries, casts, null-coalescing) are deliberately `Unknown` and suppress all three diagnostics — this is what keeps noise down around `Guid.NewGuid()` and `Guid.Empty`. Don't "fix" this by analyzing more expression shapes without understanding why it's restricted.
 
 ### SIA002/003 suppression
 
