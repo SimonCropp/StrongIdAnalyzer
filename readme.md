@@ -523,7 +523,63 @@ The source of a value is resolved when it is one of:
  * A field reference (`obj._field`)
  * A parameter reference (method argument, lambda parameter, etc.)
 
-Other sources — literals, local variables, method invocations, `await`, expressions — are treated as **unknown** and suppress all three diagnostics. This avoids noise on every `Guid.NewGuid()`, every local variable, and every primitive passed to an `[Id]` parameter.
+Other sources are treated as **unknown** and suppress all three diagnostics. This avoids noise on every `Guid.NewGuid()`, every local variable, and every primitive that happens to pass through an expression.
+
+### Literals
+
+No `[Id]` can be attached to a literal, so there is nothing to compare against.
+
+```cs
+void Consume([Id("Order")] Guid value) { }
+
+Consume(Guid.Empty);                                 // unknown — literal-like
+Consume(new Guid("00000000-0000-0000-0000-000000000000")); // unknown — constructor
+```
+
+### Local variables
+
+Locals don't support attributes in C#, so the analyzer can't resolve a tag for them — even if the value that flowed into the local was originally tagged.
+
+```cs
+[Id("Customer")] Guid source = default;
+
+var copy = source;      // tag does not flow through the local
+Consume(copy);          // unknown — local reference
+```
+
+### Method invocations
+
+The analyzer does not follow return values. Attribute a method's **return value** via `[return: Id("Order")]` on a declaration you own if you need the flow checked at the call site (future work — currently out of scope).
+
+```cs
+Guid GetOrderId() => Guid.NewGuid();
+
+Consume(GetOrderId());   // unknown — invocation result
+Consume(Guid.NewGuid()); // unknown — invocation result
+```
+
+### `await` expressions
+
+Same reason as method invocations: the awaited value originates from a call, and return-value tags aren't tracked.
+
+```cs
+Task<Guid> LoadOrderIdAsync() => Task.FromResult(Guid.NewGuid());
+
+Consume(await LoadOrderIdAsync()); // unknown — await of invocation
+```
+
+### Compound expressions
+
+Conditionals, casts, pattern results, null-coalescing, and any other expression shape collapse to "unknown" — even when every operand would individually resolve.
+
+```cs
+[Id("Order")]    Guid a = default;
+[Id("Customer")] Guid b = default;
+
+Consume(condition ? a : b); // unknown — ternary
+Consume((Guid)(object)a);   // unknown — cast chain
+Consume(a == Guid.Empty ? b : a); // unknown — conditional result
+```
 
 
 ## Record primary-constructor parameters
