@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Roslyn analyzer + code fix + source generator that prevents primitive ID values (`Guid`, `int`, `string`, ...) being crossed between domain types at compile time. Users tag declarations with `[Id("Customer")]` / `[UnionId("Customer","Product")]` and the analyzer flags cross-domain flows. No runtime wrapper type; the primitive stays a primitive.
 
-Diagnostic prefix `SIA` — SIA001 (mismatch, no fix), SIA002 (source missing, fix), SIA003 (target missing, fix), SIA004 (ambiguous convention, error, compilation-end), SIA005 (redundant `[Id]`, fix, compilation-end), SIA006 (single-option `[UnionId]`, fix).
+Diagnostic prefix `SIA` — SIA001 (mismatch, fix: change attr or rename target), SIA002 (source missing, fix), SIA003 (target missing, fix), SIA004 (ambiguous convention, error, compilation-end), SIA005 (redundant `[Id]`, fix, compilation-end), SIA006 (single-option `[UnionId]`, fix).
 
 ## Build & test
 

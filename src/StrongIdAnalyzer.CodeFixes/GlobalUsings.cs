@@ -7,4 +7,5 @@ global using Microsoft.CodeAnalysis.CodeFixes;
 global using Microsoft.CodeAnalysis.CSharp;
 global using Microsoft.CodeAnalysis.CSharp.Syntax;
 global using Microsoft.CodeAnalysis.Formatting;
+global using Microsoft.CodeAnalysis.Rename;
 global using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;

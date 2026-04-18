@@ -209,7 +209,7 @@ public class Customer
 
 | ID     | Severity | Code fix | Summary                                                                 |
 |--------|----------|----------|-------------------------------------------------------------------------|
-| SIA001 | Warning  | —        | Both sides tagged with different `[Id]` values                          |
+| SIA001 | Warning  | Yes      | Both sides tagged with different `[Id]` values                          |
 | SIA002 | Warning  | Yes      | Source missing `[Id]`; target has one                                   |
 | SIA003 | Warning  | Yes      | Source has `[Id]`; target missing one                                   |
 | SIA004 | Error    | —        | Two `public Guid Id` declarations collide under the naming convention   |
@@ -242,16 +242,17 @@ public class SIA001Sample
 <!-- endSnippet -->
 
 
-#### Why SIA001 has no code fix
+#### Code fixes
 
-SIA001 is ambiguous by design. Given `OrderId == CustomerId`, the analyzer can see the two tags don't match, but it has no way to know whether the bug is:
+For flow-style mismatches (argument, assignment, property/field initializer) the analyzer attaches the **target** declaration as the fix site and offers:
 
- * the left operand (wrong property picked on one side)
- * the right operand (same, other side)
- * one of the `[Id]` annotations itself being wrong
- * or the comparison is intentional cross-domain logic that just happens to fail safely
+ * **Change to `[Id("<source tag>")]`** — when the target already carries an explicit `[Id]` / `[UnionId]`, replaces it with the source's tag.
+ * **Add `[Id("<source tag>")]`** — when the target is untagged (its current tag came from naming convention), adds the attribute.
+ * **Rename to `<sourceTag>Id`** — when the target has no explicit attribute and its name matches the `XxxId` convention. First-character case is preserved (`bidId` → `treasuryBidId`, `BidId` → `TreasuryBidId`). Works for parameters, properties, and single-declarator fields.
 
-Any auto-fix would be picking a side at random and silently rewriting logic. For equality specifically there's one mechanical option — "replace with `false`" (for `==`) or "`true`" (for `!=`), since cross-domain equality is always false — but that's a behavior change dressed as a fix, and if the user wanted that they'd delete the line. Manual resolution is the only safe path.
+The fixer always changes the *target* side because the analyzer picks a direction by fix site, not by blaming. If the source annotation is the one that's actually wrong, fix it by hand — a silent cross-domain rewrite would be a behavior change dressed as a fix.
+
+No fix is offered for equality-operand mismatches (`a == b`): both sides are symmetric and there's no distinguished "target" to blame. The mechanical options — replace with `false` / `true`, since cross-domain equality is always false — would be behavior changes, not corrections. Manual resolution is the only safe path there.
 
 
 ### SIA002 — Source missing `[Id]`

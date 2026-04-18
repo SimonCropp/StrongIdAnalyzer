@@ -210,6 +210,158 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA001_ReplacesExplicitAttributeOnTargetParameter()
+    {
+        var source = """
+            public class Target
+            {
+                public static void Consume([Id("Bid")] System.Guid value) { }
+            }
+
+            public class Bid
+            {
+                [Id("TreasuryBid")]
+                public System.Guid Id { get; set; }
+
+                public void Use() => Target.Consume(Id);
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change to");
+
+        Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid value");
+        DoesNotContain(fixedSource, "[Id(\"Bid\")]");
+    }
+
+    [Test]
+    public async Task SIA001_AddsAttributeToConventionallyNamedParameter()
+    {
+        var source = """
+            public class Target
+            {
+                public static void Consume(System.Guid bidId) { }
+            }
+
+            public class Bid
+            {
+                [Id("TreasuryBid")]
+                public System.Guid Id { get; set; }
+
+                public void Use() => Target.Consume(Id);
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Add");
+
+        Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid bidId");
+    }
+
+    [Test]
+    public async Task SIA001_RenamesConventionallyNamedParameter()
+    {
+        var source = """
+            public class Target
+            {
+                public static void Consume(System.Guid bidId) { }
+            }
+
+            public class Bid
+            {
+                [Id("TreasuryBid")]
+                public System.Guid Id { get; set; }
+
+                public void Use() => Target.Consume(Id);
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename to");
+
+        Contains(fixedSource, "System.Guid treasuryBidId");
+        DoesNotContain(fixedSource, "bidId");
+    }
+
+    [Test]
+    public async Task SIA001_RenamesConventionallyNamedProperty()
+    {
+        var source = """
+            public class Target
+            {
+                public System.Guid BidId { get; set; }
+            }
+
+            public class Bid
+            {
+                [Id("TreasuryBid")]
+                public System.Guid Id { get; set; }
+
+                public void Use(Target target) => target.BidId = Id;
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename to");
+
+        Contains(fixedSource, "public System.Guid TreasuryBidId");
+        Contains(fixedSource, "target.TreasuryBidId = Id");
+    }
+
+    [Test]
+    public async Task SIA001_RenamesConventionallyNamedField()
+    {
+        var source = """
+            public class Target
+            {
+                public System.Guid BidId;
+            }
+
+            public class Bid
+            {
+                [Id("TreasuryBid")]
+                public System.Guid Id { get; set; }
+
+                public void Use(Target target) => target.BidId = Id;
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename to");
+
+        Contains(fixedSource, "public System.Guid TreasuryBidId;");
+        Contains(fixedSource, "target.TreasuryBidId = Id");
+    }
+
+    [Test]
+    public async Task SIA001_NoRenameWhenExplicitAttributePresent()
+    {
+        var source = """
+            public class Target
+            {
+                public static void Consume([Id("Bid")] System.Guid bidId) { }
+            }
+
+            public class Bid
+            {
+                [Id("TreasuryBid")]
+                public System.Guid Id { get; set; }
+
+                public void Use() => Target.Consume(Id);
+            }
+            """;
+
+        var (document, diagnostic) = await PrepareFixAsync(source, "SIA001");
+        var actions = ImmutableArray.CreateBuilder<CodeAction>();
+        var context = new CodeFixContext(
+            document,
+            diagnostic,
+            (action, _) => actions.Add(action),
+            Cancel.None);
+
+        await new AddIdCodeFixProvider().RegisterCodeFixesAsync(context);
+
+        var built = actions.ToImmutable();
+        AreEqual(1, built.Length);
+        IsTrue(built[0].Title.StartsWith("Change to", StringComparison.Ordinal));
+    }
+
+    [Test]
     public async Task SIA005_RemovesRedundantAttribute_WhenOnlyAttribute()
     {
         var source = """
@@ -254,6 +406,11 @@ public class AddIdCodeFixProviderTests
             actual.Contains(expected),
             $"Expected fixed source to contain:\n{expected}\n\nActual:\n{actual}");
 
+    static void DoesNotContain(string actual, string unexpected) =>
+        IsTrue(
+            !actual.Contains(unexpected),
+            $"Expected fixed source NOT to contain:\n{unexpected}\n\nActual:\n{actual}");
+
     static Task<string> ApplyFix(string source) =>
         ApplyFix(source, id: null);
 
@@ -271,10 +428,34 @@ public class AddIdCodeFixProviderTests
         await new AddIdCodeFixProvider().RegisterCodeFixesAsync(context);
 
         var action = actions.ToImmutable().Single();
+        return await ApplyAction(action, document.Id);
+    }
+
+    static async Task<string> ApplyFixByTitlePrefix(string source, string id, string titlePrefix)
+    {
+        var (document, diagnostic) = await PrepareFixAsync(source, id);
+
+        var actions = ImmutableArray.CreateBuilder<CodeAction>();
+        var context = new CodeFixContext(
+            document,
+            diagnostic,
+            (action, _) => actions.Add(action),
+            Cancel.None);
+
+        await new AddIdCodeFixProvider().RegisterCodeFixesAsync(context);
+
+        var action = actions
+            .ToImmutable()
+            .Single(_ => _.Title.StartsWith(titlePrefix, StringComparison.Ordinal));
+        return await ApplyAction(action, document.Id);
+    }
+
+    static async Task<string> ApplyAction(CodeAction action, DocumentId documentId)
+    {
         var operations = await action.GetOperationsAsync(Cancel.None);
         var applyOperation = operations.OfType<ApplyChangesOperation>().Single();
 
-        var newDocument = applyOperation.ChangedSolution.GetDocument(document.Id)!;
+        var newDocument = applyOperation.ChangedSolution.GetDocument(documentId)!;
         var text = await newDocument.GetTextAsync();
         return text.ToString();
     }

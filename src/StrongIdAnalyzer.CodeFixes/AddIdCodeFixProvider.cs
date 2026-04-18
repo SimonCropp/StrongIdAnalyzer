@@ -7,6 +7,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
     // Kept in sync with IdMismatchAnalyzer. Duplicated instead of shared to keep
     // the analyzer project free of a back-reference from the codefix project.
     const string valueKey = "IdValue";
+    const string idMismatchId = "SIA001";
     const string missingSourceIdId = "SIA002";
     const string droppedIdId = "SIA003";
     const string redundantIdId = "SIA005";
@@ -14,6 +15,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
     public override ImmutableArray<string> FixableDiagnosticIds =>
     [
+        idMismatchId,
         missingSourceIdId,
         droppedIdId,
         redundantIdId,
@@ -41,9 +43,285 @@ public class AddIdCodeFixProvider : CodeFixProvider
                 continue;
             }
 
+            if (diagnostic.Id == idMismatchId)
+            {
+                await RegisterMismatchFixes(context, diagnostic)
+                    .ConfigureAwait(false);
+                continue;
+            }
+
             await RegisterAddFix(context, diagnostic)
                 .ConfigureAwait(false);
         }
+    }
+
+    static async Task RegisterMismatchFixes(CodeFixContext context, Diagnostic diagnostic)
+    {
+        if (diagnostic.AdditionalLocations.Count == 0)
+        {
+            return;
+        }
+
+        if (!diagnostic.Properties.TryGetValue(valueKey, out var value) ||
+            value is null)
+        {
+            return;
+        }
+
+        var declarationLocation = diagnostic.AdditionalLocations[0];
+        if (!declarationLocation.IsInSource)
+        {
+            return;
+        }
+
+        var declarationTree = declarationLocation.SourceTree;
+        if (declarationTree is null)
+        {
+            return;
+        }
+
+        var declarationRoot = await declarationTree
+            .GetRootAsync(context.CancellationToken)
+            .ConfigureAwait(false);
+        var declarationNode = declarationRoot.FindNode(declarationLocation.SourceSpan);
+        var host = FindAttributeHost(declarationNode);
+        if (host is null)
+        {
+            return;
+        }
+
+        var hasExplicit = HasIdFamilyAttribute(host);
+        var actionTitle = hasExplicit
+            ? $"Change to [Id(\"{value}\")]"
+            : $"Add [Id(\"{value}\")]";
+
+        context.RegisterCodeFix(
+            CodeAction.Create(
+                actionTitle,
+                cancel => ChangeOrAddAttributeAsync(
+                    context.Document.Project.Solution,
+                    declarationLocation,
+                    value,
+                    cancel),
+                equivalenceKey: $"ChangeId:{value}"),
+            diagnostic);
+
+        if (!hasExplicit && TryGetRenameTarget(host, value, out var newName))
+        {
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    $"Rename to '{newName}'",
+                    cancel => RenameAsync(
+                        context.Document,
+                        declarationLocation,
+                        newName,
+                        cancel),
+                    equivalenceKey: $"RenameId:{newName}"),
+                diagnostic);
+        }
+    }
+
+    static bool HasIdFamilyAttribute(SyntaxNode host)
+    {
+        var lists = host switch
+        {
+            PropertyDeclarationSyntax property => property.AttributeLists,
+            FieldDeclarationSyntax field => field.AttributeLists,
+            ParameterSyntax parameter => parameter.AttributeLists,
+            _ => default
+        };
+
+        foreach (var list in lists)
+        {
+            foreach (var attribute in list.Attributes)
+            {
+                var name = GetAttributeName(attribute.Name);
+                if (name is "Id" or "IdAttribute" or "UnionId" or "UnionIdAttribute")
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    static string GetAttributeName(NameSyntax name) =>
+        name switch
+        {
+            QualifiedNameSyntax qualified => qualified.Right.Identifier.Text,
+            SimpleNameSyntax simple => simple.Identifier.Text,
+            _ => name.ToString()
+        };
+
+    // Rename heuristic: if the host name ends with "Id" (e.g. `bidId`, `BidId`), produce
+    // `<tag>Id` with the first character matching the original's case. Skips when the
+    // host is named just "Id" — fixing that would require renaming the containing type.
+    static bool TryGetRenameTarget(SyntaxNode host, string tag, out string newName)
+    {
+        newName = "";
+        if (tag.Length == 0)
+        {
+            return false;
+        }
+
+        var currentName = host switch
+        {
+            PropertyDeclarationSyntax property => property.Identifier.Text,
+            FieldDeclarationSyntax field when field.Declaration.Variables.Count == 1 =>
+                field.Declaration.Variables[0].Identifier.Text,
+            ParameterSyntax parameter => parameter.Identifier.Text,
+            _ => null
+        };
+
+        if (currentName is null)
+        {
+            return false;
+        }
+
+        if (currentName.Length <= 2 || !currentName.EndsWith("Id", System.StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var firstIsLower = char.IsLower(currentName[0]);
+        var adjusted = firstIsLower
+            ? char.ToLowerInvariant(tag[0]) + tag.Substring(1)
+            : char.ToUpperInvariant(tag[0]) + tag.Substring(1);
+        newName = adjusted + "Id";
+        return newName != currentName;
+    }
+
+    static async Task<Solution> ChangeOrAddAttributeAsync(
+        Solution solution,
+        Location declarationLocation,
+        string value,
+        Cancel cancel)
+    {
+        var document = solution.GetDocument(declarationLocation.SourceTree);
+        if (document is null)
+        {
+            return solution;
+        }
+
+        var root = await document
+            .GetSyntaxRootAsync(cancel)
+            .ConfigureAwait(false);
+        if (root is null)
+        {
+            return solution;
+        }
+
+        var declarationNode = root.FindNode(declarationLocation.SourceSpan);
+        var host = FindAttributeHost(declarationNode);
+        if (host is null)
+        {
+            return solution;
+        }
+
+        var newHost = ReplaceOrAddIdAttribute(host, value);
+        if (newHost is null)
+        {
+            return solution;
+        }
+
+        var newRoot = root.ReplaceNode(host, newHost);
+        var newDocument = document.WithSyntaxRoot(newRoot);
+        newDocument = await Formatter
+            .FormatAsync(newDocument, Formatter.Annotation, cancellationToken: cancel)
+            .ConfigureAwait(false);
+        return newDocument.Project.Solution;
+    }
+
+    static async Task<Solution> RenameAsync(
+        Document document,
+        Location declarationLocation,
+        string newName,
+        Cancel cancel)
+    {
+        var semanticModel = await document
+            .GetSemanticModelAsync(cancel)
+            .ConfigureAwait(false);
+        if (semanticModel is null)
+        {
+            return document.Project.Solution;
+        }
+
+        var root = await document
+            .GetSyntaxRootAsync(cancel)
+            .ConfigureAwait(false);
+        if (root is null)
+        {
+            return document.Project.Solution;
+        }
+
+        var declarationNode = root.FindNode(declarationLocation.SourceSpan);
+        var symbol = semanticModel.GetDeclaredSymbol(declarationNode, cancel);
+        if (symbol is null)
+        {
+            return document.Project.Solution;
+        }
+
+        return await Renamer
+            .RenameSymbolAsync(
+                document.Project.Solution,
+                symbol,
+                new SymbolRenameOptions(),
+                newName,
+                cancel)
+            .ConfigureAwait(false);
+    }
+
+    static SyntaxNode? ReplaceOrAddIdAttribute(SyntaxNode host, string value)
+    {
+        var lists = host switch
+        {
+            PropertyDeclarationSyntax property => property.AttributeLists,
+            FieldDeclarationSyntax field => field.AttributeLists,
+            ParameterSyntax parameter => parameter.AttributeLists,
+            _ => default
+        };
+
+        AttributeSyntax? existing = null;
+        foreach (var list in lists)
+        {
+            foreach (var attribute in list.Attributes)
+            {
+                var name = GetAttributeName(attribute.Name);
+                if (name is "Id" or "IdAttribute" or "UnionId" or "UnionIdAttribute")
+                {
+                    existing = attribute;
+                    break;
+                }
+            }
+
+            if (existing is not null)
+            {
+                break;
+            }
+        }
+
+        var argument = AttributeArgument(
+            LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(value)));
+        var replacement = Attribute(IdentifierName("Id"))
+            .WithArgumentList(AttributeArgumentList(SingletonSeparatedList(argument)));
+
+        if (existing is not null)
+        {
+            return host.ReplaceNode(
+                existing,
+                replacement.WithTriviaFrom(existing).WithAdditionalAnnotations(Formatter.Annotation));
+        }
+
+        var attributeList = AttributeList(SingletonSeparatedList(replacement))
+            .WithAdditionalAnnotations(Formatter.Annotation);
+        return host switch
+        {
+            PropertyDeclarationSyntax property => property.AddAttributeLists(attributeList),
+            FieldDeclarationSyntax field => field.AddAttributeLists(attributeList),
+            ParameterSyntax parameter => parameter.AddAttributeLists(attributeList),
+            _ => null
+        };
     }
 
     static async Task RegisterAddFix(CodeFixContext context, Diagnostic diagnostic)

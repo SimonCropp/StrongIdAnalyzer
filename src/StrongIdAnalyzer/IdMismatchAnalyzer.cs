@@ -1274,11 +1274,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // union-tagged targets (`[UnionId("A","B")]` accepts "A" or "B") uniformly.
             if (!target.IntersectsWith(source))
             {
+                // Attach the target declaration as an additional location so the code fix
+                // can either replace its [Id] or rename it. Library targets (no syntax
+                // refs) stay report-only — the fixer checks AdditionalLocations.Count.
                 context.ReportDiagnostic(Diagnostic.Create(
                     idMismatchRule,
                     location,
-                    source.Format(),
-                    target.Format()));
+                    additionalLocations: GetAdditionalLocations(targetSymbol),
+                    properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, source.FirstValue),
+                    messageArgs: new object[] { source.Format(), target.Format() }));
             }
 
             return;
