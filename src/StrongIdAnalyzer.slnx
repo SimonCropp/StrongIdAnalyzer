@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path="nuget.config" />
+  </Folder>
+  <Project Path="StrongIdAnalyzer/StrongIdAnalyzer.csproj" />
+  <Project Path="StrongIdAnalyzer.CodeFixes/StrongIdAnalyzer.CodeFixes.csproj" />
+  <Project Path="StrongIdAnalyzer.Tests/StrongIdAnalyzer.Tests.csproj" />
+</Solution>
