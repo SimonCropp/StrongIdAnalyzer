@@ -759,7 +759,173 @@ public class IdMismatchAnalyzerTests
         AreEqual(0, diagnostics.Length);
     }
 
-    static ImmutableArray<Diagnostic> GetDiagnostics(string source)
+    [Test]
+    public void SuppressedNamespace_DefaultSystem_NoSIA003()
+    {
+        // User-declared class in a `System.*` namespace lives in source, so the metadata
+        // suppression doesn't cover it — only the namespace rule does.
+        var source = """
+            namespace System.Fake
+            {
+                public class Target
+                {
+                    public void Consume(System.Guid value) { }
+                }
+            }
+
+            public class Consumer
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public void Use(System.Fake.Target target) => target.Consume(OrderId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void SuppressedNamespace_DefaultMicrosoft_NoSIA003()
+    {
+        var source = """
+            namespace Microsoft.Fake
+            {
+                public class Target
+                {
+                    public void Consume(System.Guid value) { }
+                }
+            }
+
+            public class Consumer
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public void Use(Microsoft.Fake.Target target) => target.Consume(OrderId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void UserNamespace_NotSuppressed_StillFires()
+    {
+        var source = """
+            namespace MyCompany.Logging
+            {
+                public class Target
+                {
+                    public void Consume(System.Guid value) { }
+                }
+            }
+
+            public class Consumer
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public void Use(MyCompany.Logging.Target target) => target.Consume(OrderId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA003", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void SuppressedNamespace_CustomOverride_AppliesToConfiguredPrefix()
+    {
+        // With the option set, MyCompany.* should be suppressed while System.* should NOT
+        // (user value fully replaces the defaults).
+        var source = """
+            namespace MyCompany.Logging
+            {
+                public class Target
+                {
+                    public void Consume(System.Guid value) { }
+                }
+            }
+
+            namespace System.Fake
+            {
+                public class Target2
+                {
+                    public void Consume(System.Guid value) { }
+                }
+            }
+
+            public class Consumer
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public void Use(MyCompany.Logging.Target m, System.Fake.Target2 s)
+                {
+                    m.Consume(OrderId);
+                    s.Consume(OrderId);
+                }
+            }
+            """;
+
+        var diagnostics = GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.suppressed_namespaces"] = "MyCompany*"
+            });
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA003", diagnostics[0].Id);
+        IsTrue(diagnostics[0].GetMessage().Contains("Order"));
+    }
+
+    [Test]
+    public void SuppressedNamespace_EmptyOverride_DisablesAllSuppression()
+    {
+        // Empty value = no suppression. A user-declared class in System.Fake now fires.
+        var source = """
+            namespace System.Fake
+            {
+                public class Target
+                {
+                    public void Consume(System.Guid value) { }
+                }
+            }
+
+            public class Consumer
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public void Use(System.Fake.Target target) => target.Consume(OrderId);
+            }
+            """;
+
+        var diagnostics = GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.suppressed_namespaces"] = ""
+            });
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA003", diagnostics[0].Id);
+    }
+
+    static ImmutableArray<Diagnostic> GetDiagnostics(string source) =>
+        GetDiagnosticsWithOptions(source, new Dictionary<string, string>());
+
+    static ImmutableArray<Diagnostic> GetDiagnosticsWithOptions(
+        string source,
+        IDictionary<string, string> globalOptions)
     {
         var compilation = BuildCompilation(source);
 
@@ -768,12 +934,48 @@ public class IdMismatchAnalyzerTests
         driver.RunGeneratorsAndUpdateCompilation(compilation, out var updated, out _);
 
         var analyzer = new IdMismatchAnalyzer();
+        var analyzerOptions = new Microsoft.CodeAnalysis.Diagnostics.AnalyzerOptions(
+            [],
+            new TestAnalyzerConfigOptionsProvider(globalOptions));
 
         return updated
-            .WithAnalyzers([analyzer])
+            .WithAnalyzers([analyzer], analyzerOptions)
             .GetAnalyzerDiagnosticsAsync()
             .GetAwaiter()
             .GetResult();
+    }
+
+    sealed class TestAnalyzerConfigOptions(IDictionary<string, string> options)
+        : Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions
+    {
+        public override bool TryGetValue(string key, out string value)
+        {
+            if (options.TryGetValue(key, out var v))
+            {
+                value = v;
+                return true;
+            }
+
+            value = null!;
+            return false;
+        }
+    }
+
+    sealed class TestAnalyzerConfigOptionsProvider(IDictionary<string, string> options)
+        : Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptionsProvider
+    {
+        readonly TestAnalyzerConfigOptions globals = new(options);
+
+        public override Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions GlobalOptions =>
+            globals;
+
+        public override Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions GetOptions(
+            Microsoft.CodeAnalysis.SyntaxTree tree) =>
+            globals;
+
+        public override Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions GetOptions(
+            Microsoft.CodeAnalysis.AdditionalText textFile) =>
+            globals;
     }
 
     static CSharpCompilation BuildCompilation(string source)

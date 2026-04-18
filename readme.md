@@ -244,7 +244,35 @@ SIA003 is suppressed when the tag can't meaningfully survive:
  * **Library metadata targets** — BCL and third-party members (`Dictionary<Guid, T>.this[Guid]`, `Guid.Equals(Guid)`, `object.Equals(object)`). Library authors can't apply `[Id]`.
  * **`object` parameters / properties / fields** — logging, serialization, message buses. The tag is erased through `object` anyway.
  * **Unconstrained generic type parameters (`T`)** — identity methods, container helpers. Generics carry no domain intent.
+ * **Targets in a suppressed namespace** — by default `System*` and `Microsoft*` (see below).
  * **Equality comparisons** — `==` / `!=` operands are symmetric, so only SIA001 / SIA002 apply.
+
+
+## Suppressing namespaces
+
+Diagnostics SIA002 and SIA003 are suppressed when the fix-target lives in a namespace matching the configured list. Defaults:
+
+ * `System*`
+ * `Microsoft*`
+
+Patterns:
+
+ * A trailing `*` makes it a prefix match — `System*` matches the `System` namespace itself *and* any `System.<anything>` child namespace, but not unrelated roots like `SystemX`.
+ * Without `*`, the pattern is an exact namespace match.
+
+Override via `.editorconfig` — user value fully replaces the defaults:
+
+```editorconfig
+[*.cs]
+strongidanalyzer.suppressed_namespaces = System*,Microsoft*,MyCompany.Logging*
+```
+
+Set the value to empty to disable namespace suppression entirely (the metadata-target, `object`, and generic-`T` suppressions still apply):
+
+```editorconfig
+[*.cs]
+strongidanalyzer.suppressed_namespaces =
+```
 
 
 

@@ -5,6 +5,17 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 {
     public const string ValueKey = "IdValue";
 
+    // .editorconfig key for overriding the default namespace suppression list.
+    // Value is comma-separated; trailing `*` means prefix match (e.g. `System*` matches
+    // `System`, `System.Collections`, etc.). Setting an empty value disables suppression.
+    internal const string SuppressedNamespacesOption = "strongidanalyzer.suppressed_namespaces";
+
+    // Library namespaces whose members we can't realistically tag. Noise for SIA002/SIA003
+    // when a tagged id flows into BCL / framework APIs (e.g. logging, serialization,
+    // dependency injection, Entity Framework). Users can override via .editorconfig.
+    static readonly ImmutableArray<string> DefaultSuppressedNamespaces =
+        ["System*", "Microsoft*"];
+
     public static readonly DiagnosticDescriptor IdMismatchRule = new(
         id: "SIA001",
         title: "Id type mismatch",
@@ -49,26 +60,102 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
+            var suppressedNamespaces = ReadSuppressedNamespaces(
+                start.Options.AnalyzerConfigOptionsProvider);
+            var config = new Config(idType, suppressedNamespaces);
+
             start.RegisterOperationAction(
-                _ => AnalyzeArgument(_, idType),
+                _ => AnalyzeArgument(_, config),
                 OperationKind.Argument);
             start.RegisterOperationAction(
-                _ => AnalyzeSimpleAssignment(_, idType),
+                _ => AnalyzeSimpleAssignment(_, config),
                 OperationKind.SimpleAssignment);
             start.RegisterOperationAction(
-                _ => AnalyzePropertyInitializer(_, idType),
+                _ => AnalyzePropertyInitializer(_, config),
                 OperationKind.PropertyInitializer);
             start.RegisterOperationAction(
-                _ => AnalyzeFieldInitializer(_, idType),
+                _ => AnalyzeFieldInitializer(_, config),
                 OperationKind.FieldInitializer);
             start.RegisterOperationAction(
-                _ => AnalyzeBinaryOperator(_, idType),
+                _ => AnalyzeBinaryOperator(_, config),
                 OperationKind.Binary);
         });
     }
 
-    static void AnalyzeBinaryOperator(OperationAnalysisContext context, INamedTypeSymbol idType)
+    static ImmutableArray<string> ReadSuppressedNamespaces(AnalyzerConfigOptionsProvider options)
     {
+        if (!options.GlobalOptions.TryGetValue(SuppressedNamespacesOption, out var raw))
+        {
+            return DefaultSuppressedNamespaces;
+        }
+
+        // Explicit empty disables all suppression.
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        return raw
+            .Split(',')
+            .Select(_ => _.Trim())
+            .Where(_ => _.Length > 0)
+            .ToImmutableArray();
+    }
+
+    static bool IsInSuppressedNamespace(ISymbol symbol, ImmutableArray<string> patterns)
+    {
+        if (patterns.IsEmpty)
+        {
+            return false;
+        }
+
+        var ns = symbol.ContainingNamespace?.ToDisplayString();
+        if (string.IsNullOrEmpty(ns))
+        {
+            return false;
+        }
+
+        foreach (var pattern in patterns)
+        {
+            if (pattern.Length == 0)
+            {
+                continue;
+            }
+
+            if (pattern[pattern.Length - 1] == '*')
+            {
+                var prefix = pattern.Substring(0, pattern.Length - 1);
+                if (prefix.Length == 0)
+                {
+                    return true;
+                }
+
+                // `System*` matches `System` exactly and any child namespace `System.*`
+                // but not unrelated roots like `SystemX`.
+                if (ns == prefix ||
+                    ns!.StartsWith(prefix + ".", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+            else if (ns == pattern)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    readonly struct Config(INamedTypeSymbol idType, ImmutableArray<string> suppressedNamespaces)
+    {
+        public INamedTypeSymbol IdType { get; } = idType;
+        public ImmutableArray<string> SuppressedNamespaces { get; } = suppressedNamespaces;
+    }
+
+    static void AnalyzeBinaryOperator(OperationAnalysisContext context, Config config)
+    {
+        var idType = config.IdType;
         var operation = (IBinaryOperation)context.Operation;
         if (operation.OperatorKind != BinaryOperatorKind.Equals &&
             operation.OperatorKind != BinaryOperatorKind.NotEquals)
@@ -105,14 +192,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (leftInfo.State == IdState.Present &&
             rightInfo.State == IdState.NotPresent)
         {
-            ReportMissingOnBinarySide(context, operation.RightOperand, rightSymbol, leftInfo.Value);
+            ReportMissingOnBinarySide(context, operation.RightOperand, rightSymbol, leftInfo.Value, config);
             return;
         }
 
         if (leftInfo.State == IdState.NotPresent &&
             rightInfo.State == IdState.Present)
         {
-            ReportMissingOnBinarySide(context, operation.LeftOperand, leftSymbol, rightInfo.Value);
+            ReportMissingOnBinarySide(context, operation.LeftOperand, leftSymbol, rightInfo.Value, config);
         }
     }
 
@@ -120,12 +207,18 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         OperationAnalysisContext context,
         IOperation untaggedOperand,
         ISymbol? untaggedSymbol,
-        string? tag)
+        string? tag,
+        Config config)
     {
         // Only fix user-owned declarations. Library members (Guid.Empty etc.) can't carry
         // [Id] so firing here would just be noise.
         if (untaggedSymbol is null ||
             untaggedSymbol.DeclaringSyntaxReferences.IsEmpty)
+        {
+            return;
+        }
+
+        if (IsInSuppressedNamespace(untaggedSymbol, config.SuppressedNamespaces))
         {
             return;
         }
@@ -137,8 +230,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             tag));
     }
 
-    static void AnalyzeArgument(OperationAnalysisContext context, INamedTypeSymbol idType)
+    static void AnalyzeArgument(OperationAnalysisContext context, Config config)
     {
+        var idType = config.IdType;
         var argument = (IArgumentOperation)context.Operation;
         var parameter = argument.Parameter;
         if (parameter is null)
@@ -155,11 +249,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             sourceSymbol,
             sourceInfo,
             parameter,
-            targetInfo);
+            targetInfo,
+            config);
     }
 
-    static void AnalyzeSimpleAssignment(OperationAnalysisContext context, INamedTypeSymbol idType)
+    static void AnalyzeSimpleAssignment(OperationAnalysisContext context, Config config)
     {
+        var idType = config.IdType;
         var assignment = (ISimpleAssignmentOperation)context.Operation;
         var targetSymbol = GetSymbol(assignment.Target);
         if (targetSymbol is null)
@@ -176,11 +272,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             sourceSymbol,
             sourceInfo,
             targetSymbol,
-            targetInfo);
+            targetInfo,
+            config);
     }
 
-    static void AnalyzePropertyInitializer(OperationAnalysisContext context, INamedTypeSymbol idType)
+    static void AnalyzePropertyInitializer(OperationAnalysisContext context, Config config)
     {
+        var idType = config.IdType;
         var init = (IPropertyInitializerOperation)context.Operation;
         var sourceSymbol = GetSymbol(init.Value);
         var sourceInfo = GetId(sourceSymbol, idType);
@@ -193,12 +291,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 sourceSymbol,
                 sourceInfo,
                 property,
-                targetInfo);
+                targetInfo,
+                config);
         }
     }
 
-    static void AnalyzeFieldInitializer(OperationAnalysisContext context, INamedTypeSymbol idType)
+    static void AnalyzeFieldInitializer(OperationAnalysisContext context, Config config)
     {
+        var idType = config.IdType;
         var init = (IFieldInitializerOperation)context.Operation;
         var sourceSymbol = GetSymbol(init.Value);
         var sourceInfo = GetId(sourceSymbol, idType);
@@ -211,7 +311,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 sourceSymbol,
                 sourceInfo,
                 field,
-                targetInfo);
+                targetInfo,
+                config);
         }
     }
 
@@ -431,7 +532,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         ISymbol? sourceSymbol,
         IdInfo source,
         ISymbol targetSymbol,
-        IdInfo target)
+        IdInfo target,
+        Config config)
     {
         if (source.State == IdState.Unknown ||
             target.State == IdState.Unknown)
@@ -466,6 +568,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
+            if (IsInSuppressedNamespace(sourceSymbol, config.SuppressedNamespaces))
+            {
+                return;
+            }
+
             // Fix site is the source symbol's declaration (add Id matching target).
             context.ReportDiagnostic(CreateFixableDiagnostic(
                 MissingSourceIdRule,
@@ -483,6 +590,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // like Equals(Guid), CompareTo, Dictionary<Guid,T>.this[Guid] would otherwise
             // produce constant noise when passing any tagged value to them.
             if (targetSymbol.DeclaringSyntaxReferences.IsEmpty)
+            {
+                return;
+            }
+
+            if (IsInSuppressedNamespace(targetSymbol, config.SuppressedNamespaces))
             {
                 return;
             }
