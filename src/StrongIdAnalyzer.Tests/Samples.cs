@@ -113,3 +113,58 @@ public static class FixedUsage
 }
 
 #endregion
+
+#region SIA001Example
+
+public class SIA001Sample
+{
+    [Id("Customer")]
+    public Guid CustomerId { get; set; }
+
+    public static void ProcessOrder([Id("Order")] Guid orderId) { }
+
+    public void Trigger() =>
+        // SIA001: argument tagged [Id("Customer")] passed to parameter tagged [Id("Order")].
+#pragma warning disable SIA001
+        ProcessOrder(CustomerId);
+#pragma warning restore SIA001
+}
+
+#endregion
+
+#region SIA002Example
+
+public class SIA002Sample
+{
+    public Guid RawId { get; set; }
+
+    public static void ProcessOrder([Id("Order")] Guid orderId) { }
+
+    public void Trigger() =>
+        // SIA002: RawId has no [Id] but is passed to an [Id("Order")] parameter.
+        // Code fix: add [Id("Order")] to RawId's declaration.
+#pragma warning disable SIA002
+        ProcessOrder(RawId);
+#pragma warning restore SIA002
+}
+
+#endregion
+
+#region SIA003Example
+
+public class SIA003Sample
+{
+    [Id("Order")]
+    public Guid OrderId { get; set; }
+
+    public static void Consume(Guid value) { }
+
+    public void Trigger() =>
+        // SIA003: OrderId is [Id("Order")] but Consume's parameter has no [Id].
+        // Code fix: add [Id("Order")] to Consume's value parameter.
+#pragma warning disable SIA003
+        Consume(OrderId);
+#pragma warning restore SIA003
+}
+
+#endregion

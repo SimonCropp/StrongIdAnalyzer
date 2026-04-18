@@ -143,15 +143,39 @@ The `IdAttribute` is source-generated into your compilation — you don't take a
 
 ## Diagnostics
 
-| ID     | Severity | Code fix | Description                                                   |
-|--------|----------|----------|---------------------------------------------------------------|
-| SIA001 | Warning  | —        | Id mismatch — both sides have `[Id]` but values differ        |
-| SIA002 | Warning  | Yes      | Source has no `[Id]` while the target requires one            |
-| SIA003 | Warning  | Yes      | Source has `[Id]` while the target has none                   |
+| ID     | Severity | Code fix | Summary                                          |
+|--------|----------|----------|--------------------------------------------------|
+| SIA001 | Warning  | —        | Both sides tagged with different `[Id]` values   |
+| SIA002 | Warning  | Yes      | Source missing `[Id]`; target has one            |
+| SIA003 | Warning  | Yes      | Source has `[Id]`; target missing one            |
 
-SIA002 and SIA003 ship a code fix that adds `[Id("<value>")]` to the relevant declaration — the source symbol for SIA002, the target symbol for SIA003.
 
-### Why SIA001 has no code fix
+### SIA001 — Id mismatch
+
+Fires when both operands carry `[Id]` and the tag values differ. The analyzer sees an unambiguous cross-domain flow (e.g. a `Customer` id passed where an `Order` id is expected) and refuses it.
+
+<!-- snippet: SIA001Example -->
+<a id='snippet-SIA001Example'></a>
+```cs
+public class SIA001Sample
+{
+    [Id("Customer")]
+    public Guid CustomerId { get; set; }
+
+    public static void ProcessOrder([Id("Order")] Guid orderId) { }
+
+    public void Trigger() =>
+        // SIA001: argument tagged [Id("Customer")] passed to parameter tagged [Id("Order")].
+#pragma warning disable SIA001
+        ProcessOrder(CustomerId);
+#pragma warning restore SIA001
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L117-L133' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA001Example' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+
+#### Why SIA001 has no code fix
 
 SIA001 is ambiguous by design. Given `OrderId == CustomerId`, the analyzer can see the two tags don't match, but it has no way to know whether the bug is:
 
@@ -161,6 +185,62 @@ SIA001 is ambiguous by design. Given `OrderId == CustomerId`, the analyzer can s
  * or the comparison is intentional cross-domain logic that just happens to fail safely
 
 Any auto-fix would be picking a side at random and silently rewriting logic. For equality specifically there's one mechanical option — "replace with `false`" (for `==`) or "`true`" (for `!=`), since cross-domain equality is always false — but that's a behavior change dressed as a fix, and if the user wanted that they'd delete the line. Manual resolution is the only safe path.
+
+
+### SIA002 — Source missing `[Id]`
+
+Fires when the source (argument, right-hand side of an assignment, initializer, or one operand of an equality check) has no `[Id]` but the target carries one. The fix adds `[Id("<target value>")]` to the source symbol's declaration.
+
+<!-- snippet: SIA002Example -->
+<a id='snippet-SIA002Example'></a>
+```cs
+public class SIA002Sample
+{
+    public Guid RawId { get; set; }
+
+    public static void ProcessOrder([Id("Order")] Guid orderId) { }
+
+    public void Trigger() =>
+        // SIA002: RawId has no [Id] but is passed to an [Id("Order")] parameter.
+        // Code fix: add [Id("Order")] to RawId's declaration.
+#pragma warning disable SIA002
+        ProcessOrder(RawId);
+#pragma warning restore SIA002
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L135-L151' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA002Example' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+Suppressed when the untagged source lives in referenced metadata (e.g. `Guid.Empty`, a third-party property) — library authors can't apply `[Id]`, so the warning would offer no actionable fix.
+
+
+### SIA003 — Target missing `[Id]`
+
+Fires when the source carries `[Id]` but the target (parameter, assignment left-hand side, initializer) does not. The fix adds `[Id("<source value>")]` to the target symbol's declaration.
+
+<!-- snippet: SIA003Example -->
+<a id='snippet-SIA003Example'></a>
+```cs
+public class SIA003Sample
+{
+    [Id("Order")]
+    public Guid OrderId { get; set; }
+
+    public static void Consume(Guid value) { }
+
+    public void Trigger() =>
+        // SIA003: OrderId is [Id("Order")] but Consume's parameter has no [Id].
+        // Code fix: add [Id("Order")] to Consume's value parameter.
+#pragma warning disable SIA003
+        Consume(OrderId);
+#pragma warning restore SIA003
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L153-L170' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+Suppressed when the target is declared in referenced metadata (BCL, third-party libraries — e.g. `Dictionary<Guid, T>.this[Guid]`, `Guid.Equals(Guid)`, `object.Equals(object)`). SIA003 is not raised on equality comparisons (`==`, `!=`) — the two operands are symmetric, so it's SIA001 or SIA002 or nothing.
+
 
 
 ## Analyzed sites

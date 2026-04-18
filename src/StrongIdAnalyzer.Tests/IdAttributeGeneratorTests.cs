@@ -12,7 +12,7 @@ public class IdAttributeGeneratorTests
             .Single(tree => tree.FilePath.EndsWith("IdAttribute.g.cs"));
         var text = generated.ToString();
 
-        IsTrue(text.Contains("internal sealed class IdAttribute"));
+        IsTrue(text.Contains("sealed class IdAttribute"));
         IsTrue(text.Contains("public string Type"));
         IsTrue(text.Contains("namespace StrongIdAnalyzer"));
     }
@@ -21,8 +21,6 @@ public class IdAttributeGeneratorTests
     public void ConsumerCodeUsingIdAttribute_Compiles()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public static void Consume([Id("Order")] System.Guid value) { }

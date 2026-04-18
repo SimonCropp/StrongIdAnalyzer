@@ -5,8 +5,6 @@ public class IdMismatchAnalyzerTests
     public void IdMismatch_ArgumentToParameter()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -35,8 +33,6 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 [Id("Order")]
@@ -60,8 +56,6 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 [Id("Order")]
@@ -88,8 +82,6 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 public System.Guid GetValue() => System.Guid.Empty;
@@ -110,8 +102,6 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -137,8 +127,6 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
-            using StrongIdAnalyzer;
-
             public class Source
             {
                 public System.Guid Raw { get; set; }
@@ -164,8 +152,6 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public System.Guid Value { get; set; }
@@ -192,8 +178,6 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public void Consume(System.Guid value) { }
@@ -218,8 +202,6 @@ public class IdMismatchAnalyzerTests
     public void MatchingIds_NoDiagnostic()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -243,8 +225,6 @@ public class IdMismatchAnalyzerTests
     public void LocalVariableSource_NoDiagnostic()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -293,8 +273,6 @@ public class IdMismatchAnalyzerTests
         // Unlike StringSyntax which special-cases the first character, Id values are
         // user-defined tags and are compared ordinally. "Order" vs "order" is a mismatch.
         var source = """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -319,8 +297,6 @@ public class IdMismatchAnalyzerTests
     public void FieldSource_Mismatch()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 [Id("Customer")]
@@ -343,8 +319,6 @@ public class IdMismatchAnalyzerTests
     {
         // The analyzer ignores the primitive type — it only compares the Id tag string.
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 [Id("Customer")]
@@ -366,8 +340,6 @@ public class IdMismatchAnalyzerTests
     public void EqualityCheck_MismatchedIds_Fires()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 [Id("Order")]
@@ -390,8 +362,6 @@ public class IdMismatchAnalyzerTests
     public void InequalityCheck_MismatchedIds_Fires()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 [Id("Order")]
@@ -414,8 +384,6 @@ public class IdMismatchAnalyzerTests
     public void EqualityCheck_MatchingIds_NoDiagnostic()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 [Id("Order")]
@@ -437,8 +405,6 @@ public class IdMismatchAnalyzerTests
     public void EqualityCheck_OneSideMissing_FiresSIA002()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 [Id("Order")]
@@ -462,8 +428,6 @@ public class IdMismatchAnalyzerTests
     {
         // Same as above but the tagged side is on the right — fixer should target the left.
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 public System.Guid Other { get; set; }
@@ -486,8 +450,6 @@ public class IdMismatchAnalyzerTests
     {
         // Comparing a tagged id to Guid.Empty or a literal is routine and must not fire.
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 [Id("Order")]
@@ -509,7 +471,6 @@ public class IdMismatchAnalyzerTests
         // because the indexer's parameter has no [Id]. Library-declared targets are now
         // suppressed.
         var source = """
-            using StrongIdAnalyzer;
             using System.Collections.Generic;
 
             public class Holder
@@ -534,8 +495,6 @@ public class IdMismatchAnalyzerTests
         // Guid.Equals(Guid) and object.Equals(object) are library boundary methods —
         // they don't carry [Id] semantics, so passing a tagged value must not fire SIA003.
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 [Id("Order")]

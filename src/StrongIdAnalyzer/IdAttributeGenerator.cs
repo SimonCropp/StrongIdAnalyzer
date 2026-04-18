@@ -28,7 +28,7 @@ public class IdAttributeGenerator : IIncrementalGenerator
             Inherited = false)]
         [ExcludeFromCodeCoverage]
         [DebuggerNonUserCode]
-        internal sealed class IdAttribute : Attribute
+        sealed class IdAttribute : Attribute
         {
             public IdAttribute(string type) =>
                 Type = type;

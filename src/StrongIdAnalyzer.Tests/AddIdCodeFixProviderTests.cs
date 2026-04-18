@@ -3,6 +3,8 @@ public class AddIdCodeFixProviderTests
 {
     const string idAttributeSource =
         """
+        global using StrongIdAnalyzer;
+
         namespace StrongIdAnalyzer;
 
         using System;
@@ -14,7 +16,7 @@ public class AddIdCodeFixProviderTests
             AttributeTargets.ReturnValue,
             AllowMultiple = false,
             Inherited = false)]
-        internal sealed class IdAttribute : Attribute
+        sealed class IdAttribute : Attribute
         {
             public IdAttribute(string type) => Type = type;
             public string Type { get; }
@@ -25,8 +27,6 @@ public class AddIdCodeFixProviderTests
     public async Task SIA002_AddsAttributeToSourceProperty()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -50,8 +50,6 @@ public class AddIdCodeFixProviderTests
     public async Task SIA002_AddsAttributeToSourceField()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 public System.Guid Field;
@@ -72,8 +70,6 @@ public class AddIdCodeFixProviderTests
     public async Task SIA002_AddsAttributeToSourceParameter()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 public static void Consume([Id("Order")] System.Guid value) { }
@@ -91,8 +87,6 @@ public class AddIdCodeFixProviderTests
     public async Task SIA003_AddsAttributeToTargetParameter()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public static void Consume(System.Guid value) { }
@@ -116,8 +110,6 @@ public class AddIdCodeFixProviderTests
     public async Task SIA003_AddsAttributeToTargetProperty()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Target
             {
                 public System.Guid Value { get; set; }
@@ -142,8 +134,6 @@ public class AddIdCodeFixProviderTests
     public async Task SIA002_BinaryEquality_AddsAttributeToUntaggedSide()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 [Id("Order")]
@@ -165,8 +155,6 @@ public class AddIdCodeFixProviderTests
     public async Task SIA002_CustomIdValue()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 public System.Guid Value { get; set; }
@@ -186,8 +174,6 @@ public class AddIdCodeFixProviderTests
     public async Task MultiDeclaratorField_NoFixRegistered()
     {
         var source = """
-            using StrongIdAnalyzer;
-
             public class Holder
             {
                 public System.Guid a, b;
