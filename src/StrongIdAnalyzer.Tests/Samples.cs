@@ -5,7 +5,6 @@
 #pragma warning disable CS0414
 #pragma warning disable CA1822
 #pragma warning disable CA1002
-#pragma warning disable SIA003
 
 #region BuggyExample
 

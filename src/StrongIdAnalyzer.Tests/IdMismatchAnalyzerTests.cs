@@ -362,6 +362,197 @@ public class IdMismatchAnalyzerTests
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
+    [Test]
+    public void EqualityCheck_MismatchedIds_Fires()
+    {
+        var source = """
+            using StrongIdAnalyzer;
+
+            public class Holder
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                [Id("Customer")]
+                public System.Guid CustomerId { get; set; }
+
+                public bool Check() => OrderId == CustomerId;
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void InequalityCheck_MismatchedIds_Fires()
+    {
+        var source = """
+            using StrongIdAnalyzer;
+
+            public class Holder
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                [Id("Customer")]
+                public System.Guid CustomerId { get; set; }
+
+                public bool Check() => OrderId != CustomerId;
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void EqualityCheck_MatchingIds_NoDiagnostic()
+    {
+        var source = """
+            using StrongIdAnalyzer;
+
+            public class Holder
+            {
+                [Id("Order")]
+                public System.Guid A { get; set; }
+
+                [Id("Order")]
+                public System.Guid B { get; set; }
+
+                public bool Check() => A == B;
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void EqualityCheck_OneSideMissing_FiresSIA002()
+    {
+        var source = """
+            using StrongIdAnalyzer;
+
+            public class Holder
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public System.Guid Other { get; set; }
+
+                public bool Check() => OrderId == Other;
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA002", diagnostics[0].Id);
+        IsTrue(diagnostics[0].GetMessage().Contains("Order"));
+    }
+
+    [Test]
+    public void EqualityCheck_OneSideMissing_RightToLeft_FiresSIA002()
+    {
+        // Same as above but the tagged side is on the right — fixer should target the left.
+        var source = """
+            using StrongIdAnalyzer;
+
+            public class Holder
+            {
+                public System.Guid Other { get; set; }
+
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public bool Check() => Other == OrderId;
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA002", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void EqualityCheck_AgainstEmpty_NoDiagnostic()
+    {
+        // Comparing a tagged id to Guid.Empty or a literal is routine and must not fire.
+        var source = """
+            using StrongIdAnalyzer;
+
+            public class Holder
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public bool IsSet() => OrderId != System.Guid.Empty;
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void DictionaryIndexer_LibraryTarget_NoDiagnostic()
+    {
+        // Passing a tagged Guid to Dictionary<Guid, T>.this[Guid] previously fired SIA003
+        // because the indexer's parameter has no [Id]. Library-declared targets are now
+        // suppressed.
+        var source = """
+            using StrongIdAnalyzer;
+            using System.Collections.Generic;
+
+            public class Holder
+            {
+                readonly Dictionary<System.Guid, string> map = new();
+
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public string Lookup() => map[OrderId];
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void GuidEquals_LibraryTarget_NoDiagnostic()
+    {
+        // Guid.Equals(Guid) and object.Equals(object) are library boundary methods —
+        // they don't carry [Id] semantics, so passing a tagged value must not fire SIA003.
+        var source = """
+            using StrongIdAnalyzer;
+
+            public class Holder
+            {
+                [Id("Order")]
+                public System.Guid A { get; set; }
+
+                [Id("Order")]
+                public System.Guid B { get; set; }
+
+                public bool Check() => A.Equals(B);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
     static ImmutableArray<Diagnostic> GetDiagnostics(string source)
     {
         var compilation = BuildCompilation(source);

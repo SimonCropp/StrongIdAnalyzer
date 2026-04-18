@@ -48,7 +48,7 @@ public static class BuggyUsage
         service.GetOrderAmount(order.CustomerId);
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L10-L43' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L9-L42' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The bug is the call to `service.GetOrderAmount(order.CustomerId)` — a customer's `Guid` is passed into a method expecting an order's `Guid`. Both are `Guid`, so the compiler is happy; at runtime you get a `KeyNotFoundException`, or worse, if the `Guid` coincidentally hits a populated dictionary, silently wrong data.
@@ -88,7 +88,7 @@ public class EntityLookup
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L45-L76' title='Snippet source file'>snippet source</a> | <a href='#snippet-SilentMismatch' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L44-L75' title='Snippet source file'>snippet source</a> | <a href='#snippet-SilentMismatch' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -135,7 +135,7 @@ public static class FixedUsage
 #pragma warning restore SIA001
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L78-L116' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L77-L115' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The `IdAttribute` is source-generated into your compilation — you don't take a runtime dependency on any attributes assembly. Just install the analyzer package and start tagging.
@@ -149,7 +149,18 @@ The `IdAttribute` is source-generated into your compilation — you don't take a
 | SIA002 | Warning  | Yes      | Source has no `[Id]` while the target requires one            |
 | SIA003 | Warning  | Yes      | Source has `[Id]` while the target has none                   |
 
-SIA002 and SIA003 ship a code fix that adds `[Id("<value>")]` to the relevant declaration — the source symbol for SIA002, the target symbol for SIA003. SIA001 has no fix because picking which side to change requires human judgement.
+SIA002 and SIA003 ship a code fix that adds `[Id("<value>")]` to the relevant declaration — the source symbol for SIA002, the target symbol for SIA003.
+
+### Why SIA001 has no code fix
+
+SIA001 is ambiguous by design. Given `OrderId == CustomerId`, the analyzer can see the two tags don't match, but it has no way to know whether the bug is:
+
+ * the left operand (wrong property picked on one side)
+ * the right operand (same, other side)
+ * one of the `[Id]` annotations itself being wrong
+ * or the comparison is intentional cross-domain logic that just happens to fail safely
+
+Any auto-fix would be picking a side at random and silently rewriting logic. For equality specifically there's one mechanical option — "replace with `false`" (for `==`) or "`true`" (for `!=`), since cross-domain equality is always false — but that's a behavior change dressed as a fix, and if the user wanted that they'd delete the line. Manual resolution is the only safe path.
 
 
 ## Analyzed sites
@@ -159,6 +170,9 @@ Diagnostics fire on:
  * Method, constructor, indexer, and delegate arguments
  * Simple assignments (`=`), including inside object initializers
  * Property and field inline initializers
+ * Equality comparisons (`==`, `!=`) — SIA001 when both sides carry different `[Id]` values; SIA002 (with fix) when only one side is tagged and the other is a user-owned untagged member. Comparisons against `Guid.Empty`, literals, locals, and method results stay silent.
+
+Targets declared in referenced metadata (BCL, third-party libraries — e.g. `Dictionary<Guid, T>.this[Guid]`, `Guid.Equals(Guid)`, `object.Equals(object)`) are treated as boundary APIs: SIA003 is suppressed for them because the library author has no way to apply `[Id]`.
 
 
 ## Sources the analyzer can resolve

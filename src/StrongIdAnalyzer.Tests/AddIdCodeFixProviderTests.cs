@@ -139,6 +139,29 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA002_BinaryEquality_AddsAttributeToUntaggedSide()
+    {
+        var source = """
+            using StrongIdAnalyzer;
+
+            public class Holder
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public System.Guid Other { get; set; }
+
+                public bool Check() => OrderId == Other;
+            }
+            """;
+
+        var fixedSource = await ApplyFix(source);
+
+        Contains(fixedSource, "[Id(\"Order\")]");
+        Contains(fixedSource, "public System.Guid Other { get; set; }");
+    }
+
+    [Test]
     public async Task SIA002_CustomIdValue()
     {
         var source = """

@@ -61,7 +61,80 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             start.RegisterOperationAction(
                 _ => AnalyzeFieldInitializer(_, idType),
                 OperationKind.FieldInitializer);
+            start.RegisterOperationAction(
+                _ => AnalyzeBinaryOperator(_, idType),
+                OperationKind.Binary);
         });
+    }
+
+    static void AnalyzeBinaryOperator(OperationAnalysisContext context, INamedTypeSymbol idType)
+    {
+        var op = (IBinaryOperation)context.Operation;
+        if (op.OperatorKind != BinaryOperatorKind.Equals &&
+            op.OperatorKind != BinaryOperatorKind.NotEquals)
+        {
+            return;
+        }
+
+        var leftSymbol = GetSymbol(op.LeftOperand);
+        var rightSymbol = GetSymbol(op.RightOperand);
+        var leftInfo = GetId(leftSymbol, idType);
+        var rightInfo = GetId(rightSymbol, idType);
+
+        // Both tagged with different values: SIA001.
+        if (leftInfo.State == IdState.Present &&
+            rightInfo.State == IdState.Present)
+        {
+            if (string.Equals(leftInfo.Value, rightInfo.Value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            context.ReportDiagnostic(Diagnostic.Create(
+                IdMismatchRule,
+                op.Syntax.GetLocation(),
+                leftInfo.Value ?? "",
+                rightInfo.Value ?? ""));
+            return;
+        }
+
+        // One side tagged, other is a user-owned member with no tag: SIA002 on the missing
+        // side so the fixer can add [Id("<same value>")] to its declaration. When the
+        // untagged side is Unknown (literal, Guid.Empty, local var, method call) no
+        // diagnostic fires — those are routine and not a bug.
+        if (leftInfo.State == IdState.Present &&
+            rightInfo.State == IdState.NotPresent)
+        {
+            ReportMissingOnBinarySide(context, op.RightOperand, rightSymbol, leftInfo.Value);
+            return;
+        }
+
+        if (leftInfo.State == IdState.NotPresent &&
+            rightInfo.State == IdState.Present)
+        {
+            ReportMissingOnBinarySide(context, op.LeftOperand, leftSymbol, rightInfo.Value);
+        }
+    }
+
+    static void ReportMissingOnBinarySide(
+        OperationAnalysisContext context,
+        IOperation untaggedOperand,
+        ISymbol? untaggedSymbol,
+        string? tag)
+    {
+        // Only fix user-owned declarations. Library members (Guid.Empty etc.) can't carry
+        // [Id] so firing here would just be noise.
+        if (untaggedSymbol is null ||
+            untaggedSymbol.DeclaringSyntaxReferences.IsEmpty)
+        {
+            return;
+        }
+
+        context.ReportDiagnostic(CreateFixableDiagnostic(
+            MissingSourceIdRule,
+            untaggedOperand.Syntax.GetLocation(),
+            untaggedSymbol,
+            tag));
     }
 
     static void AnalyzeArgument(OperationAnalysisContext context, INamedTypeSymbol idType)
@@ -224,6 +297,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (source.State == IdState.NotPresent &&
             target.State == IdState.Present)
         {
+            // Don't fire when the untagged source is in referenced metadata (e.g. Guid.Empty).
+            // The fix adds [Id] to the source's declaration; if we can't modify it, the
+            // diagnostic is just noise.
+            if (sourceSymbol is null ||
+                sourceSymbol.DeclaringSyntaxReferences.IsEmpty)
+            {
+                return;
+            }
+
             // Fix site is the source symbol's declaration (add Id matching target).
             context.ReportDiagnostic(CreateFixableDiagnostic(
                 MissingSourceIdRule,
@@ -236,6 +318,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (source.State == IdState.Present &&
             target.State == IdState.NotPresent)
         {
+            // Don't fire SIA003 when the target is declared in referenced metadata (BCL,
+            // third-party libraries). Library authors can't apply [Id], and boundary APIs
+            // like Equals(Guid), CompareTo, Dictionary<Guid,T>.this[Guid] would otherwise
+            // produce constant noise when passing any tagged value to them.
+            if (targetSymbol.DeclaringSyntaxReferences.IsEmpty)
+            {
+                return;
+            }
+
             // Fix site is the target symbol's declaration (add Id matching source).
             context.ReportDiagnostic(CreateFixableDiagnostic(
                 DroppedIdRule,
