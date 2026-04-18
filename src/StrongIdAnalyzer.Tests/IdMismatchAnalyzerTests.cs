@@ -1195,6 +1195,130 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public void Convention_InheritedId_CarriesBaseAndDerivedTags_Match()
+    {
+        // child1.Id carries the set {"Child1", "Base"} — both parameters are satisfied.
+        // (The parameter attributes are dropped because convention infers them.)
+        var source = """
+            public class Base
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class Child1 : Base;
+
+            public class Holder
+            {
+                public static void Foo(System.Guid child1Id, System.Guid baseId) { }
+
+                public void Use()
+                {
+                    var child1 = new Child1();
+                    Foo(child1.Id, child1.Id);
+                }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(
+            0,
+            diagnostics.Length,
+            string.Join("\n", diagnostics.Select(_ => _.Id + ": " + _.GetMessage())));
+    }
+
+    [Test]
+    public void Convention_InheritedId_SiblingDerivedType_FiresMismatch()
+    {
+        // child2.Id is {"Child2", "Base"} — satisfies the Base parameter but NOT the
+        // Child1 parameter; SIA001 fires only on the first argument.
+        var source = """
+            public class Base
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class Child1 : Base;
+            public class Child2 : Base;
+
+            public class Holder
+            {
+                public static void Foo(System.Guid child1Id, System.Guid baseId) { }
+
+                public void Use()
+                {
+                    var child2 = new Child2();
+                    Foo(child2.Id, child2.Id);
+                }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+        var message = diagnostics[0].GetMessage();
+        IsTrue(message.Contains("Child2"));
+        IsTrue(message.Contains("Child1"));
+    }
+
+    [Test]
+    public void Convention_InheritedId_StaticReceiverIsBase_DoesNotCarryDerivedTag()
+    {
+        // When the static receiver type is Base, the access carries only "Base" — the
+        // derived-type tags aren't inferred because the caller didn't express them.
+        var source = """
+            public class Base
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class Child1 : Base;
+
+            public class Holder
+            {
+                public static void TakeChild1(System.Guid child1Id) { }
+
+                public void Use(Base b) => TakeChild1(b.Id);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void Convention_InheritedId_DeepChain_IncludesAllAncestors()
+    {
+        // leaf.Id walks Leaf → Mid → Root and carries all three tags.
+        var source = """
+            public class Root { public System.Guid Id { get; set; } }
+            public class Mid : Root;
+            public class Leaf : Mid;
+
+            public class Holder
+            {
+                public static void TakeRoot(System.Guid rootId) { }
+                public static void TakeMid(System.Guid midId) { }
+                public static void TakeLeaf(System.Guid leafId) { }
+
+                public void Use(Leaf leaf)
+                {
+                    TakeRoot(leaf.Id);
+                    TakeMid(leaf.Id);
+                    TakeLeaf(leaf.Id);
+                }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
     public void Convention_ParameterCamelCase_InferredAsPascal()
     {
         // Parameter `orderId` (camelCase) -> "Order" tag; passing into a "Customer"-tagged

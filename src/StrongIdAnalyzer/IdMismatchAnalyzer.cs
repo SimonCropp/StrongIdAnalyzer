@@ -425,14 +425,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         var leftSymbol = GetSymbol(operation.LeftOperand);
         var rightSymbol = GetSymbol(operation.RightOperand);
-        var leftInfo = GetId(leftSymbol, idType);
-        var rightInfo = GetId(rightSymbol, idType);
+        var leftInfo = GetAccessInfo(operation.LeftOperand, idType);
+        var rightInfo = GetAccessInfo(operation.RightOperand, idType);
 
-        // Both tagged with different values: SIA001.
+        // Equality is symmetric: if the two tag sets share any tag, the values could
+        // represent the same identity. Only fire SIA001 when the sets are disjoint.
         if (leftInfo.State == IdState.Present &&
             rightInfo.State == IdState.Present)
         {
-            if (string.Equals(leftInfo.Value, rightInfo.Value, StringComparison.Ordinal))
+            if (leftInfo.IntersectsWith(rightInfo))
             {
                 return;
             }
@@ -440,8 +441,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(
                 idMismatchRule,
                 operation.Syntax.GetLocation(),
-                leftInfo.Value ?? "",
-                rightInfo.Value ?? ""));
+                leftInfo.Format(),
+                rightInfo.Format()));
             return;
         }
 
@@ -452,14 +453,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (leftInfo.State == IdState.Present &&
             rightInfo.State == IdState.NotPresent)
         {
-            ReportMissingOnBinarySide(context, operation.RightOperand, rightSymbol, leftInfo.Value, config);
+            ReportMissingOnBinarySide(context, operation.RightOperand, rightSymbol, leftInfo.FirstValue, config);
             return;
         }
 
         if (leftInfo.State == IdState.NotPresent &&
             rightInfo.State == IdState.Present)
         {
-            ReportMissingOnBinarySide(context, operation.LeftOperand, leftSymbol, rightInfo.Value, config);
+            ReportMissingOnBinarySide(context, operation.LeftOperand, leftSymbol, rightInfo.FirstValue, config);
         }
     }
 
@@ -502,7 +503,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         var targetInfo = GetIdWithInheritance(parameter, idType);
         var sourceSymbol = GetSymbol(argument.Value);
-        var sourceInfo = GetId(sourceSymbol, idType);
+        var sourceInfo = GetAccessInfo(argument.Value, idType);
         Report(
             context,
             argument.Value.Syntax.GetLocation(),
@@ -523,9 +524,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var targetInfo = GetId(targetSymbol, idType);
+        // Target walks its receiver chain too — `parent.Id = value` carries Parent's
+        // receiver context just like a read would, so assignments use the same multi-tag
+        // view on both sides.
+        var targetInfo = GetAccessInfo(assignment.Target, idType);
         var sourceSymbol = GetSymbol(assignment.Value);
-        var sourceInfo = GetId(sourceSymbol, idType);
+        var sourceInfo = GetAccessInfo(assignment.Value, idType);
         Report(
             context,
             assignment.Value.Syntax.GetLocation(),
@@ -541,7 +545,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var idType = config.IdType;
         var init = (IPropertyInitializerOperation)context.Operation;
         var sourceSymbol = GetSymbol(init.Value);
-        var sourceInfo = GetId(sourceSymbol, idType);
+        var sourceInfo = GetAccessInfo(init.Value, idType);
         foreach (var property in init.InitializedProperties)
         {
             var targetInfo = GetIdWithInheritance(property, idType);
@@ -561,7 +565,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var idType = config.IdType;
         var init = (IFieldInitializerOperation)context.Operation;
         var sourceSymbol = GetSymbol(init.Value);
-        var sourceInfo = GetId(sourceSymbol, idType);
+        var sourceInfo = GetAccessInfo(init.Value, idType);
         foreach (var field in init.InitializedFields)
         {
             var targetInfo = GetIdWithInheritance(field, idType);
@@ -586,6 +590,102 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             IParameterReferenceOperation param => param.Parameter,
             _ => null
         };
+    }
+
+    // Expression-level resolution. Differs from symbol-only resolution in that a member
+    // named `Id` walks the receiver's static-type chain (up to the declaring type) and
+    // adds the convention tag for each level — so `child1.Id` carries both "Child1" and
+    // "Base" and can flow into parameters tagged either way.
+    static IdInfo GetAccessInfo(IOperation operation, INamedTypeSymbol idType)
+    {
+        operation = UnwrapConversions(operation);
+        return operation switch
+        {
+            IPropertyReferenceOperation prop => GetMemberAccessInfo(prop.Property, prop.Instance?.Type, idType),
+            IFieldReferenceOperation field => GetMemberAccessInfo(field.Field, field.Instance?.Type, idType),
+            IParameterReferenceOperation param => GetIdWithInheritance(param.Parameter, idType),
+            _ => IdInfo.Unknown
+        };
+    }
+
+    static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType, INamedTypeSymbol idType)
+    {
+        // Explicit [Id] (own attribute or inherited via override/interface) wins and
+        // collapses to a single tag — user intent overrides the convention's broadening.
+        var direct = GetIdFromAttributes(member.GetAttributes(), idType);
+        if (direct.State == IdState.Present)
+        {
+            return direct;
+        }
+
+        if (member is IPropertySymbol property)
+        {
+            var inherited = GetPropertyIdFromHierarchy(property, idType);
+            if (inherited.State == IdState.Present)
+            {
+                return inherited;
+            }
+        }
+
+        if (member.DeclaringSyntaxReferences.IsEmpty)
+        {
+            return IdInfo.NotPresent;
+        }
+
+        if (member is IPropertySymbol indexerProbe && indexerProbe.IsIndexer)
+        {
+            return IdInfo.NotPresent;
+        }
+
+        var containing = member.ContainingType;
+        var name = member.Name;
+
+        // `Id`-convention collects a tag for each type in the receiver chain between the
+        // static receiver type and the declaring type (inclusive). `new` hide isn't walked
+        // — the resolved member symbol is the hidden declaration, so the chain starts
+        // there and terminates immediately.
+        if (name == "Id" && containing is not null)
+        {
+            var tags = ImmutableArray.CreateBuilder<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var start = (receiverType as INamedTypeSymbol) ?? containing;
+            var current = start;
+            // Defensive cap against runaway inheritance walks (ill-formed code, recursive
+            // metadata). 32 is well beyond any real class hierarchy.
+            for (var safety = 32; current is not null && safety > 0; safety--)
+            {
+                if (current.Name.Length > 0 && seen.Add(current.Name))
+                {
+                    tags.Add(current.Name);
+                }
+
+                if (SymbolEqualityComparer.Default.Equals(
+                        current.OriginalDefinition,
+                        containing.OriginalDefinition))
+                {
+                    break;
+                }
+
+                current = current.BaseType;
+            }
+
+            return tags.Count == 0
+                ? IdInfo.NotPresent
+                : IdInfo.Present(tags.ToImmutable());
+        }
+
+        if (name.Length > 2 && name.EndsWith("Id", StringComparison.Ordinal))
+        {
+            var prefix = name.Substring(0, name.Length - 2);
+            if (char.IsLower(prefix[0]))
+            {
+                prefix = char.ToUpperInvariant(prefix[0]) + prefix.Substring(1);
+            }
+
+            return IdInfo.Present(prefix);
+        }
+
+        return IdInfo.NotPresent;
     }
 
     static IdInfo GetId(ISymbol? symbol, INamedTypeSymbol idType)
@@ -640,7 +740,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (!symbol.DeclaringSyntaxReferences.IsEmpty &&
             TryGetConventionName(symbol, out var conventionName))
         {
-            return new(IdState.Present, conventionName);
+            return IdInfo.Present(conventionName);
         }
 
         return direct;
@@ -650,7 +750,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         if (parameter.ContainingSymbol is not IMethodSymbol method)
         {
-            return new(IdState.NotPresent, null);
+            return IdInfo.NotPresent;
         }
 
         var ordinal = parameter.Ordinal;
@@ -691,7 +791,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var containingType = method.ContainingType;
         if (containingType is null)
         {
-            return new(IdState.NotPresent, null);
+            return IdInfo.NotPresent;
         }
 
         foreach (var iface in containingType.AllInterfaces)
@@ -719,7 +819,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        return new(IdState.NotPresent, null);
+        return IdInfo.NotPresent;
     }
 
     static IdInfo GetPropertyIdFromHierarchy(IPropertySymbol property, INamedTypeSymbol idType)
@@ -752,7 +852,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var containingType = property.ContainingType;
         if (containingType is null)
         {
-            return new(IdState.NotPresent, null);
+            return IdInfo.NotPresent;
         }
 
         foreach (var iface in containingType.AllInterfaces)
@@ -773,7 +873,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        return new(IdState.NotPresent, null);
+        return IdInfo.NotPresent;
     }
 
     static IOperation UnwrapConversions(IOperation operation)
@@ -796,17 +896,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            string? value = null;
             if (attribute.ConstructorArguments.Length > 0 &&
                 attribute.ConstructorArguments[0].Value is string s)
             {
-                value = s;
+                return IdInfo.Present(s);
             }
 
-            return new(IdState.Present, value);
+            return IdInfo.Present("");
         }
 
-        return new(IdState.NotPresent, null);
+        return IdInfo.NotPresent;
     }
 
     static void Report(
@@ -827,13 +926,17 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (source.State == IdState.Present &&
             target.State == IdState.Present)
         {
-            if (!string.Equals(source.Value, target.Value, StringComparison.Ordinal))
+            // The value flowing in must carry every tag the target demands. Multi-tag
+            // targets (receiver-walked assignment LHS) force the source to cover all of
+            // them; multi-tag sources (receiver-walked reads) satisfy any single-tag
+            // target whose tag is in the set.
+            if (!target.SatisfiedBy(source))
             {
                 context.ReportDiagnostic(Diagnostic.Create(
                     idMismatchRule,
                     location,
-                    source.Value ?? "",
-                    target.Value ?? ""));
+                    source.Format(),
+                    target.Format()));
             }
 
             return;
@@ -857,11 +960,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
 
             // Fix site is the source symbol's declaration (add Id matching target).
+            // For multi-tag targets the fixer writes the first tag; the user can adjust.
             context.ReportDiagnostic(CreateFixableDiagnostic(
                 missingSourceIdRule,
                 location,
                 sourceSymbol,
-                target.Value));
+                target.FirstValue));
             return;
         }
 
@@ -897,7 +1001,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 droppedIdRule,
                 location,
                 targetSymbol,
-                source.Value));
+                source.FirstValue));
         }
     }
 
@@ -954,11 +1058,67 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         Present
     }
 
-    readonly struct IdInfo(IdState state, string? value)
+    // A value's Id info is a set of tags. Empty-with-state-Present is not allowed —
+    // use NotPresent instead. Multi-tag sets arise from receiver-type walking at
+    // access sites: `child1.Id` where `Id` is declared on Base carries both
+    // "Child1" and "Base", so it satisfies parameters tagged either way.
+    readonly struct IdInfo
     {
-        public IdState State { get; } = state;
-        public string? Value { get; } = value;
+        public IdState State { get; }
+        public ImmutableArray<string> Tags { get; }
 
-        public static IdInfo Unknown => new(IdState.Unknown, null);
+        IdInfo(IdState state, ImmutableArray<string> tags)
+        {
+            State = state;
+            Tags = tags;
+        }
+
+        public static IdInfo Unknown { get; } = new(IdState.Unknown, ImmutableArray<string>.Empty);
+        public static IdInfo NotPresent { get; } = new(IdState.NotPresent, ImmutableArray<string>.Empty);
+
+        public static IdInfo Present(string tag) =>
+            new(IdState.Present, ImmutableArray.Create(tag));
+
+        public static IdInfo Present(ImmutableArray<string> tags) =>
+            tags.IsDefaultOrEmpty
+                ? NotPresent
+                : new(IdState.Present, tags);
+
+        // Single-value accessor for the fixer (which needs one string to write back).
+        // Picks the first tag — callers that care about multi-tag must use Tags directly.
+        public string? FirstValue => Tags.IsDefaultOrEmpty ? null : Tags[0];
+
+        // Every tag the target demands must be present in the source's tag set.
+        // Used for assignment-like flow (argument → parameter, RHS → LHS).
+        public bool SatisfiedBy(IdInfo source)
+        {
+            foreach (var tag in Tags)
+            {
+                if (!source.Tags.Contains(tag))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Symmetric set intersection. Used for equality comparisons where either side
+        // could be the identity the other is checking against.
+        public bool IntersectsWith(IdInfo other)
+        {
+            foreach (var tag in Tags)
+            {
+                if (other.Tags.Contains(tag))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Flat representation for diagnostic messages. Multi-tag sets use "/" as a
+        // separator so a reader sees the full set at once: [Id("Child1/Base")].
+        public string Format() =>
+            Tags.IsDefaultOrEmpty ? "" : string.Join("/", Tags);
     }
 }
