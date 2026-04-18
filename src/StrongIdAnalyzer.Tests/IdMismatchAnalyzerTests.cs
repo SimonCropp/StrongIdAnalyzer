@@ -475,7 +475,7 @@ public class IdMismatchAnalyzerTests
 
             public class Holder
             {
-                readonly Dictionary<System.Guid, string> map = new();
+                Dictionary<System.Guid, string> map = new();
 
                 [Id("Order")]
                 public System.Guid OrderId { get; set; }

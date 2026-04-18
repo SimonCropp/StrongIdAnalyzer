@@ -32,7 +32,7 @@ public class Order
 
 public class OrderService
 {
-    readonly Dictionary<Guid, Order> orders = [];
+    Dictionary<Guid, Order> orders = [];
 
     // BUG: Parameter is named 'orderId' but caller passes a CustomerId.
     // The compiler can't catch this because both are just Guid.
@@ -67,8 +67,8 @@ public class Product
 
 public class EntityLookup
 {
-    readonly Dictionary<Guid, Customer> customers = [];
-    readonly Dictionary<Guid, Product> products = [];
+    Dictionary<Guid, Customer> customers = [];
+    Dictionary<Guid, Product> products = [];
 
     // Caller intends to look up an order, but this method silently
     // reports it as something else or "Unknown" — no exception, just wrong behavior.
@@ -120,7 +120,7 @@ public class TypedOrder
 
 public class TypedOrderService
 {
-    readonly Dictionary<Guid, TypedOrder> orders = [];
+    Dictionary<Guid, TypedOrder> orders = [];
 
     public decimal GetOrderAmount([Id("Order")] Guid orderId) =>
         orders[orderId].Amount;
