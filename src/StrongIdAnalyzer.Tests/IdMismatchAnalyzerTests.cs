@@ -1743,6 +1743,50 @@ public class IdMismatchAnalyzerTests
         AreEqual(0, diagnostics.Length);
     }
 
+    [Test]
+    public void RecordPrimaryCtorParameterAttribute_AppliesToGeneratedProperty()
+    {
+        var source =
+            """
+            public record Holder([Id("Order")] System.Guid Value);
+
+            public class Consumer
+            {
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use(Holder holder) => Consume(holder.Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void RecordPrimaryCtorParameterAttribute_PropertyMismatchAgainstTarget()
+    {
+        var source =
+            """
+            public record Holder([Id("Customer")] System.Guid Value);
+
+            public class Consumer
+            {
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use(Holder holder) => Consume(holder.Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+        var message = diagnostics[0].GetMessage();
+        IsTrue(message.Contains("Customer"));
+        IsTrue(message.Contains("Order"));
+    }
+
     static ImmutableArray<Diagnostic> GetDiagnostics(string source) =>
         GetDiagnosticsWithOptions(source, new Dictionary<string, string>());
 

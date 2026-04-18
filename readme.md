@@ -526,6 +526,29 @@ The source of a value is resolved when it is one of:
 Other sources — literals, local variables, method invocations, `await`, expressions — are treated as **unknown** and suppress all three diagnostics. This avoids noise on every `Guid.NewGuid()`, every local variable, and every primitive passed to an `[Id]` parameter.
 
 
+## Record primary-constructor parameters
+
+When a record is declared with a primary constructor, `[Id(...)]` / `[UnionId(...)]` written on a parameter applies to both the parameter and the auto-generated property. The C# compiler leaves the attribute physically on the parameter (its default target), so reading `record.Member` would otherwise look unattributed. The analyzer bridges this gap: a property synthesized from a primary-constructor parameter inherits the parameter's Id-family attributes for analysis purposes.
+
+<!-- snippet: RecordPrimaryCtorParameter -->
+<a id='snippet-RecordPrimaryCtorParameter'></a>
+```cs
+public record Holder([Id("Order")] Guid Value);
+
+public static class RecordUsage
+{
+    public static void Consume([Id("Order")] Guid value) { }
+
+    public static void Use(Holder holder) =>
+        Consume(holder.Value); // no diagnostic — attribute flows to property
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L348-L360' title='Snippet source file'>snippet source</a> | <a href='#snippet-RecordPrimaryCtorParameter' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+An explicit `[property: Id(...)]` on the property still wins — if both targets are attributed, the property's own attribute is used. Naming-convention inference (for properties named `Id` or `XxxId`) is only consulted after both the property's and the parameter's explicit attributes come up empty.
+
+
 ## Icon
 
 [Escher Triangle](https://thenounproject.com/icon/escher-triangle-358766/)

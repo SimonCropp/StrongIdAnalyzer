@@ -403,7 +403,26 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // that convention alone would have collided.
     static bool HasAnyIdFamilyAttribute(ISymbol symbol, Config config)
     {
-        foreach (var attribute in symbol.GetAttributes())
+        if (HasIdFamilyAttribute(symbol.GetAttributes(), config))
+        {
+            return true;
+        }
+
+        // A record primary-ctor parameter with [Id] / [UnionId] counts for the
+        // synthesized property too — the attribute is physically on the parameter
+        // (its default target) but the user means it to apply to both.
+        if (symbol is IPropertySymbol property &&
+            FindRecordPrimaryParameter(property) is { } parameter)
+        {
+            return HasIdFamilyAttribute(parameter.GetAttributes(), config);
+        }
+
+        return false;
+    }
+
+    static bool HasIdFamilyAttribute(ImmutableArray<AttributeData> attributes, Config config)
+    {
+        foreach (var attribute in attributes)
         {
             if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.IdType))
             {
@@ -418,6 +437,33 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         return false;
+    }
+
+    // Records: a property synthesized from a primary-ctor parameter carries the
+    // parameter's [Id] / [UnionId] (the compiler leaves such attributes on the
+    // parameter, which is their default target). Returns the parameter so callers
+    // can read its attributes as if they were on the property.
+    static IParameterSymbol? FindRecordPrimaryParameter(IPropertySymbol property)
+    {
+        var type = property.ContainingType;
+        if (type is null || !type.IsRecord)
+        {
+            return null;
+        }
+
+        foreach (var constructor in type.InstanceConstructors)
+        {
+            foreach (var parameter in constructor.Parameters)
+            {
+                if (parameter.Name == property.Name &&
+                    SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type))
+                {
+                    return parameter;
+                }
+            }
+        }
+
+        return null;
     }
 
     static string? GetAttributeValue(AttributeData attribute)
@@ -728,6 +774,27 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
+            // Record primary-ctor parameters carry their [Id] / [UnionId] on the
+            // parameter itself, not the synthesized property. Treat those tags as if
+            // they lived on the property so receiver-chain walking sees them.
+            if (level is IPropertySymbol recordProperty &&
+                FindRecordPrimaryParameter(recordProperty) is { } recordParameter)
+            {
+                var parameterInfo = GetIdFromAttributes(recordParameter.GetAttributes(), config);
+                if (parameterInfo.State == IdState.Present)
+                {
+                    foreach (var tag in parameterInfo.Tags)
+                    {
+                        if (seen.Add(tag))
+                        {
+                            tags.Add(tag);
+                        }
+                    }
+
+                    continue;
+                }
+            }
+
             // Convention only applies to user-declared members. Library-declared levels
             // in the chain (e.g. an interface member in a referenced assembly) are
             // silently skipped — the user can't attach a tag to them.
@@ -869,6 +936,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (inherited.State == IdState.Present)
             {
                 return inherited;
+            }
+
+            if (FindRecordPrimaryParameter(property) is { } recordParameter)
+            {
+                var fromParameter = GetIdFromAttributes(recordParameter.GetAttributes(), config);
+                if (fromParameter.State == IdState.Present)
+                {
+                    return fromParameter;
+                }
             }
         }
         else if (symbol is IParameterSymbol parameter)

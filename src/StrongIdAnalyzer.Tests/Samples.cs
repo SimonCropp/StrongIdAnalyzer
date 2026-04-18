@@ -344,3 +344,17 @@ namespace InheritanceInterfaceConvention
 }
 
 #endregion
+
+#region RecordPrimaryCtorParameter
+
+public record Holder([Id("Order")] Guid Value);
+
+public static class RecordUsage
+{
+    public static void Consume([Id("Order")] Guid value) { }
+
+    public static void Use(Holder holder) =>
+        Consume(holder.Value); // no diagnostic — attribute flows to property
+}
+
+#endregion
