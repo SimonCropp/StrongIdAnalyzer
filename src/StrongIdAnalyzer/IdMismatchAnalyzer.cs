@@ -487,6 +487,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
+            // Skip when the target's declared type can't meaningfully carry a tag —
+            // `object` parameters/props (logging, serialization) and unconstrained
+            // generics (`T`). Adding [Id] to these wouldn't express intent, and the
+            // common case (passing a tagged id into an ILogger-like helper with an
+            // `object` or `T` arg) would otherwise produce constant noise.
+            if (IsBoundaryTarget(targetSymbol))
+            {
+                return;
+            }
+
             // Fix site is the target symbol's declaration (add Id matching source).
             context.ReportDiagnostic(CreateFixableDiagnostic(
                 DroppedIdRule,
@@ -494,6 +504,29 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 targetSymbol,
                 source.Value));
         }
+    }
+
+    static bool IsBoundaryTarget(ISymbol target)
+    {
+        // For parameters on a generic method, `.Type` is already substituted at the call
+        // site (T → Guid). Inspect the original definition so the type-parameter check
+        // actually catches `T`. Properties/fields don't have this issue since their
+        // declared type is fixed.
+        var type = target switch
+        {
+            IParameterSymbol parameter => parameter.OriginalDefinition.Type,
+            IPropertySymbol property => property.Type,
+            IFieldSymbol field => field.Type,
+            _ => null
+        };
+
+        if (type is null)
+        {
+            return false;
+        }
+
+        return type.SpecialType == SpecialType.System_Object ||
+               type.TypeKind == TypeKind.TypeParameter;
     }
 
     static Diagnostic CreateFixableDiagnostic(

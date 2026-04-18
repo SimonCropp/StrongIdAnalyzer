@@ -239,7 +239,12 @@ public class SIA003Sample
 <sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L153-L170' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-Suppressed when the target is declared in referenced metadata (BCL, third-party libraries — e.g. `Dictionary<Guid, T>.this[Guid]`, `Guid.Equals(Guid)`, `object.Equals(object)`). SIA003 is not raised on equality comparisons (`==`, `!=`) — the two operands are symmetric, so it's SIA001 or SIA002 or nothing.
+SIA003 is suppressed when the tag can't meaningfully survive:
+
+ * **Library metadata targets** — BCL and third-party members (`Dictionary<Guid, T>.this[Guid]`, `Guid.Equals(Guid)`, `object.Equals(object)`). Library authors can't apply `[Id]`.
+ * **`object` parameters / properties / fields** — logging, serialization, message buses. The tag is erased through `object` anyway.
+ * **Unconstrained generic type parameters (`T`)** — identity methods, container helpers. Generics carry no domain intent.
+ * **Equality comparisons** — `==` / `!=` operands are symmetric, so only SIA001 / SIA002 apply.
 
 
 

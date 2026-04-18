@@ -710,6 +710,55 @@ public class IdMismatchAnalyzerTests
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
+    [Test]
+    public void ObjectParameter_DoesNotFireSIA003()
+    {
+        // Logger-style helper: tagged id passed into an `object` parameter. The [Id] tag
+        // is erased through `object`, so firing SIA003 here would be constant noise.
+        var source = """
+            public class Logger
+            {
+                public void Log(string message, object value) { }
+            }
+
+            public class Consumer
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public void Use(Logger logger) => logger.Log("processing {0}", OrderId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void GenericTypeParameter_DoesNotFireSIA003()
+    {
+        // Generic pass-through methods (identity, container helpers) can't carry tags.
+        var source = """
+            public class Helper
+            {
+                public T Identity<T>(T value) => value;
+            }
+
+            public class Consumer
+            {
+                [Id("Order")]
+                public System.Guid OrderId { get; set; }
+
+                public System.Guid Use(Helper h) => h.Identity(OrderId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
     static ImmutableArray<Diagnostic> GetDiagnostics(string source)
     {
         var compilation = BuildCompilation(source);
