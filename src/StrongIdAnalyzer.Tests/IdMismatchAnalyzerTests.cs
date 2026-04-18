@@ -1544,6 +1544,187 @@ public class IdMismatchAnalyzerTests
         AreEqual(0, diagnostics.Count(_ => _.Id == "SIA005"));
     }
 
+    [Test]
+    public void Union_SourceUnion_TargetSingleInOverlap_NoDiagnostic()
+    {
+        // [UnionId("Customer","Product")] source overlaps with [Id("Customer")] target.
+        var source = """
+            public class Holder
+            {
+                [UnionId("Customer", "Product")]
+                public System.Guid Value { get; set; }
+
+                public static void Consume([Id("Customer")] System.Guid value) { }
+
+                public void Use() => Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void Union_SourceUnion_TargetSingleDisjoint_FiresSIA001()
+    {
+        var source = """
+            public class Holder
+            {
+                [UnionId("Customer", "Product")]
+                public System.Guid Value { get; set; }
+
+                public static void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use() => Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+        var message = diagnostics[0].GetMessage();
+        IsTrue(message.Contains("Customer"));
+        IsTrue(message.Contains("Product"));
+        IsTrue(message.Contains("Order"));
+    }
+
+    [Test]
+    public void Union_TargetUnion_SourceSingleInOverlap_NoDiagnostic()
+    {
+        var source = """
+            public class Holder
+            {
+                [Id("Customer")]
+                public System.Guid CustomerValue { get; set; }
+
+                public static void Consume([UnionId("Customer", "Product")] System.Guid value) { }
+
+                public void Use() => Consume(CustomerValue);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void Union_UnionAndUnionOverlap_NoDiagnostic()
+    {
+        var source = """
+            public class Holder
+            {
+                [UnionId("Customer", "Product")]
+                public System.Guid SourceValue { get; set; }
+
+                public static void Consume([UnionId("Product", "Order")] System.Guid value) { }
+
+                public void Use() => Consume(SourceValue);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void Union_UnionAndUnionDisjoint_FiresSIA001()
+    {
+        var source = """
+            public class Holder
+            {
+                [UnionId("Customer", "Product")]
+                public System.Guid SourceValue { get; set; }
+
+                public static void Consume([UnionId("Order", "Supplier")] System.Guid value) { }
+
+                public void Use() => Consume(SourceValue);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void Union_CoexistsWithConvention_UnionsTags()
+    {
+        // A property named `CustomerId` with explicit [UnionId("Order")] — convention
+        // would give "Customer" and the explicit union adds "Order". Passing it to an
+        // [Id("Order")] parameter must succeed because "Order" is in the set.
+        var source = """
+            public class Holder
+            {
+                [UnionId("Order")]
+                public System.Guid CustomerId { get; set; }
+
+                public static void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use() => Consume(CustomerId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var flow = diagnostics.Where(_ => _.Id is "SIA001" or "SIA002" or "SIA003").ToArray();
+
+        AreEqual(0, flow.Length);
+    }
+
+    [Test]
+    public void SIA006_SingletonUnion_Fires()
+    {
+        var source = """
+            public class Holder
+            {
+                [UnionId("Customer")]
+                public System.Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var sia006 = diagnostics.Where(_ => _.Id == "SIA006").ToArray();
+
+        AreEqual(1, sia006.Length);
+        IsTrue(sia006[0].GetMessage().Contains("Customer"));
+    }
+
+    [Test]
+    public void SIA006_SingletonUnion_OnParameter_Fires()
+    {
+        var source = """
+            public class Holder
+            {
+                public static void Consume([UnionId("Customer")] System.Guid value) { }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var sia006 = diagnostics.Where(_ => _.Id == "SIA006").ToArray();
+
+        AreEqual(1, sia006.Length);
+    }
+
+    [Test]
+    public void SIA006_MultiOptionUnion_NoDiagnostic()
+    {
+        var source = """
+            public class Holder
+            {
+                [UnionId("Customer", "Product")]
+                public System.Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Count(_ => _.Id == "SIA006"));
+    }
+
     static ImmutableArray<Diagnostic> GetDiagnostics(string source) =>
         GetDiagnosticsWithOptions(source, new Dictionary<string, string>());
 

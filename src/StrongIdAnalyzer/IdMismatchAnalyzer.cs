@@ -8,7 +8,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // .editorconfig key for overriding the default namespace suppression list.
     // Value is comma-separated; trailing `*` means prefix match (e.g. `System*` matches
     // `System`, `System.Collections`, etc.). Setting an empty value disables suppression.
-    const string SuppressedNamespacesOption = "strongidanalyzer.suppressed_namespaces";
+    const string suppressedNamespacesOption = "strongidanalyzer.suppressed_namespaces";
 
     // Library namespaces whose members we can't realistically tag. Noise for SIA002/SIA003
     // when a tagged id flows into BCL / framework APIs (e.g. logging, serialization,
@@ -58,8 +58,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         isEnabledByDefault: true,
         customTags: [WellKnownDiagnosticTags.CompilationEnd]);
 
+    public static readonly DiagnosticDescriptor singletonUnionRule = new(
+        id: "SIA006",
+        title: "[UnionId] with a single option should be [Id]",
+        messageFormat: "[UnionId(\"{0}\")] has only one option; use [Id(\"{0}\")] instead",
+        category: "IdAttribute.Usage",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
-        [idMismatchRule, missingSourceIdRule, droppedIdRule, ambiguousConventionRule, redundantIdRule];
+        [idMismatchRule, missingSourceIdRule, droppedIdRule, ambiguousConventionRule, redundantIdRule, singletonUnionRule];
 
     public override void Initialize(AnalysisContext context)
     {
@@ -78,9 +86,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
+            // UnionIdAttribute is ours too. If the generator shipped it, we wire the
+            // union-aware paths; otherwise we behave as if only [Id] exists.
+            var unionIdType = start.Compilation
+                .GetTypeByMetadataName("StrongIdAnalyzer.UnionIdAttribute");
+
             var suppressedNamespaces = ReadSuppressedNamespaces(
                 start.Options.AnalyzerConfigOptionsProvider);
-            var config = new Config(idType, suppressedNamespaces);
+            var config = new Config(idType, unionIdType, suppressedNamespaces);
 
             start.RegisterOperationAction(
                 _ => AnalyzeArgument(_, config),
@@ -116,9 +129,50 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 SymbolKind.Field,
                 SymbolKind.Parameter);
 
+            if (unionIdType is not null)
+            {
+                start.RegisterSymbolAction(
+                    _ => AnalyzeSingletonUnion(_, unionIdType),
+                    SymbolKind.Property,
+                    SymbolKind.Field,
+                    SymbolKind.Parameter);
+            }
+
             start.RegisterCompilationEndAction(
                 _ => ReportConventionDiagnostics(_, ambiguity, redundantCandidates));
         });
+    }
+
+    static void AnalyzeSingletonUnion(SymbolAnalysisContext context, INamedTypeSymbol unionIdType)
+    {
+        foreach (var attribute in context.Symbol.GetAttributes())
+        {
+            if (!SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, unionIdType))
+            {
+                continue;
+            }
+
+            var options = ExtractUnionOptions(attribute);
+            if (options.Length > 1)
+            {
+                return;
+            }
+
+            var reference = attribute.ApplicationSyntaxReference;
+            if (reference is null)
+            {
+                return;
+            }
+
+            var singleValue = options.Length == 1 ? options[0] : "";
+            var properties = ImmutableDictionary<string, string?>.Empty.Add(ValueKey, singleValue);
+            context.ReportDiagnostic(Diagnostic.Create(
+                singletonUnionRule,
+                Location.Create(reference.SyntaxTree, reference.Span),
+                properties: properties,
+                messageArgs: singleValue));
+            return;
+        }
     }
 
     static void CollectConvention(
@@ -138,15 +192,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var explicitAttribute = GetExplicitIdAttribute(symbol, config.IdType);
+        var explicitAttribute = GetExplicitIdAttribute(symbol, config);
+        var hasAnyIdFamily = HasAnyIdFamilyAttribute(symbol, config);
 
         // Only the containing-type-named rule (`public Guid Id`) feeds ambiguity tracking.
-        // Explicit [Id] opts out — it resolves the ambiguity that SIA004 would otherwise
-        // complain about.
-        if (fromContainingType && explicitAttribute is null)
+        // Any explicit Id-family attribute ([Id] or [UnionId]) opts out — it resolves the
+        // ambiguity that SIA004 would otherwise complain about.
+        if (fromContainingType && !hasAnyIdFamily)
         {
             ambiguity
-                .GetOrAdd(conventionName, _ => new())
+                .GetOrAdd(conventionName, _ => [])
                 .Add(symbol);
         }
 
@@ -178,7 +233,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         foreach (var entry in ambiguity)
         {
             var distinct = entry.Value
-                .Distinct<ISymbol>(SymbolEqualityComparer.Default)
+                .Distinct(SymbolEqualityComparer.Default)
                 .ToArray();
             if (distinct.Length < 2)
             {
@@ -192,7 +247,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 .Select(_ => (ISymbol?)_.ContainingType?.OriginalDefinition)
                 .Where(_ => _ is not null)
                 .Select(_ => _!)
-                .Distinct<ISymbol>(SymbolEqualityComparer.Default)
+                .Distinct(SymbolEqualityComparer.Default)
                 .Count();
             if (distinctTypes < 2)
             {
@@ -318,17 +373,42 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static bool TryGetConventionName(ISymbol symbol, out string conventionName) =>
         TryGetConventionName(symbol, out conventionName, out _);
 
-    static AttributeData? GetExplicitIdAttribute(ISymbol symbol, INamedTypeSymbol idType)
+    // Returns the symbol's [Id] attribute specifically — not [UnionId]. Used by the
+    // SIA005 "redundant" check, which only applies to single-tag [Id("X")] values that
+    // happen to equal what the convention would infer.
+    static AttributeData? GetExplicitIdAttribute(ISymbol symbol, Config config)
     {
         foreach (var attribute in symbol.GetAttributes())
         {
-            if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, idType))
+            if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.IdType))
             {
                 return attribute;
             }
         }
 
         return null;
+    }
+
+    // True when the symbol carries any Id-family attribute — [Id] or [UnionId]. Used by
+    // SIA004 ambiguity tracking so explicitly-tagged declarations drop out of the pool
+    // that convention alone would have collided.
+    static bool HasAnyIdFamilyAttribute(ISymbol symbol, Config config)
+    {
+        foreach (var attribute in symbol.GetAttributes())
+        {
+            if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.IdType))
+            {
+                return true;
+            }
+
+            if (config.UnionIdType is not null &&
+                SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.UnionIdType))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     static string? GetAttributeValue(AttributeData attribute)
@@ -344,7 +424,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static ImmutableArray<string> ReadSuppressedNamespaces(AnalyzerConfigOptionsProvider options)
     {
-        if (!options.GlobalOptions.TryGetValue(SuppressedNamespacesOption, out var raw))
+        if (!options.GlobalOptions.TryGetValue(suppressedNamespacesOption, out var raw))
         {
             return defaultSuppressedNamespaces;
         }
@@ -407,15 +487,18 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
-    readonly struct Config(INamedTypeSymbol idType, ImmutableArray<string> suppressedNamespaces)
+    readonly struct Config(
+        INamedTypeSymbol idType,
+        INamedTypeSymbol? unionIdType,
+        ImmutableArray<string> suppressedNamespaces)
     {
         public INamedTypeSymbol IdType { get; } = idType;
+        public INamedTypeSymbol? UnionIdType { get; } = unionIdType;
         public ImmutableArray<string> SuppressedNamespaces { get; } = suppressedNamespaces;
     }
 
     static void AnalyzeBinaryOperator(OperationAnalysisContext context, Config config)
     {
-        var idType = config.IdType;
         var operation = (IBinaryOperation)context.Operation;
         if (operation.OperatorKind != BinaryOperatorKind.Equals &&
             operation.OperatorKind != BinaryOperatorKind.NotEquals)
@@ -425,8 +508,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         var leftSymbol = GetSymbol(operation.LeftOperand);
         var rightSymbol = GetSymbol(operation.RightOperand);
-        var leftInfo = GetAccessInfo(operation.LeftOperand, idType);
-        var rightInfo = GetAccessInfo(operation.RightOperand, idType);
+        var leftInfo = GetAccessInfo(operation.LeftOperand, config);
+        var rightInfo = GetAccessInfo(operation.RightOperand, config);
 
         // Equality is symmetric: if the two tag sets share any tag, the values could
         // represent the same identity. Only fire SIA001 when the sets are disjoint.
@@ -493,7 +576,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static void AnalyzeArgument(OperationAnalysisContext context, Config config)
     {
-        var idType = config.IdType;
         var argument = (IArgumentOperation)context.Operation;
         var parameter = argument.Parameter;
         if (parameter is null)
@@ -501,9 +583,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var targetInfo = GetIdWithInheritance(parameter, idType);
+        var targetInfo = GetIdWithInheritance(parameter, config);
         var sourceSymbol = GetSymbol(argument.Value);
-        var sourceInfo = GetAccessInfo(argument.Value, idType);
+        var sourceInfo = GetAccessInfo(argument.Value, config);
         Report(
             context,
             argument.Value.Syntax.GetLocation(),
@@ -516,7 +598,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static void AnalyzeSimpleAssignment(OperationAnalysisContext context, Config config)
     {
-        var idType = config.IdType;
         var assignment = (ISimpleAssignmentOperation)context.Operation;
         var targetSymbol = GetSymbol(assignment.Target);
         if (targetSymbol is null)
@@ -527,9 +608,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Target walks its receiver chain too — `parent.Id = value` carries Parent's
         // receiver context just like a read would, so assignments use the same multi-tag
         // view on both sides.
-        var targetInfo = GetAccessInfo(assignment.Target, idType);
+        var targetInfo = GetAccessInfo(assignment.Target, config);
         var sourceSymbol = GetSymbol(assignment.Value);
-        var sourceInfo = GetAccessInfo(assignment.Value, idType);
+        var sourceInfo = GetAccessInfo(assignment.Value, config);
         Report(
             context,
             assignment.Value.Syntax.GetLocation(),
@@ -542,13 +623,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static void AnalyzePropertyInitializer(OperationAnalysisContext context, Config config)
     {
-        var idType = config.IdType;
         var init = (IPropertyInitializerOperation)context.Operation;
         var sourceSymbol = GetSymbol(init.Value);
-        var sourceInfo = GetAccessInfo(init.Value, idType);
+        var sourceInfo = GetAccessInfo(init.Value, config);
         foreach (var property in init.InitializedProperties)
         {
-            var targetInfo = GetIdWithInheritance(property, idType);
+            var targetInfo = GetIdWithInheritance(property, config);
             Report(
                 context,
                 init.Value.Syntax.GetLocation(),
@@ -562,13 +642,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static void AnalyzeFieldInitializer(OperationAnalysisContext context, Config config)
     {
-        var idType = config.IdType;
         var init = (IFieldInitializerOperation)context.Operation;
         var sourceSymbol = GetSymbol(init.Value);
-        var sourceInfo = GetAccessInfo(init.Value, idType);
+        var sourceInfo = GetAccessInfo(init.Value, config);
         foreach (var field in init.InitializedFields)
         {
-            var targetInfo = GetIdWithInheritance(field, idType);
+            var targetInfo = GetIdWithInheritance(field, config);
             Report(
                 context,
                 init.Value.Syntax.GetLocation(),
@@ -596,19 +675,19 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // named `Id` walks the receiver's static-type chain (up to the declaring type) and
     // adds the convention tag for each level — so `child1.Id` carries both "Child1" and
     // "Base" and can flow into parameters tagged either way.
-    static IdInfo GetAccessInfo(IOperation operation, INamedTypeSymbol idType)
+    static IdInfo GetAccessInfo(IOperation operation, Config config)
     {
         operation = UnwrapConversions(operation);
         return operation switch
         {
-            IPropertyReferenceOperation prop => GetMemberAccessInfo(prop.Property, prop.Instance?.Type, idType),
-            IFieldReferenceOperation field => GetMemberAccessInfo(field.Field, field.Instance?.Type, idType),
-            IParameterReferenceOperation param => GetIdWithInheritance(param.Parameter, idType),
+            IPropertyReferenceOperation prop => GetMemberAccessInfo(prop.Property, prop.Instance?.Type, config),
+            IFieldReferenceOperation field => GetMemberAccessInfo(field.Field, field.Instance?.Type, config),
+            IParameterReferenceOperation param => GetIdWithInheritance(param.Parameter, config),
             _ => IdInfo.Unknown
         };
     }
 
-    static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType, INamedTypeSymbol idType)
+    static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType, Config config)
     {
         var tags = ImmutableArray.CreateBuilder<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -626,7 +705,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 coveredTypes.Add(ct.OriginalDefinition);
             }
 
-            var explicitInfo = GetIdFromAttributes(level.GetAttributes(), idType);
+            var explicitInfo = GetIdFromAttributes(level.GetAttributes(), config);
             if (explicitInfo.State == IdState.Present)
             {
                 foreach (var tag in explicitInfo.Tags)
@@ -669,8 +748,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         //    Only the `Id` rule applies here; `XxxId` is name-based and already captured.
         //    Stop at System.Object so "Object" never leaks into the tag set — relevant
         //    when the declaring type is an interface and `.BaseType` walks past it.
-        if (member.Name == "Id" &&
-            member.ContainingType is { } memberContaining &&
+        if (member is { Name: "Id", ContainingType: { } memberContaining } &&
             receiverType is INamedTypeSymbol rt)
         {
             var boundary = memberContaining.OriginalDefinition;
@@ -748,14 +826,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    static IdInfo GetId(ISymbol? symbol, INamedTypeSymbol idType)
+    static IdInfo GetId(ISymbol? symbol, Config config)
     {
         if (symbol is null)
         {
             return IdInfo.Unknown;
         }
 
-        return GetIdWithInheritance(symbol, idType);
+        return GetIdWithInheritance(symbol, config);
     }
 
     // Reads the [Id] attribute off a symbol, walking override / interface-impl chains
@@ -768,9 +846,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     //   2. Inherited [Id] via override/interface impl chain (properties & parameters).
     //   3. Naming convention (properties/fields only).
     //   4. NotPresent.
-    static IdInfo GetIdWithInheritance(ISymbol symbol, INamedTypeSymbol idType)
+    static IdInfo GetIdWithInheritance(ISymbol symbol, Config config)
     {
-        var direct = GetIdFromAttributes(symbol.GetAttributes(), idType);
+        var direct = GetIdFromAttributes(symbol.GetAttributes(), config);
         if (direct.State == IdState.Present)
         {
             return direct;
@@ -778,7 +856,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         if (symbol is IPropertySymbol property)
         {
-            var inherited = GetPropertyIdFromHierarchy(property, idType);
+            var inherited = GetPropertyIdFromHierarchy(property, config);
             if (inherited.State == IdState.Present)
             {
                 return inherited;
@@ -786,7 +864,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
         else if (symbol is IParameterSymbol parameter)
         {
-            var inherited = GetParameterIdFromHierarchy(parameter, idType);
+            var inherited = GetParameterIdFromHierarchy(parameter, config);
             if (inherited.State == IdState.Present)
             {
                 return inherited;
@@ -806,7 +884,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return direct;
     }
 
-    static IdInfo GetParameterIdFromHierarchy(IParameterSymbol parameter, INamedTypeSymbol idType)
+    static IdInfo GetParameterIdFromHierarchy(IParameterSymbol parameter, Config config)
     {
         if (parameter.ContainingSymbol is not IMethodSymbol method)
         {
@@ -822,7 +900,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             {
                 var info = GetIdFromAttributes(
                     overridden.Parameters[ordinal].GetAttributes(),
-                    idType);
+                    config);
                 if (info.State == IdState.Present)
                 {
                     return info;
@@ -841,7 +919,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
             var info = GetIdFromAttributes(
                 ifaceMember.Parameters[ordinal].GetAttributes(),
-                idType);
+                config);
             if (info.State == IdState.Present)
             {
                 return info;
@@ -871,7 +949,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
                 var info = GetIdFromAttributes(
                     ifaceMember.Parameters[ordinal].GetAttributes(),
-                    idType);
+                    config);
                 if (info.State == IdState.Present)
                 {
                     return info;
@@ -882,13 +960,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return IdInfo.NotPresent;
     }
 
-    static IdInfo GetPropertyIdFromHierarchy(IPropertySymbol property, INamedTypeSymbol idType)
+    static IdInfo GetPropertyIdFromHierarchy(IPropertySymbol property, Config config)
     {
         // Walk the `override` chain bottom-up. First [Id] found wins.
         var overridden = property.OverriddenProperty;
         while (overridden is not null)
         {
-            var info = GetIdFromAttributes(overridden.GetAttributes(), idType);
+            var info = GetIdFromAttributes(overridden.GetAttributes(), config);
             if (info.State == IdState.Present)
             {
                 return info;
@@ -900,7 +978,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Explicit interface implementations carry their target interface member directly.
         foreach (var ifaceMember in property.ExplicitInterfaceImplementations)
         {
-            var info = GetIdFromAttributes(ifaceMember.GetAttributes(), idType);
+            var info = GetIdFromAttributes(ifaceMember.GetAttributes(), config);
             if (info.State == IdState.Present)
             {
                 return info;
@@ -925,7 +1003,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     continue;
                 }
 
-                var info = GetIdFromAttributes(ifaceMember.GetAttributes(), idType);
+                var info = GetIdFromAttributes(ifaceMember.GetAttributes(), config);
                 if (info.State == IdState.Present)
                 {
                     return info;
@@ -947,25 +1025,71 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static IdInfo GetIdFromAttributes(
         ImmutableArray<AttributeData> attributes,
-        INamedTypeSymbol idType)
+        Config config)
     {
+        // Id and UnionId on the same declaration are rare but legal (different attribute
+        // classes). If they coexist the tags union, which is consistent with the rest of
+        // the analyzer treating Id-family attrs as a single set.
+        var tags = ImmutableArray.CreateBuilder<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var attribute in attributes)
         {
-            if (!SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, idType))
+            if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.IdType))
             {
+                if (attribute.ConstructorArguments.Length > 0 &&
+                    attribute.ConstructorArguments[0].Value is string s &&
+                    seen.Add(s))
+                {
+                    tags.Add(s);
+                }
+
                 continue;
             }
 
-            if (attribute.ConstructorArguments.Length > 0 &&
-                attribute.ConstructorArguments[0].Value is string s)
+            if (config.UnionIdType is not null &&
+                SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.UnionIdType))
             {
-                return IdInfo.Present(s);
+                foreach (var option in ExtractUnionOptions(attribute))
+                {
+                    if (seen.Add(option))
+                    {
+                        tags.Add(option);
+                    }
+                }
             }
-
-            return IdInfo.Present("");
         }
 
-        return IdInfo.NotPresent;
+        return tags.Count == 0
+            ? IdInfo.NotPresent
+            : IdInfo.Present(tags.ToImmutable());
+    }
+
+    // Reads `[UnionId(params string[] options)]`'s constructor argument. Roslyn surfaces
+    // the `params string[]` as a single Array TypedConstant whose Values are the items.
+    static ImmutableArray<string> ExtractUnionOptions(AttributeData attribute)
+    {
+        if (attribute.ConstructorArguments.Length == 0)
+        {
+            return ImmutableArray<string>.Empty;
+        }
+
+        var first = attribute.ConstructorArguments[0];
+        if (first.Kind != TypedConstantKind.Array)
+        {
+            return ImmutableArray<string>.Empty;
+        }
+
+        var builder = ImmutableArray.CreateBuilder<string>(first.Values.Length);
+        foreach (var element in first.Values)
+        {
+            if (element.Value is string s)
+            {
+                builder.Add(s);
+            }
+        }
+
+        return builder.ToImmutable();
     }
 
     static void Report(
@@ -986,11 +1110,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (source.State == IdState.Present &&
             target.State == IdState.Present)
         {
-            // The value flowing in must carry every tag the target demands. Multi-tag
-            // targets (receiver-walked assignment LHS) force the source to cover all of
-            // them; multi-tag sources (receiver-walked reads) satisfy any single-tag
-            // target whose tag is in the set.
-            if (!target.SatisfiedBy(source))
+            // Source and target sets must overlap — at least one shared tag means the
+            // value could legitimately flow in. Intersection is symmetric, so it handles
+            // both receiver-walked covariant sources (`child.Id` = {"Child","Base"}) and
+            // union-tagged targets (`[UnionId("A","B")]` accepts "A" or "B") uniformly.
+            if (!target.IntersectsWith(source))
             {
                 context.ReportDiagnostic(Diagnostic.Create(
                     idMismatchRule,
@@ -1137,7 +1261,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         public static IdInfo NotPresent { get; } = new(IdState.NotPresent, ImmutableArray<string>.Empty);
 
         public static IdInfo Present(string tag) =>
-            new(IdState.Present, ImmutableArray.Create(tag));
+            new(IdState.Present, [tag]);
 
         public static IdInfo Present(ImmutableArray<string> tags) =>
             tags.IsDefaultOrEmpty
@@ -1148,22 +1272,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Picks the first tag — callers that care about multi-tag must use Tags directly.
         public string? FirstValue => Tags.IsDefaultOrEmpty ? null : Tags[0];
 
-        // Every tag the target demands must be present in the source's tag set.
-        // Used for assignment-like flow (argument → parameter, RHS → LHS).
-        public bool SatisfiedBy(IdInfo source)
-        {
-            foreach (var tag in Tags)
-            {
-                if (!source.Tags.Contains(tag))
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        // Symmetric set intersection. Used for equality comparisons where either side
-        // could be the identity the other is checking against.
+        // Set intersection — the source and target are compatible if they share at least
+        // one tag. This is the natural rule for both covariant sources (receiver walk:
+        // `child1.Id` carries {"Child1","Base"} so it matches a `[Id("Base")]` or
+        // `[Id("Child1")]` parameter) and contravariant targets (`[UnionId("A","B")]`
+        // accepts anything tagged "A" or "B").
         public bool IntersectsWith(IdInfo other)
         {
             foreach (var tag in Tags)

@@ -144,11 +144,14 @@ The `IdAttribute` is source-generated into your compilation — you don't take a
 
 ## Diagnostics
 
-| ID     | Severity | Code fix | Summary                                          |
-|--------|----------|----------|--------------------------------------------------|
-| SIA001 | Warning  | —        | Both sides tagged with different `[Id]` values   |
-| SIA002 | Warning  | Yes      | Source missing `[Id]`; target has one            |
-| SIA003 | Warning  | Yes      | Source has `[Id]`; target missing one            |
+| ID     | Severity | Code fix | Summary                                                                 |
+|--------|----------|----------|-------------------------------------------------------------------------|
+| SIA001 | Warning  | —        | Both sides tagged with different `[Id]` values                          |
+| SIA002 | Warning  | Yes      | Source missing `[Id]`; target has one                                   |
+| SIA003 | Warning  | Yes      | Source has `[Id]`; target missing one                                   |
+| SIA004 | Error    | —        | Two `public Guid Id` declarations collide under the naming convention   |
+| SIA005 | Warning  | Yes      | `[Id("x")]` is redundant — the naming convention already infers `"x"`   |
+| SIA006 | Warning  | Yes      | `[UnionId("x")]` with a single option should be `[Id("x")]`             |
 
 
 ### SIA001 — Id mismatch
@@ -248,6 +251,23 @@ SIA003 is suppressed when the tag can't meaningfully survive:
  * **Unconstrained generic type parameters (`T`)** — identity methods, container helpers. Generics carry no domain intent.
  * **Targets in a suppressed namespace** — by default `System*` and `Microsoft*` (see below).
  * **Equality comparisons** — `==` / `!=` operands are symmetric, so only SIA001 / SIA002 apply.
+
+
+## `[UnionId(...)]`
+
+Sometimes a member legitimately accepts any one of several domain types — a generic lookup helper, a cache key that can be either a Customer or a Product. The package ships `[UnionId("Customer", "Product")]` for that case.
+
+Two values are **compatible** when their tag sets overlap on at least one entry:
+
+| Source                           | Target                                  | Compatible?     |
+|----------------------------------|------------------------------------------|-----------------|
+| `[UnionId("Customer","Product")]`| `[UnionId("Customer","Product")]`        | yes (full)      |
+| `[UnionId("Customer","Product")]`| `[UnionId("Customer","Order")]`          | yes (`Customer`)|
+| `[UnionId("Customer","Product")]`| `[Id("Product")]`                        | yes             |
+| `[Id("Product")]`                | `[UnionId("Customer","Product")]`        | yes             |
+| `[UnionId("Customer","Product")]`| `[UnionId("Order","Supplier")]`          | **no** → SIA001 |
+
+A `[UnionId("x")]` with a single option is always a mistake — use `[Id("x")]`. SIA006 flags it and ships a fixer that rewrites the attribute in place.
 
 
 ## Inheritance and covariant Id tagging

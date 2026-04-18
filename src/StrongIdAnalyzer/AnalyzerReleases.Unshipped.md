@@ -7,3 +7,4 @@ SIA002 | IdAttribute.Usage | Warning | Source has no Id while target requires on
 SIA003 | IdAttribute.Usage | Warning | Source has Id while target has none
 SIA004 | IdAttribute.Usage | Error | Multiple declarations map to the same conventional Id name
 SIA005 | IdAttribute.Usage | Warning | [Id(...)] attribute matches the naming convention and is redundant
+SIA006 | IdAttribute.Usage | Warning | [UnionId("x")] with a single option should be [Id("x")]

@@ -17,6 +17,15 @@ public class AddIdCodeFixProviderTests
             AllowMultiple = false,
             Inherited = false)]
         sealed class IdAttribute(string type) : Attribute;
+
+        [AttributeUsage(
+            AttributeTargets.Property |
+            AttributeTargets.Field |
+            AttributeTargets.Parameter |
+            AttributeTargets.ReturnValue,
+            AllowMultiple = false,
+            Inherited = false)]
+        sealed class UnionIdAttribute(params string[] types) : Attribute;
         """;
 
     [Test]
@@ -180,6 +189,24 @@ public class AddIdCodeFixProviderTests
         var actions = await GetCodeActions(source);
 
         AreEqual(0, actions.Length);
+    }
+
+    [Test]
+    public async Task SIA006_RewritesSingletonUnionAsId()
+    {
+        var source = """
+            public class Holder
+            {
+                [UnionId("Customer")]
+                public System.Guid Value { get; set; }
+            }
+            """;
+
+        var fixedSource = await ApplyFix(source, "SIA006");
+
+        Contains(fixedSource, "[Id(\"Customer\")]");
+        IsTrue(!fixedSource.Contains("UnionId"),
+            $"Expected UnionId to be replaced but got:\n{fixedSource}");
     }
 
     [Test]

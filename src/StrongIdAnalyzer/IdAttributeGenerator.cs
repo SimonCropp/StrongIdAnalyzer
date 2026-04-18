@@ -29,6 +29,24 @@ public class IdAttributeGenerator : IIncrementalGenerator
         #pragma warning disable CS9113
         sealed class IdAttribute(string type) : Attribute;
         #pragma warning restore CS9113
+
+        /// <summary>
+        /// Marks a primitive ID declaration as accepting any one of a set of domain type
+        /// tags. Compatible with [Id] when the option sets overlap on at least one entry.
+        /// Useful for parameters/properties that legitimately accept multiple Id kinds.
+        /// </summary>
+        [AttributeUsage(
+            AttributeTargets.Property |
+            AttributeTargets.Field |
+            AttributeTargets.Parameter |
+            AttributeTargets.ReturnValue,
+            AllowMultiple = false,
+            Inherited = false)]
+        [ExcludeFromCodeCoverage]
+        [DebuggerNonUserCode]
+        #pragma warning disable CS9113
+        sealed class UnionIdAttribute(params string[] types) : Attribute;
+        #pragma warning restore CS9113
         """;
 
     public void Initialize(IncrementalGeneratorInitializationContext context) =>

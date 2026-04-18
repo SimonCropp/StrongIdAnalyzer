@@ -10,12 +10,14 @@ public class AddIdCodeFixProvider : CodeFixProvider
     const string missingSourceIdId = "SIA002";
     const string droppedIdId = "SIA003";
     const string redundantIdId = "SIA005";
+    const string singletonUnionId = "SIA006";
 
     public override ImmutableArray<string> FixableDiagnosticIds =>
     [
         missingSourceIdId,
         droppedIdId,
-        redundantIdId
+        redundantIdId,
+        singletonUnionId
     ];
 
     public override FixAllProvider GetFixAllProvider() =>
@@ -28,6 +30,13 @@ public class AddIdCodeFixProvider : CodeFixProvider
             if (diagnostic.Id == redundantIdId)
             {
                 await RegisterRemoveFix(context, diagnostic)
+                    .ConfigureAwait(false);
+                continue;
+            }
+
+            if (diagnostic.Id == singletonUnionId)
+            {
+                await RegisterReplaceUnionWithIdFix(context, diagnostic)
                     .ConfigureAwait(false);
                 continue;
             }
@@ -80,6 +89,37 @@ public class AddIdCodeFixProvider : CodeFixProvider
                     value,
                     cancel),
                 equivalenceKey: $"AddId:{value}"),
+            diagnostic);
+    }
+
+    static async Task RegisterReplaceUnionWithIdFix(CodeFixContext context, Diagnostic diagnostic)
+    {
+        if (!diagnostic.Properties.TryGetValue(valueKey, out var value) || value is null)
+        {
+            return;
+        }
+
+        var location = diagnostic.Location;
+        var tree = location.SourceTree;
+        if (tree is null)
+        {
+            return;
+        }
+
+        var root = await tree
+            .GetRootAsync(context.CancellationToken)
+            .ConfigureAwait(false);
+        var node = root.FindNode(location.SourceSpan);
+        if (node.FirstAncestorOrSelf<AttributeSyntax>() is null)
+        {
+            return;
+        }
+
+        context.RegisterCodeFix(
+            CodeAction.Create(
+                $"Replace with [Id(\"{value}\")]",
+                cancel => ReplaceUnionWithIdAsync(context.Document, location, value, cancel),
+                equivalenceKey: $"ReplaceUnionWithId:{value}"),
             diagnostic);
     }
 
@@ -157,6 +197,38 @@ public class AddIdCodeFixProvider : CodeFixProvider
             .ConfigureAwait(false);
 
         return newDocument.Project.Solution;
+    }
+
+    static async Task<Document> ReplaceUnionWithIdAsync(
+        Document document,
+        Location location,
+        string value,
+        Cancel cancel)
+    {
+        var root = await document
+            .GetSyntaxRootAsync(cancel)
+            .ConfigureAwait(false);
+        if (root is null)
+        {
+            return document;
+        }
+
+        var node = root.FindNode(location.SourceSpan);
+        var oldAttribute = node.FirstAncestorOrSelf<AttributeSyntax>();
+        if (oldAttribute is null)
+        {
+            return document;
+        }
+
+        var argument = AttributeArgument(
+            LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(value)));
+        var newAttribute = Attribute(IdentifierName("Id"))
+            .WithArgumentList(AttributeArgumentList(SingletonSeparatedList(argument)))
+            .WithTriviaFrom(oldAttribute)
+            .WithAdditionalAnnotations(Formatter.Annotation);
+
+        var newRoot = root.ReplaceNode(oldAttribute, newAttribute);
+        return document.WithSyntaxRoot(newRoot);
     }
 
     static async Task<Document> RemoveAttributeAsync(
