@@ -8,15 +8,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // .editorconfig key for overriding the default namespace suppression list.
     // Value is comma-separated; trailing `*` means prefix match (e.g. `System*` matches
     // `System`, `System.Collections`, etc.). Setting an empty value disables suppression.
-    internal const string SuppressedNamespacesOption = "strongidanalyzer.suppressed_namespaces";
+    const string SuppressedNamespacesOption = "strongidanalyzer.suppressed_namespaces";
 
     // Library namespaces whose members we can't realistically tag. Noise for SIA002/SIA003
     // when a tagged id flows into BCL / framework APIs (e.g. logging, serialization,
     // dependency injection, Entity Framework). Users can override via .editorconfig.
-    static readonly ImmutableArray<string> DefaultSuppressedNamespaces =
+    static readonly ImmutableArray<string> defaultSuppressedNamespaces =
         ["System*", "Microsoft*"];
 
-    public static readonly DiagnosticDescriptor IdMismatchRule = new(
+    static readonly DiagnosticDescriptor idMismatchRule = new(
         id: "SIA001",
         title: "Id type mismatch",
         messageFormat: "Value with [Id(\"{0}\")] is assigned to a target with [Id(\"{1}\")]",
@@ -24,7 +24,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
-    public static readonly DiagnosticDescriptor MissingSourceIdRule = new(
+    static readonly DiagnosticDescriptor missingSourceIdRule = new(
         id: "SIA002",
         title: "Source has no Id while target requires one",
         messageFormat: "Value has no [Id] attribute but is assigned to a target with [Id(\"{0}\")]",
@@ -32,7 +32,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
-    public static readonly DiagnosticDescriptor DroppedIdRule = new(
+    static readonly DiagnosticDescriptor droppedIdRule = new(
         id: "SIA003",
         title: "Source has Id while target has none",
         messageFormat: "Value with [Id(\"{0}\")] is assigned to a target without an [Id] attribute",
@@ -41,7 +41,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         isEnabledByDefault: true);
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
-        [IdMismatchRule, MissingSourceIdRule, DroppedIdRule];
+        [idMismatchRule, missingSourceIdRule, droppedIdRule];
 
     public override void Initialize(AnalysisContext context)
     {
@@ -86,7 +86,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         if (!options.GlobalOptions.TryGetValue(SuppressedNamespacesOption, out var raw))
         {
-            return DefaultSuppressedNamespaces;
+            return defaultSuppressedNamespaces;
         }
 
         // Explicit empty disables all suppression.
@@ -178,7 +178,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
 
             context.ReportDiagnostic(Diagnostic.Create(
-                IdMismatchRule,
+                idMismatchRule,
                 operation.Syntax.GetLocation(),
                 leftInfo.Value ?? "",
                 rightInfo.Value ?? ""));
@@ -224,7 +224,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         context.ReportDiagnostic(CreateFixableDiagnostic(
-            MissingSourceIdRule,
+            missingSourceIdRule,
             untaggedOperand.Syntax.GetLocation(),
             untaggedSymbol,
             tag));
@@ -547,7 +547,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (!string.Equals(source.Value, target.Value, StringComparison.Ordinal))
             {
                 context.ReportDiagnostic(Diagnostic.Create(
-                    IdMismatchRule,
+                    idMismatchRule,
                     location,
                     source.Value ?? "",
                     target.Value ?? ""));
@@ -575,7 +575,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
             // Fix site is the source symbol's declaration (add Id matching target).
             context.ReportDiagnostic(CreateFixableDiagnostic(
-                MissingSourceIdRule,
+                missingSourceIdRule,
                 location,
                 sourceSymbol,
                 target.Value));
@@ -611,7 +611,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
             // Fix site is the target symbol's declaration (add Id matching source).
             context.ReportDiagnostic(CreateFixableDiagnostic(
-                DroppedIdRule,
+                droppedIdRule,
                 location,
                 targetSymbol,
                 source.Value));

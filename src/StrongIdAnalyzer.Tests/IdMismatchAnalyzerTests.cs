@@ -934,7 +934,7 @@ public class IdMismatchAnalyzerTests
         driver.RunGeneratorsAndUpdateCompilation(compilation, out var updated, out _);
 
         var analyzer = new IdMismatchAnalyzer();
-        var analyzerOptions = new Microsoft.CodeAnalysis.Diagnostics.AnalyzerOptions(
+        var analyzerOptions = new AnalyzerOptions(
             [],
             new TestAnalyzerConfigOptionsProvider(globalOptions));
 
@@ -946,7 +946,7 @@ public class IdMismatchAnalyzerTests
     }
 
     sealed class TestAnalyzerConfigOptions(IDictionary<string, string> options)
-        : Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions
+        : AnalyzerConfigOptions
     {
         public override bool TryGetValue(string key, out string value)
         {
@@ -962,19 +962,17 @@ public class IdMismatchAnalyzerTests
     }
 
     sealed class TestAnalyzerConfigOptionsProvider(IDictionary<string, string> options)
-        : Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptionsProvider
+        : AnalyzerConfigOptionsProvider
     {
         readonly TestAnalyzerConfigOptions globals = new(options);
 
-        public override Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions GlobalOptions =>
+        public override AnalyzerConfigOptions GlobalOptions =>
             globals;
 
-        public override Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions GetOptions(
-            Microsoft.CodeAnalysis.SyntaxTree tree) =>
+        public override AnalyzerConfigOptions GetOptions(SyntaxTree tree) =>
             globals;
 
-        public override Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions GetOptions(
-            Microsoft.CodeAnalysis.AdditionalText textFile) =>
+        public override AnalyzerConfigOptions GetOptions(AdditionalText textFile) =>
             globals;
     }
 
