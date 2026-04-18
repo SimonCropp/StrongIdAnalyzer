@@ -21,10 +21,7 @@ public class CodeFixConsumeTests
             AttributeTargets.ReturnValue,
             AllowMultiple = false,
             Inherited = false)]
-        internal sealed class IdAttribute(string type) : Attribute
-        {
-            public string Type { get; } = type;
-        }
+        internal sealed class IdAttribute(string type) : Attribute;
         """;
 
     // Verifies that the Release-built nuget (from ../nugets) actually ships a loadable

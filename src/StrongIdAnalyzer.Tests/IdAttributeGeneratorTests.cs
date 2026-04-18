@@ -13,7 +13,6 @@ public class IdAttributeGeneratorTests
         var text = generated.ToString();
 
         IsTrue(text.Contains("sealed class IdAttribute"));
-        IsTrue(text.Contains("public string Type"));
         IsTrue(text.Contains("namespace StrongIdAnalyzer"));
     }
 

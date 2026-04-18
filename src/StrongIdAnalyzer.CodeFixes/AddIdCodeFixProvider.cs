@@ -9,11 +9,13 @@ public class AddIdCodeFixProvider : CodeFixProvider
     const string valueKey = "IdValue";
     const string missingSourceIdId = "SIA002";
     const string droppedIdId = "SIA003";
+    const string redundantIdId = "SIA005";
 
     public override ImmutableArray<string> FixableDiagnosticIds =>
     [
         missingSourceIdId,
-        droppedIdId
+        droppedIdId,
+        redundantIdId
     ];
 
     public override FixAllProvider GetFixAllProvider() =>
@@ -23,49 +25,89 @@ public class AddIdCodeFixProvider : CodeFixProvider
     {
         foreach (var diagnostic in context.Diagnostics)
         {
-            if (diagnostic.AdditionalLocations.Count == 0)
+            if (diagnostic.Id == redundantIdId)
             {
+                await RegisterRemoveFix(context, diagnostic)
+                    .ConfigureAwait(false);
                 continue;
             }
 
-            if (!diagnostic.Properties.TryGetValue(valueKey, out var value) ||
-                value is null)
-            {
-                continue;
-            }
-
-            var declarationLocation = diagnostic.AdditionalLocations[0];
-            if (!declarationLocation.IsInSource)
-            {
-                continue;
-            }
-
-            var declarationTree = declarationLocation.SourceTree;
-            if (declarationTree is null)
-            {
-                continue;
-            }
-
-            var declarationRoot = await declarationTree
-                .GetRootAsync(context.CancellationToken)
+            await RegisterAddFix(context, diagnostic)
                 .ConfigureAwait(false);
-            var declarationNode = declarationRoot.FindNode(declarationLocation.SourceSpan);
-            if (FindAttributeHost(declarationNode) is null)
-            {
-                continue;
-            }
-
-            context.RegisterCodeFix(
-                CodeAction.Create(
-                    $"Add [Id(\"{value}\")]",
-                    cancel => AddAttributeAsync(
-                        context.Document.Project.Solution,
-                        declarationLocation,
-                        value,
-                        cancel),
-                    equivalenceKey: $"AddId:{value}"),
-                diagnostic);
         }
+    }
+
+    static async Task RegisterAddFix(CodeFixContext context, Diagnostic diagnostic)
+    {
+        if (diagnostic.AdditionalLocations.Count == 0)
+        {
+            return;
+        }
+
+        if (!diagnostic.Properties.TryGetValue(valueKey, out var value) ||
+            value is null)
+        {
+            return;
+        }
+
+        var declarationLocation = diagnostic.AdditionalLocations[0];
+        if (!declarationLocation.IsInSource)
+        {
+            return;
+        }
+
+        var declarationTree = declarationLocation.SourceTree;
+        if (declarationTree is null)
+        {
+            return;
+        }
+
+        var declarationRoot = await declarationTree
+            .GetRootAsync(context.CancellationToken)
+            .ConfigureAwait(false);
+        var declarationNode = declarationRoot.FindNode(declarationLocation.SourceSpan);
+        if (FindAttributeHost(declarationNode) is null)
+        {
+            return;
+        }
+
+        context.RegisterCodeFix(
+            CodeAction.Create(
+                $"Add [Id(\"{value}\")]",
+                cancel => AddAttributeAsync(
+                    context.Document.Project.Solution,
+                    declarationLocation,
+                    value,
+                    cancel),
+                equivalenceKey: $"AddId:{value}"),
+            diagnostic);
+    }
+
+    static async Task RegisterRemoveFix(CodeFixContext context, Diagnostic diagnostic)
+    {
+        var location = diagnostic.Location;
+        var tree = location.SourceTree;
+        if (tree is null)
+        {
+            return;
+        }
+
+        var root = await tree
+            .GetRootAsync(context.CancellationToken)
+            .ConfigureAwait(false);
+        var node = root.FindNode(location.SourceSpan);
+        var attribute = node.FirstAncestorOrSelf<AttributeSyntax>();
+        if (attribute is null)
+        {
+            return;
+        }
+
+        context.RegisterCodeFix(
+            CodeAction.Create(
+                "Remove redundant [Id] attribute",
+                cancel => RemoveAttributeAsync(context.Document, location, cancel),
+                equivalenceKey: "RemoveRedundantId"),
+            diagnostic);
     }
 
     static async Task<Solution> AddAttributeAsync(
@@ -115,6 +157,41 @@ public class AddIdCodeFixProvider : CodeFixProvider
             .ConfigureAwait(false);
 
         return newDocument.Project.Solution;
+    }
+
+    static async Task<Document> RemoveAttributeAsync(
+        Document document,
+        Location location,
+        Cancel cancel)
+    {
+        var root = await document
+            .GetSyntaxRootAsync(cancel)
+            .ConfigureAwait(false);
+        if (root is null)
+        {
+            return document;
+        }
+
+        var node = root.FindNode(location.SourceSpan);
+        var attribute = node.FirstAncestorOrSelf<AttributeSyntax>();
+        if (attribute is null)
+        {
+            return document;
+        }
+
+        SyntaxNode newRoot;
+        if (attribute.Parent is AttributeListSyntax { Attributes.Count: 1 } list)
+        {
+            // Whole list (e.g. `[Id("Order")]`) is just this attribute — drop the list so we
+            // don't leave behind empty brackets on the declaration.
+            newRoot = root.RemoveNode(list, SyntaxRemoveOptions.KeepNoTrivia)!;
+        }
+        else
+        {
+            newRoot = root.RemoveNode(attribute, SyntaxRemoveOptions.KeepNoTrivia)!;
+        }
+
+        return document.WithSyntaxRoot(newRoot);
     }
 
     static SyntaxNode? FindAttributeHost(SyntaxNode node)

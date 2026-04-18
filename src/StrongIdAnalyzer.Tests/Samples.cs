@@ -35,8 +35,10 @@ public static class BuggyUsage
 {
     public static decimal Run(OrderService service, Order order) =>
         // BUG: Passing CustomerId where OrderId is expected.
-        // Compiles fine, throws KeyNotFoundException at runtime.
+        // With conventions both sides carry inferred tags, so this is SIA001.
+#pragma warning disable SIA001
         service.GetOrderAmount(order.CustomerId);
+#pragma warning restore SIA001
 }
 
 #endregion
@@ -86,10 +88,9 @@ public class TypedCustomer
 
 public class TypedOrder
 {
-    [Id("Order")]
+    // [Id("Order")] / [Id("Customer")] are inferred by naming convention — no attributes needed.
     public Guid Id { get; set; }
 
-    [Id("Customer")]
     public Guid CustomerId { get; set; }
 
     public decimal Amount { get; set; }
@@ -99,7 +100,7 @@ public class TypedOrderService
 {
     Dictionary<Guid, TypedOrder> orders = [];
 
-    public decimal GetOrderAmount([Id("Order")] Guid orderId) =>
+    public decimal GetOrderAmount(Guid orderId) =>
         orders[orderId].Amount;
 }
 
@@ -118,10 +119,10 @@ public static class FixedUsage
 
 public class SIA001Sample
 {
-    [Id("Customer")]
+    // CustomerId is tagged "Customer" by naming convention.
     public Guid CustomerId { get; set; }
 
-    public static void ProcessOrder([Id("Order")] Guid orderId) { }
+    public static void ProcessOrder(Guid orderId) { }
 
     public void Trigger() =>
         // SIA001: argument tagged [Id("Customer")] passed to parameter tagged [Id("Order")].
@@ -136,15 +137,16 @@ public class SIA001Sample
 
 public class SIA002Sample
 {
-    public Guid RawId { get; set; }
+    // Name doesn't match the `Id`/`XxxId` convention, so no automatic tag.
+    public Guid Raw { get; set; }
 
-    public static void ProcessOrder([Id("Order")] Guid orderId) { }
+    public static void ProcessOrder(Guid orderId) { }
 
     public void Trigger() =>
-        // SIA002: RawId has no [Id] but is passed to an [Id("Order")] parameter.
-        // Code fix: add [Id("Order")] to RawId's declaration.
+        // SIA002: Raw has no [Id] but is passed to an [Id("Order")] parameter.
+        // Code fix: add [Id("Order")] to Raw's declaration.
 #pragma warning disable SIA002
-        ProcessOrder(RawId);
+        ProcessOrder(Raw);
 #pragma warning restore SIA002
 }
 
@@ -154,7 +156,7 @@ public class SIA002Sample
 
 public class SIA003Sample
 {
-    [Id("Order")]
+    // OrderId is tagged "Order" by naming convention.
     public Guid OrderId { get; set; }
 
     public static void Consume(Guid value) { }

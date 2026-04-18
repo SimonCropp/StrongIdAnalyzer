@@ -31,14 +31,13 @@ public class IdMismatchAnalyzerTests
     [Test]
     public void IdMismatch_PropertyToProperty_Assignment()
     {
+        // OrderId / CustomerId are auto-tagged by the naming convention.
         var source =
             """
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
-                [Id("Customer")]
                 public System.Guid CustomerId { get; set; }
 
                 public void Copy() => OrderId = CustomerId;
@@ -58,13 +57,11 @@ public class IdMismatchAnalyzerTests
             """
             public class Target
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
             }
 
             public class Holder
             {
-                [Id("Customer")]
                 public System.Guid CustomerId { get; set; }
 
                 public Target Create() => new Target { OrderId = CustomerId };
@@ -134,7 +131,6 @@ public class IdMismatchAnalyzerTests
 
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(Source src) => OrderId = src.Raw;
@@ -159,7 +155,6 @@ public class IdMismatchAnalyzerTests
 
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(Target target) => target.Value = OrderId;
@@ -185,7 +180,6 @@ public class IdMismatchAnalyzerTests
 
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(Target target) => target.Consume(OrderId);
@@ -209,7 +203,6 @@ public class IdMismatchAnalyzerTests
 
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(Target target) => target.Consume(OrderId);
@@ -321,7 +314,6 @@ public class IdMismatchAnalyzerTests
         var source = """
             public class Holder
             {
-                [Id("Customer")]
                 public int CustomerId { get; set; }
 
                 public void Consume([Id("Order")] int value) { }
@@ -342,10 +334,8 @@ public class IdMismatchAnalyzerTests
         var source = """
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
-                [Id("Customer")]
                 public System.Guid CustomerId { get; set; }
 
                 public bool Check() => OrderId == CustomerId;
@@ -364,10 +354,8 @@ public class IdMismatchAnalyzerTests
         var source = """
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
-                [Id("Customer")]
                 public System.Guid CustomerId { get; set; }
 
                 public bool Check() => OrderId != CustomerId;
@@ -407,7 +395,6 @@ public class IdMismatchAnalyzerTests
         var source = """
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public System.Guid Other { get; set; }
@@ -432,7 +419,6 @@ public class IdMismatchAnalyzerTests
             {
                 public System.Guid Other { get; set; }
 
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public bool Check() => Other == OrderId;
@@ -452,7 +438,6 @@ public class IdMismatchAnalyzerTests
         var source = """
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public bool IsSet() => OrderId != System.Guid.Empty;
@@ -477,7 +462,6 @@ public class IdMismatchAnalyzerTests
             {
                 Dictionary<System.Guid, string> map = new();
 
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public string Lookup() => map[OrderId];
@@ -649,7 +633,9 @@ public class IdMismatchAnalyzerTests
     {
         // `new` hide is an explicit fresh declaration. The derived property has its own
         // (empty) attribute set and SHOULD NOT pick up the base's [Id]. Access via the
-        // derived static type should see no tag — SIA002, not SIA001.
+        // derived static type fires SIA001 — the derived's tag comes from the naming
+        // convention ("Derived") and conflicts with the target's "Customer", not the
+        // base's "Order".
         var source = """
             public class Base
             {
@@ -676,28 +662,31 @@ public class IdMismatchAnalyzerTests
         var diagnostics = GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
-        AreEqual("SIA002", diagnostics[0].Id);
+        AreEqual("SIA001", diagnostics[0].Id);
+        var message = diagnostics[0].GetMessage();
+        IsTrue(message.Contains("Derived"));
+        IsTrue(message.Contains("Customer"));
     }
 
     [Test]
     public void OverriddenMethodParameter_InheritsTagFromBase()
     {
-        // Abstract base has [Id("Order")] on the parameter. Override drops the attribute.
-        // Call through the derived receiver should still see SIA001.
+        // Abstract base has an explicit non-convention tag on the parameter so the rename
+        // can't be satisfied by the naming convention. Override drops the attribute; call
+        // through the derived receiver still sees SIA001 via the inheritance walk.
         var source = """
             public abstract class Base
             {
-                public abstract void Process([Id("Order")] System.Guid orderId);
+                public abstract void Process([Id("Urgent")] System.Guid value);
             }
 
             public class Impl : Base
             {
-                public override void Process(System.Guid orderId) { }
+                public override void Process(System.Guid value) { }
             }
 
             public class Consumer
             {
-                [Id("Customer")]
                 public System.Guid CustomerId { get; set; }
 
                 public void Use(Impl impl) => impl.Process(CustomerId);
@@ -723,7 +712,6 @@ public class IdMismatchAnalyzerTests
 
             public class Consumer
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(Logger logger) => logger.Log("processing {0}", OrderId);
@@ -747,7 +735,6 @@ public class IdMismatchAnalyzerTests
 
             public class Consumer
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public System.Guid Use(Helper h) => h.Identity(OrderId);
@@ -775,7 +762,6 @@ public class IdMismatchAnalyzerTests
 
             public class Consumer
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(System.Fake.Target target) => target.Consume(OrderId);
@@ -801,7 +787,6 @@ public class IdMismatchAnalyzerTests
 
             public class Consumer
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(Microsoft.Fake.Target target) => target.Consume(OrderId);
@@ -827,7 +812,6 @@ public class IdMismatchAnalyzerTests
 
             public class Consumer
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(MyCompany.Logging.Target target) => target.Consume(OrderId);
@@ -864,7 +848,6 @@ public class IdMismatchAnalyzerTests
 
             public class Consumer
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(MyCompany.Logging.Target m, System.Fake.Target2 s)
@@ -902,7 +885,6 @@ public class IdMismatchAnalyzerTests
 
             public class Consumer
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(System.Fake.Target target) => target.Consume(OrderId);
@@ -918,6 +900,378 @@ public class IdMismatchAnalyzerTests
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA003", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void Convention_IdOnType_InferredAsTypeName()
+    {
+        // Order.Id has no [Id] but the naming convention tags it "Order"; passing into an
+        // [Id("Customer")] parameter fires SIA001 with "Order" vs "Customer".
+        var source = """
+            public class Order
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class Target
+            {
+                public void Consume([Id("Customer")] System.Guid value) { }
+            }
+
+            public class Consumer
+            {
+                public void Use(Target target, Order order) => target.Consume(order.Id);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+        var message = diagnostics[0].GetMessage();
+        IsTrue(message.Contains("Order"));
+        IsTrue(message.Contains("Customer"));
+    }
+
+    [Test]
+    public void Convention_XxxIdProperty_InferredAsPrefix()
+    {
+        // CustomerId -> convention "Customer"; passing into [Id("Order")] fires SIA001.
+        var source = """
+            public class Holder
+            {
+                public System.Guid CustomerId { get; set; }
+
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use() => Consume(CustomerId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void Convention_CrossTypeMatch_NoDiagnostic()
+    {
+        // Customer.Id (convention "Customer") and Order.CustomerId (convention "Customer")
+        // reference the same conceptual Id — the analyzer must accept matching flow.
+        var source = """
+            public class Customer
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class Order
+            {
+                public System.Guid CustomerId { get; set; }
+            }
+
+            public class Lookup
+            {
+                public Customer? Find([Id("Customer")] System.Guid id) => null;
+
+                public Customer? For(Order order) => Find(order.CustomerId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void Convention_FieldConvention_Applies()
+    {
+        var source = """
+            public class Holder
+            {
+                public System.Guid OrderId;
+
+                public void Consume([Id("Customer")] System.Guid value) { }
+
+                public void Use() => Consume(OrderId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void Convention_NonIdName_NoConvention()
+    {
+        // "Value" isn't an Id-convention name, so no inferred tag — passing to an [Id]
+        // parameter fires SIA002 (not SIA001).
+        var source = """
+            public class Holder
+            {
+                public System.Guid Value { get; set; }
+
+                public void Consume([Id("Order")] System.Guid value) { }
+
+                public void Use() => Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA002", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void Convention_ExplicitAttributeOverridesConvention()
+    {
+        // CustomerId would be "Customer" by convention, but explicit [Id("Special")] wins.
+        var source = """
+            public class Holder
+            {
+                [Id("Special")]
+                public System.Guid CustomerId { get; set; }
+
+                public void Consume([Id("Customer")] System.Guid value) { }
+
+                public void Use() => Consume(CustomerId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+        var message = diagnostics[0].GetMessage();
+        IsTrue(message.Contains("Special"));
+        IsTrue(message.Contains("Customer"));
+    }
+
+    [Test]
+    public void SIA004_TwoTypesSameName_DifferentNamespaces_Fires()
+    {
+        // Two Order classes in separate namespaces both map to conventional name "Order".
+        // SIA004 fires on each declaration.
+        var source = """
+            namespace One
+            {
+                public class Order
+                {
+                    public System.Guid Id { get; set; }
+                }
+            }
+
+            namespace Two
+            {
+                public class Order
+                {
+                    public System.Guid Id { get; set; }
+                }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var sia004 = diagnostics.Where(_ => _.Id == "SIA004").ToArray();
+
+        AreEqual(2, sia004.Length);
+        IsTrue(sia004.All(_ => _.GetMessage().Contains("Order")));
+    }
+
+    [Test]
+    public void SIA004_NestedUnderDifferentParents_Fires()
+    {
+        var source = """
+            public class A
+            {
+                public class Foo
+                {
+                    public System.Guid Id { get; set; }
+                }
+            }
+
+            public class B
+            {
+                public class Foo
+                {
+                    public System.Guid Id { get; set; }
+                }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var sia004 = diagnostics.Where(_ => _.Id == "SIA004").ToArray();
+
+        AreEqual(2, sia004.Length);
+    }
+
+    [Test]
+    public void SIA004_ExplicitAttributeOnOne_Disambiguates()
+    {
+        // Adding an explicit [Id("...")] (with a different value) on one declaration takes
+        // it out of the ambiguity set — SIA004 no longer fires on either side.
+        var source = """
+            namespace One
+            {
+                public class Order
+                {
+                    [Id("OneOrder")]
+                    public System.Guid Id { get; set; }
+                }
+            }
+
+            namespace Two
+            {
+                public class Order
+                {
+                    public System.Guid Id { get; set; }
+                }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Count(_ => _.Id == "SIA004"));
+    }
+
+    [Test]
+    public void SIA004_SameXxxIdOnDifferentTypes_NoDiagnostic()
+    {
+        // `XxxId` convention does not feed the ambiguity map: two types each having a
+        // `CustomerId` property are expected and desirable.
+        var source = """
+            public class Order
+            {
+                public System.Guid CustomerId { get; set; }
+            }
+
+            public class Invoice
+            {
+                public System.Guid CustomerId { get; set; }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Count(_ => _.Id == "SIA004"));
+    }
+
+    [Test]
+    public void SIA005_RedundantAttributeOnId_Fires()
+    {
+        var source = """
+            public class Order
+            {
+                [Id("Order")]
+                public System.Guid Id { get; set; }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+
+        AreEqual(1, sia005.Length);
+        IsTrue(sia005[0].GetMessage().Contains("Order"));
+    }
+
+    [Test]
+    public void SIA005_RedundantAttributeOnXxxId_Fires()
+    {
+        var source = """
+            public class Holder
+            {
+                [Id("Customer")]
+                public System.Guid CustomerId { get; set; }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+
+        AreEqual(1, sia005.Length);
+        IsTrue(sia005[0].GetMessage().Contains("Customer"));
+    }
+
+    [Test]
+    public void Convention_ParameterCamelCase_InferredAsPascal()
+    {
+        // Parameter `orderId` (camelCase) -> "Order" tag; passing into a "Customer"-tagged
+        // target fires SIA001 with "Order" vs "Customer".
+        var source = """
+            public class Holder
+            {
+                public System.Guid CustomerId { get; set; }
+
+                public static void ProcessOrder(System.Guid orderId) { }
+
+                public void Trigger() => ProcessOrder(CustomerId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+        var message = diagnostics[0].GetMessage();
+        IsTrue(message.Contains("Order"));
+        IsTrue(message.Contains("Customer"));
+    }
+
+    [Test]
+    public void Convention_ParameterBareId_NoConvention()
+    {
+        // A parameter named just `id` has no containing-type equivalent and must NOT
+        // receive an inferred tag — otherwise generic helpers would be over-tagged.
+        var source = """
+            public class Holder
+            {
+                public System.Guid CustomerId { get; set; }
+
+                public static void Lookup(System.Guid id) { }
+
+                public void Trigger() => Lookup(CustomerId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA003", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void SIA005_RedundantAttributeOnParameter_Fires()
+    {
+        var source = """
+            public class Holder
+            {
+                public static void Process([Id("Order")] System.Guid orderId) { }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+
+        AreEqual(1, sia005.Length);
+        IsTrue(sia005[0].GetMessage().Contains("Order"));
+    }
+
+    [Test]
+    public void SIA005_DifferentExplicitValue_NoDiagnostic()
+    {
+        var source = """
+            public class Order
+            {
+                [Id("Special")]
+                public System.Guid Id { get; set; }
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Count(_ => _.Id == "SIA005"));
     }
 
     static ImmutableArray<Diagnostic> GetDiagnostics(string source) =>

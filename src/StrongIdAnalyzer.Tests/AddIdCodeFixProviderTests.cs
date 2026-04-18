@@ -16,10 +16,7 @@ public class AddIdCodeFixProviderTests
             AttributeTargets.ReturnValue,
             AllowMultiple = false,
             Inherited = false)]
-        sealed class IdAttribute(string type) : Attribute
-        {
-            public string Type { get; } = type;
-        }
+        sealed class IdAttribute(string type) : Attribute;
         """;
 
     [Test]
@@ -93,7 +90,6 @@ public class AddIdCodeFixProviderTests
 
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use() => Target.Consume(OrderId);
@@ -116,7 +112,6 @@ public class AddIdCodeFixProviderTests
 
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public void Use(Target target) => target.Value = OrderId;
@@ -135,7 +130,6 @@ public class AddIdCodeFixProviderTests
         var source = """
             public class Holder
             {
-                [Id("Order")]
                 public System.Guid OrderId { get; set; }
 
                 public System.Guid Other { get; set; }
@@ -188,14 +182,57 @@ public class AddIdCodeFixProviderTests
         AreEqual(0, actions.Length);
     }
 
+    [Test]
+    public async Task SIA005_RemovesRedundantAttribute_WhenOnlyAttribute()
+    {
+        var source = """
+            public class Order
+            {
+                [Id("Order")]
+                public System.Guid Id { get; set; }
+            }
+            """;
+
+        var fixedSource = await ApplyFix(source, "SIA005");
+
+        IsTrue(!fixedSource.Contains("[Id("),
+            $"Expected attribute to be removed but got:\n{fixedSource}");
+        Contains(fixedSource, "public System.Guid Id { get; set; }");
+    }
+
+    [Test]
+    public async Task SIA005_RemovesRedundantAttribute_LeavingSiblings()
+    {
+        // When the redundant [Id] sits beside another attribute in the same list, only it
+        // is removed.
+        var source = """
+            using System;
+
+            public class Order
+            {
+                [Obsolete, Id("Order")]
+                public System.Guid Id { get; set; }
+            }
+            """;
+
+        var fixedSource = await ApplyFix(source, "SIA005");
+
+        IsTrue(!fixedSource.Contains("Id(\"Order\")"),
+            $"Expected [Id(\"Order\")] to be removed but got:\n{fixedSource}");
+        Contains(fixedSource, "Obsolete");
+    }
+
     static void Contains(string actual, string expected) =>
         IsTrue(
             actual.Contains(expected),
             $"Expected fixed source to contain:\n{expected}\n\nActual:\n{actual}");
 
-    static async Task<string> ApplyFix(string source)
+    static Task<string> ApplyFix(string source) =>
+        ApplyFix(source, id: null);
+
+    static async Task<string> ApplyFix(string source, string? id)
     {
-        var (document, diagnostic) = await PrepareFixAsync(source);
+        var (document, diagnostic) = await PrepareFixAsync(source, id);
 
         var actions = ImmutableArray.CreateBuilder<CodeAction>();
         var context = new CodeFixContext(
@@ -230,7 +267,12 @@ public class AddIdCodeFixProviderTests
         return actions.ToImmutable();
     }
 
-    static async Task<(Document Document, Diagnostic Diagnostic)> PrepareFixAsync(string source)
+    static Task<(Document Document, Diagnostic Diagnostic)> PrepareFixAsync(string source) =>
+        PrepareFixAsync(source, id: null);
+
+    static async Task<(Document Document, Diagnostic Diagnostic)> PrepareFixAsync(
+        string source,
+        string? id)
     {
         var workspace = new AdhocWorkspace();
         var projectInfo = ProjectInfo.Create(
@@ -255,7 +297,11 @@ public class AddIdCodeFixProviderTests
             .WithAnalyzers([new IdMismatchAnalyzer()])
             .GetAnalyzerDiagnosticsAsync();
 
-        return (document, diagnostics.Single());
+        var diagnostic = id is null
+            ? diagnostics.Single()
+            : diagnostics.Single(_ => _.Id == id);
+
+        return (document, diagnostic);
     }
 
     static IEnumerable<MetadataReference> TrustedReferences() =>

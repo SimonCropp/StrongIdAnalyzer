@@ -16,21 +16,17 @@ public class ConsumeTests
     }
 
     [Test]
-    public void GeneratedIdAttribute_IsAvailable()
-    {
+    public void GeneratedIdAttribute_IsAvailable() =>
         // Compile-time: this line fails to build if the source generator did not emit
         // IdAttribute into the consumer compilation.
-        var attr = new IdAttribute("Order");
-        AreEqual("Order", attr.Type);
-    }
+        _ = new IdAttribute("Order");
 }
 
 public class IdSample
 {
-    [Id("Order")]
+    // OrderId / CustomerId are tagged "Order" / "Customer" by the naming convention.
     public System.Guid OrderId { get; set; }
 
-    [Id("Customer")]
     public System.Guid CustomerId { get; set; }
 
     public static void ConsumeOrderId([Id("Order")] System.Guid value)

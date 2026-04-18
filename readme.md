@@ -44,11 +44,13 @@ public static class BuggyUsage
 {
     public static decimal Run(OrderService service, Order order) =>
         // BUG: Passing CustomerId where OrderId is expected.
-        // Compiles fine, throws KeyNotFoundException at runtime.
+        // With conventions both sides carry inferred tags, so this is SIA001.
+#pragma warning disable SIA001
         service.GetOrderAmount(order.CustomerId);
+#pragma warning restore SIA001
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L9-L42' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L9-L44' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The bug is the call to `service.GetOrderAmount(order.CustomerId)` — a customer's `Guid` is passed into a method expecting an order's `Guid`. Both are `Guid`, so the compiler is happy; at runtime you get a `KeyNotFoundException`, or worse, if the `Guid` coincidentally hits a populated dictionary, silently wrong data.
@@ -88,7 +90,7 @@ public class EntityLookup
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L44-L75' title='Snippet source file'>snippet source</a> | <a href='#snippet-SilentMismatch' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L46-L77' title='Snippet source file'>snippet source</a> | <a href='#snippet-SilentMismatch' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -109,10 +111,9 @@ public class TypedCustomer
 
 public class TypedOrder
 {
-    [Id("Order")]
+    // [Id("Order")] / [Id("Customer")] are inferred by naming convention — no attributes needed.
     public Guid Id { get; set; }
 
-    [Id("Customer")]
     public Guid CustomerId { get; set; }
 
     public decimal Amount { get; set; }
@@ -122,7 +123,7 @@ public class TypedOrderService
 {
     Dictionary<Guid, TypedOrder> orders = [];
 
-    public decimal GetOrderAmount([Id("Order")] Guid orderId) =>
+    public decimal GetOrderAmount(Guid orderId) =>
         orders[orderId].Amount;
 }
 
@@ -135,7 +136,7 @@ public static class FixedUsage
 #pragma warning restore SIA001
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L77-L115' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L79-L116' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The `IdAttribute` is source-generated into your compilation — you don't take a runtime dependency on any attributes assembly. Just install the analyzer package and start tagging.
@@ -159,10 +160,10 @@ Fires when both operands carry `[Id]` and the tag values differ. The analyzer se
 ```cs
 public class SIA001Sample
 {
-    [Id("Customer")]
+    // CustomerId is tagged "Customer" by naming convention.
     public Guid CustomerId { get; set; }
 
-    public static void ProcessOrder([Id("Order")] Guid orderId) { }
+    public static void ProcessOrder(Guid orderId) { }
 
     public void Trigger() =>
         // SIA001: argument tagged [Id("Customer")] passed to parameter tagged [Id("Order")].
@@ -171,7 +172,7 @@ public class SIA001Sample
 #pragma warning restore SIA001
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L117-L133' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA001Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L118-L134' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA001Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -196,19 +197,20 @@ Fires when the source (argument, right-hand side of an assignment, initializer, 
 ```cs
 public class SIA002Sample
 {
-    public Guid RawId { get; set; }
+    // Name doesn't match the `Id`/`XxxId` convention, so no automatic tag.
+    public Guid Raw { get; set; }
 
-    public static void ProcessOrder([Id("Order")] Guid orderId) { }
+    public static void ProcessOrder(Guid orderId) { }
 
     public void Trigger() =>
-        // SIA002: RawId has no [Id] but is passed to an [Id("Order")] parameter.
-        // Code fix: add [Id("Order")] to RawId's declaration.
+        // SIA002: Raw has no [Id] but is passed to an [Id("Order")] parameter.
+        // Code fix: add [Id("Order")] to Raw's declaration.
 #pragma warning disable SIA002
-        ProcessOrder(RawId);
+        ProcessOrder(Raw);
 #pragma warning restore SIA002
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L135-L151' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA002Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L136-L153' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA002Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Suppressed when the untagged source lives in referenced metadata (e.g. `Guid.Empty`, a third-party property) — library authors can't apply `[Id]`, so the warning would offer no actionable fix.
@@ -223,7 +225,7 @@ Fires when the source carries `[Id]` but the target (parameter, assignment left-
 ```cs
 public class SIA003Sample
 {
-    [Id("Order")]
+    // OrderId is tagged "Order" by naming convention.
     public Guid OrderId { get; set; }
 
     public static void Consume(Guid value) { }
@@ -236,7 +238,7 @@ public class SIA003Sample
 #pragma warning restore SIA003
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L153-L170' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L155-L172' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 SIA003 is suppressed when the tag can't meaningfully survive:
