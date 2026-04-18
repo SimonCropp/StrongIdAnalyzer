@@ -1,4 +1,4 @@
-# StrongIdAnalyzer
+# <img src="/src/icon.png" height="30px"> StrongIdAnalyzer
 
 [![Build status](https://img.shields.io/appveyor/build/SimonCropp/StrongIdAnalyzer)](https://ci.appveyor.com/project/SimonCropp/StrongIdAnalyzer)
 [![NuGet Status](https://img.shields.io/nuget/v/StrongIdAnalyzer.svg?label=StrongIdAnalyzer)](https://www.nuget.org/packages/StrongIdAnalyzer/)
