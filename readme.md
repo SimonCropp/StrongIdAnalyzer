@@ -142,6 +142,69 @@ public static class FixedUsage
 The `IdAttribute` is source-generated into your compilation — you don't take a runtime dependency on any attributes assembly. Just install the analyzer package and start tagging.
 
 
+## Naming conventions
+
+Most declarations don't need an explicit `[Id("...")]` — the analyzer infers a tag from two naming rules. Whatever falls through the rules stays untagged (no tag, no diagnostic) until you add an explicit attribute.
+
+### The two rules
+
+1. **`Id` on a type** — a property or field named exactly `Id` gets the **containing type's name** as its tag.
+
+    ```cs
+    public class Customer
+    {
+        public Guid Id { get; set; } // tag: "Customer"
+    }
+    ```
+
+2. **`<Xxx>Id`** — a property, field, **or** parameter whose name ends in `Id` gets the prefix as its tag. The first character is upper-cased so camelCase parameters line up with PascalCase members.
+
+    ```cs
+    public Guid CustomerId { get; set; } // tag: "Customer"
+    public void Handle(Guid orderId) { } // tag: "Order" (first char upper-cased)
+    public Guid ShipmentId;              // tag: "Shipment"
+    ```
+
+    The prefix is the whole identifier minus the trailing `Id` — `OldCustomerId` tags as `"OldCustomer"`, not `"Customer"`.
+
+### What does *not* get a convention tag
+
+- **Parameters named just `id`** — rule 1 doesn't apply to parameters (a bare `id` has no containing-type equivalent, and parameters should be name-driven so method signatures read cleanly). Write `orderId`, or add `[Id("Order")]` explicitly.
+- **Names that are just `Id`** (on parameters) or shorter than 3 characters under rule 2 — so a property literally named `Id` only matches rule 1, never rule 2.
+- **Anonymous-type properties** — `new { CustomerId = x }`. They can't carry `[Id]`, so tagging them would produce diagnostics the user has no way to silence (matters for EF `HasIndex`, LINQ projections, etc.).
+- **Indexers** — `this[Guid id]` never participates.
+- **Implicitly-declared fields** — backing fields, primary-constructor capture fields, and similar compiler-synthesized members.
+- **Members declared in referenced metadata** — BCL and third-party members (`Diagnostic.Id`, `EventArgs`, …) never receive convention tags. If it were otherwise, any library property named `Id` would suddenly carry a tag the user can't change.
+
+### Precedence
+
+When resolving a symbol's tag set, the analyzer consults these sources in order and stops at the first that produces a tag:
+
+1. **Explicit `[Id]` / `[UnionId]`** directly on the symbol.
+2. **Inherited explicit attribute** via the property's override / interface-implementation chain, or the parameter's matching slot on overridden / implemented methods.
+3. **Record primary-constructor parameter attribute** bridged onto the synthesized property (see "Record primary-constructor parameters" below).
+4. **Naming convention** (rules 1 and 2 above).
+
+At access sites (`child.Id`), covariant receiver-type walking unions the current level's tags with every parent-type tag between the receiver type and the declaring type — see "Inheritance and covariant Id tagging".
+
+### Interaction with diagnostics
+
+- **SIA004** only fires for rule 1 collisions — two `public Guid Id` declarations on different types both claiming the same type name. Rule 2 collisions across types are the *intended* matching behavior (`Order.CustomerId` and `Invoice.CustomerId` both referring to "Customer").
+- **SIA005** (redundant `[Id]`) fires only when an explicit `[Id("X")]` exactly equals what the convention would infer. It ships a fixer that removes the attribute.
+
+### Overriding the convention
+
+Any `[Id("...")]` / `[UnionId("...")]` on the symbol wins over the convention, so you can broaden, narrow, or rename at will:
+
+```cs
+public class Customer
+{
+    [Id("Person")] // overrides the "Customer" convention tag
+    public Guid Id { get; set; }
+}
+```
+
+
 ## Diagnostics
 
 | ID     | Severity | Code fix | Summary                                                                 |
