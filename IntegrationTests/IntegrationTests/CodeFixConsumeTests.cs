@@ -21,10 +21,9 @@ public class CodeFixConsumeTests
             AttributeTargets.ReturnValue,
             AllowMultiple = false,
             Inherited = false)]
-        internal sealed class IdAttribute : Attribute
+        internal sealed class IdAttribute(string type) : Attribute
         {
-            public IdAttribute(string type) => Type = type;
-            public string Type { get; }
+            public string Type { get; } = type;
         }
         """;
 
