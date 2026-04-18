@@ -512,6 +512,204 @@ public class IdMismatchAnalyzerTests
         AreEqual(0, diagnostics.Length);
     }
 
+    [Test]
+    public void InheritedProperty_InheritsTagFromBase()
+    {
+        // Base has [Id("Order")]; derived inherits without redeclaring. Accessing
+        // derived.Id resolves to the base property symbol, so this works naturally
+        // (no hierarchy walk required). Pinned to guard against regressions.
+        var source = """
+            public class Base
+            {
+                [Id("Order")]
+                public System.Guid Id { get; set; }
+            }
+
+            public class Derived : Base { }
+
+            public class Target
+            {
+                public void Consume([Id("Customer")] System.Guid value) { }
+            }
+
+            public class Consumer
+            {
+                public void Use(Target target, Derived derived) => target.Consume(derived.Id);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void OverriddenProperty_InheritsTagFromBase()
+    {
+        // Derived overrides without repeating [Id]. The analyzer walks OverriddenProperty
+        // so passing derived.Id where [Id("Customer")] is expected still fires SIA001.
+        var source = """
+            public class Base
+            {
+                [Id("Order")]
+                public virtual System.Guid Id { get; set; }
+            }
+
+            public class Derived : Base
+            {
+                public override System.Guid Id { get; set; }
+            }
+
+            public class Target
+            {
+                public void Consume([Id("Customer")] System.Guid value) { }
+            }
+
+            public class Consumer
+            {
+                public void Use(Target target, Derived derived) => target.Consume(derived.Id);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void ImplicitInterfaceProperty_InheritsTagFromInterface()
+    {
+        var source = """
+            public interface IEntity
+            {
+                [Id("Order")]
+                System.Guid Id { get; }
+            }
+
+            public class Order : IEntity
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class Target
+            {
+                public void Consume([Id("Customer")] System.Guid value) { }
+            }
+
+            public class Consumer
+            {
+                public void Use(Target target, Order order) => target.Consume(order.Id);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void ExplicitInterfaceProperty_InheritsTagFromInterface()
+    {
+        // Access via the interface type since explicit impls are not accessible on the
+        // concrete type. The explicit-impl path of the hierarchy walk is exercised.
+        var source = """
+            public interface IEntity
+            {
+                [Id("Order")]
+                System.Guid Id { get; }
+            }
+
+            public class Order : IEntity
+            {
+                System.Guid IEntity.Id => System.Guid.Empty;
+            }
+
+            public class Target
+            {
+                public void Consume([Id("Customer")] System.Guid value) { }
+            }
+
+            public class Consumer
+            {
+                public void Use(Target target, IEntity entity) => target.Consume(entity.Id);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void NewHideProperty_DoesNotInheritTag()
+    {
+        // `new` hide is an explicit fresh declaration. The derived property has its own
+        // (empty) attribute set and SHOULD NOT pick up the base's [Id]. Access via the
+        // derived static type should see no tag — SIA002, not SIA001.
+        var source = """
+            public class Base
+            {
+                [Id("Order")]
+                public System.Guid Id { get; set; }
+            }
+
+            public class Derived : Base
+            {
+                public new System.Guid Id { get; set; }
+            }
+
+            public class Target
+            {
+                public void Consume([Id("Customer")] System.Guid value) { }
+            }
+
+            public class Consumer
+            {
+                public void Use(Target target, Derived derived) => target.Consume(derived.Id);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA002", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void OverriddenMethodParameter_InheritsTagFromBase()
+    {
+        // Abstract base has [Id("Order")] on the parameter. Override drops the attribute.
+        // Call through the derived receiver should still see SIA001.
+        var source = """
+            public abstract class Base
+            {
+                public abstract void Process([Id("Order")] System.Guid orderId);
+            }
+
+            public class Impl : Base
+            {
+                public override void Process(System.Guid orderId) { }
+            }
+
+            public class Consumer
+            {
+                [Id("Customer")]
+                public System.Guid CustomerId { get; set; }
+
+                public void Use(Impl impl) => impl.Process(CustomerId);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
     static ImmutableArray<Diagnostic> GetDiagnostics(string source)
     {
         var compilation = BuildCompilation(source);

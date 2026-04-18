@@ -69,15 +69,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static void AnalyzeBinaryOperator(OperationAnalysisContext context, INamedTypeSymbol idType)
     {
-        var op = (IBinaryOperation)context.Operation;
-        if (op.OperatorKind != BinaryOperatorKind.Equals &&
-            op.OperatorKind != BinaryOperatorKind.NotEquals)
+        var operation = (IBinaryOperation)context.Operation;
+        if (operation.OperatorKind != BinaryOperatorKind.Equals &&
+            operation.OperatorKind != BinaryOperatorKind.NotEquals)
         {
             return;
         }
 
-        var leftSymbol = GetSymbol(op.LeftOperand);
-        var rightSymbol = GetSymbol(op.RightOperand);
+        var leftSymbol = GetSymbol(operation.LeftOperand);
+        var rightSymbol = GetSymbol(operation.RightOperand);
         var leftInfo = GetId(leftSymbol, idType);
         var rightInfo = GetId(rightSymbol, idType);
 
@@ -92,7 +92,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
             context.ReportDiagnostic(Diagnostic.Create(
                 IdMismatchRule,
-                op.Syntax.GetLocation(),
+                operation.Syntax.GetLocation(),
                 leftInfo.Value ?? "",
                 rightInfo.Value ?? ""));
             return;
@@ -105,14 +105,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (leftInfo.State == IdState.Present &&
             rightInfo.State == IdState.NotPresent)
         {
-            ReportMissingOnBinarySide(context, op.RightOperand, rightSymbol, leftInfo.Value);
+            ReportMissingOnBinarySide(context, operation.RightOperand, rightSymbol, leftInfo.Value);
             return;
         }
 
         if (leftInfo.State == IdState.NotPresent &&
             rightInfo.State == IdState.Present)
         {
-            ReportMissingOnBinarySide(context, op.LeftOperand, leftSymbol, rightInfo.Value);
+            ReportMissingOnBinarySide(context, operation.LeftOperand, leftSymbol, rightInfo.Value);
         }
     }
 
@@ -146,7 +146,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var targetInfo = GetIdFromAttributes(parameter.GetAttributes(), idType);
+        var targetInfo = GetIdWithInheritance(parameter, idType);
         var sourceSymbol = GetSymbol(argument.Value);
         var sourceInfo = GetId(sourceSymbol, idType);
         Report(
@@ -186,7 +186,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var sourceInfo = GetId(sourceSymbol, idType);
         foreach (var property in init.InitializedProperties)
         {
-            var targetInfo = GetIdFromAttributes(property.GetAttributes(), idType);
+            var targetInfo = GetIdWithInheritance(property, idType);
             Report(
                 context,
                 init.Value.Syntax.GetLocation(),
@@ -227,10 +227,170 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         };
     }
 
-    static IdInfo GetId(ISymbol? symbol, INamedTypeSymbol idType) =>
-        symbol is null
-            ? IdInfo.Unknown
-            : GetIdFromAttributes(symbol.GetAttributes(), idType);
+    static IdInfo GetId(ISymbol? symbol, INamedTypeSymbol idType)
+    {
+        if (symbol is null)
+        {
+            return IdInfo.Unknown;
+        }
+
+        return GetIdWithInheritance(symbol, idType);
+    }
+
+    // Reads the [Id] attribute off a symbol, walking override / interface-impl chains
+    // for properties so a derived class inherits the base's tag without having to
+    // repeat the attribute. `new`-hide is NOT walked — `new` declares a fresh property
+    // and the user is explicitly saying "this is not the base's property".
+    static IdInfo GetIdWithInheritance(ISymbol symbol, INamedTypeSymbol idType)
+    {
+        var direct = GetIdFromAttributes(symbol.GetAttributes(), idType);
+        if (direct.State == IdState.Present)
+        {
+            return direct;
+        }
+
+        if (symbol is IPropertySymbol property)
+        {
+            return GetPropertyIdFromHierarchy(property, idType);
+        }
+
+        if (symbol is IParameterSymbol parameter)
+        {
+            return GetParameterIdFromHierarchy(parameter, idType);
+        }
+
+        return direct;
+    }
+
+    static IdInfo GetParameterIdFromHierarchy(IParameterSymbol parameter, INamedTypeSymbol idType)
+    {
+        if (parameter.ContainingSymbol is not IMethodSymbol method)
+        {
+            return new(IdState.NotPresent, null);
+        }
+
+        var ordinal = parameter.Ordinal;
+
+        var overridden = method.OverriddenMethod;
+        while (overridden is not null)
+        {
+            if (ordinal < overridden.Parameters.Length)
+            {
+                var info = GetIdFromAttributes(
+                    overridden.Parameters[ordinal].GetAttributes(),
+                    idType);
+                if (info.State == IdState.Present)
+                {
+                    return info;
+                }
+            }
+
+            overridden = overridden.OverriddenMethod;
+        }
+
+        foreach (var ifaceMember in method.ExplicitInterfaceImplementations)
+        {
+            if (ordinal >= ifaceMember.Parameters.Length)
+            {
+                continue;
+            }
+
+            var info = GetIdFromAttributes(
+                ifaceMember.Parameters[ordinal].GetAttributes(),
+                idType);
+            if (info.State == IdState.Present)
+            {
+                return info;
+            }
+        }
+
+        var containingType = method.ContainingType;
+        if (containingType is null)
+        {
+            return new(IdState.NotPresent, null);
+        }
+
+        foreach (var iface in containingType.AllInterfaces)
+        {
+            foreach (var ifaceMember in iface.GetMembers(method.Name).OfType<IMethodSymbol>())
+            {
+                var impl = containingType.FindImplementationForInterfaceMember(ifaceMember);
+                if (!SymbolEqualityComparer.Default.Equals(impl, method))
+                {
+                    continue;
+                }
+
+                if (ordinal >= ifaceMember.Parameters.Length)
+                {
+                    continue;
+                }
+
+                var info = GetIdFromAttributes(
+                    ifaceMember.Parameters[ordinal].GetAttributes(),
+                    idType);
+                if (info.State == IdState.Present)
+                {
+                    return info;
+                }
+            }
+        }
+
+        return new(IdState.NotPresent, null);
+    }
+
+    static IdInfo GetPropertyIdFromHierarchy(IPropertySymbol property, INamedTypeSymbol idType)
+    {
+        // Walk the `override` chain bottom-up. First [Id] found wins.
+        var overridden = property.OverriddenProperty;
+        while (overridden is not null)
+        {
+            var info = GetIdFromAttributes(overridden.GetAttributes(), idType);
+            if (info.State == IdState.Present)
+            {
+                return info;
+            }
+
+            overridden = overridden.OverriddenProperty;
+        }
+
+        // Explicit interface implementations carry their target interface member directly.
+        foreach (var ifaceMember in property.ExplicitInterfaceImplementations)
+        {
+            var info = GetIdFromAttributes(ifaceMember.GetAttributes(), idType);
+            if (info.State == IdState.Present)
+            {
+                return info;
+            }
+        }
+
+        // Implicit interface impls: walk the containing type's interfaces and ask each
+        // whether this property satisfies one of its members.
+        var containingType = property.ContainingType;
+        if (containingType is null)
+        {
+            return new(IdState.NotPresent, null);
+        }
+
+        foreach (var iface in containingType.AllInterfaces)
+        {
+            foreach (var ifaceMember in iface.GetMembers(property.Name).OfType<IPropertySymbol>())
+            {
+                var impl = containingType.FindImplementationForInterfaceMember(ifaceMember);
+                if (!SymbolEqualityComparer.Default.Equals(impl, property))
+                {
+                    continue;
+                }
+
+                var info = GetIdFromAttributes(ifaceMember.GetAttributes(), idType);
+                if (info.State == IdState.Present)
+                {
+                    return info;
+                }
+            }
+        }
+
+        return new(IdState.NotPresent, null);
+    }
 
     static IOperation UnwrapConversions(IOperation operation)
     {
