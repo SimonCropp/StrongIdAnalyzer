@@ -417,16 +417,39 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return;
         }
 
-        context.RegisterCodeFix(
-            CodeAction.Create(
-                $"Add [Id(\"{value}\")] to {DescribeHost(host)}",
-                cancel => AddAttributeAsync(
-                    context.Document.Project.Solution,
-                    declarationLocation,
-                    value,
-                    cancel),
-                equivalenceKey: $"AddId:{value}"),
-            diagnostic);
+        var values = value.Split('|');
+
+        // When the source has [UnionId(a, b, ...)], offer a matching [UnionId] fix first
+        // plus one [Id(x)] fix per tag — picking which option to accept is a human
+        // judgement call (same reasoning as the StringSyntax pipe split).
+        if (values.Length > 1)
+        {
+            var unionArgs = string.Join(", ", values.Select(_ => $"\"{_}\""));
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    $"Add [UnionId({unionArgs})] to {DescribeHost(host)}",
+                    cancel => AddUnionAttributeAsync(
+                        context.Document.Project.Solution,
+                        declarationLocation,
+                        values,
+                        cancel),
+                    equivalenceKey: $"AddUnionId:{value}"),
+                diagnostic);
+        }
+
+        foreach (var singleValue in values)
+        {
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    $"Add [Id(\"{singleValue}\")] to {DescribeHost(host)}",
+                    cancel => AddAttributeAsync(
+                        context.Document.Project.Solution,
+                        declarationLocation,
+                        singleValue,
+                        cancel),
+                    equivalenceKey: $"AddId:{singleValue}"),
+                diagnostic);
+        }
     }
 
     static async Task RegisterReplaceUnionWithIdFix(CodeFixContext context, Diagnostic diagnostic)
@@ -642,6 +665,69 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
         return node.FirstAncestorOrSelf<SyntaxNode>(ancestor =>
             ancestor is PropertyDeclarationSyntax or ParameterSyntax);
+    }
+
+    static async Task<Solution> AddUnionAttributeAsync(
+        Solution solution,
+        Location declarationLocation,
+        string[] values,
+        Cancel cancel)
+    {
+        var document = solution.GetDocument(declarationLocation.SourceTree);
+        if (document is null)
+        {
+            return solution;
+        }
+
+        var root = await document
+            .GetSyntaxRootAsync(cancel)
+            .ConfigureAwait(false);
+        if (root is null)
+        {
+            return solution;
+        }
+
+        var declarationNode = root.FindNode(declarationLocation.SourceSpan);
+        var targetNode = FindAttributeHost(declarationNode);
+        if (targetNode is null)
+        {
+            return solution;
+        }
+
+        var newTargetNode = AddUnionIdAttribute(targetNode, values);
+        if (newTargetNode is null)
+        {
+            return solution;
+        }
+
+        var newRoot = root.ReplaceNode(targetNode, newTargetNode);
+        var newDocument = document.WithSyntaxRoot(newRoot);
+
+        newDocument = await Formatter
+            .FormatAsync(newDocument, Formatter.Annotation, cancellationToken: cancel)
+            .ConfigureAwait(false);
+
+        return newDocument.Project.Solution;
+    }
+
+    static SyntaxNode? AddUnionIdAttribute(SyntaxNode host, string[] values)
+    {
+        var arguments = values.Select(value =>
+            AttributeArgument(LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(value))));
+
+        var attribute = Attribute(IdentifierName("UnionId"))
+            .WithArgumentList(AttributeArgumentList(SeparatedList(arguments)));
+
+        var attributeList = AttributeList(SingletonSeparatedList(attribute))
+            .WithAdditionalAnnotations(Formatter.Annotation);
+
+        return host switch
+        {
+            PropertyDeclarationSyntax property => property.AddAttributeLists(attributeList),
+            FieldDeclarationSyntax field => field.AddAttributeLists(attributeList),
+            ParameterSyntax parameter => parameter.AddAttributeLists(attributeList),
+            _ => null
+        };
     }
 
     static SyntaxNode? AddIdAttribute(SyntaxNode host, string value)

@@ -383,7 +383,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         foreach (var attribute in symbol.GetAttributes())
         {
-            if (IsAttributeNamed(attribute, idMetadataName))
+            if (IsAnyIdAttribute(attribute))
             {
                 return attribute;
             }
@@ -418,7 +418,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         foreach (var attribute in attributes)
         {
-            if (IsAttributeNamed(attribute, idMetadataName) ||
+            if (IsAnyIdAttribute(attribute) ||
                 IsAttributeNamed(attribute, unionIdMetadataName))
             {
                 return true;
@@ -461,6 +461,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             attribute.ConstructorArguments[0].Value is string value)
         {
             return value;
+        }
+
+        if (TryGetGenericIdTag(attribute, out var genericTag))
+        {
+            return genericTag;
         }
 
         return null;
@@ -533,6 +538,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     const string idMetadataName = "StrongIdAnalyzer.IdAttribute";
     const string unionIdMetadataName = "StrongIdAnalyzer.UnionIdAttribute";
+    const string idNamespace = "StrongIdAnalyzer";
+    const string idGenericMetadataName = "IdAttribute`1";
 
     readonly struct Config(ImmutableArray<string> suppressedNamespaces)
     {
@@ -545,6 +552,45 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static bool IsAttributeNamed(AttributeData attribute, string metadataName) =>
         attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
             .Equals("global::" + metadataName, StringComparison.Ordinal) == true;
+
+    // Matches `[Id<T>]` — the generic counterpart of `[Id("T")]`. Reads the tag from the
+    // type argument's short name, mirroring `nameof(T)`. Open/error type arguments and
+    // unresolved type parameters are rejected so malformed usages don't leak a tag.
+    static bool TryGetGenericIdTag(AttributeData attribute, out string tag)
+    {
+        tag = "";
+        var attributeClass = attribute.AttributeClass;
+        if (attributeClass is null || attributeClass.Arity != 1)
+        {
+            return false;
+        }
+
+        var original = attributeClass.OriginalDefinition;
+        if (original.MetadataName != idGenericMetadataName ||
+            original.ContainingNamespace?.ToDisplayString() != idNamespace)
+        {
+            return false;
+        }
+
+        var typeArgument = attributeClass.TypeArguments[0];
+        if (typeArgument.TypeKind is TypeKind.Error or TypeKind.TypeParameter)
+        {
+            return false;
+        }
+
+        var name = typeArgument.Name;
+        if (string.IsNullOrEmpty(name))
+        {
+            return false;
+        }
+
+        tag = name;
+        return true;
+    }
+
+    static bool IsAnyIdAttribute(AttributeData attribute) =>
+        IsAttributeNamed(attribute, idMetadataName) ||
+        TryGetGenericIdTag(attribute, out _);
 
     static void AnalyzeBinaryOperator(OperationAnalysisContext context, Config config)
     {
@@ -589,14 +635,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (leftInfo.State == IdState.Present &&
             rightInfo.State == IdState.NotPresent)
         {
-            ReportMissingOnBinarySide(context, operation.RightOperand, rightSymbol, leftInfo.FirstValue, config);
+            ReportMissingOnBinarySide(context, operation.RightOperand, rightSymbol, leftInfo, config);
             return;
         }
 
         if (leftInfo.State == IdState.NotPresent &&
             rightInfo.State == IdState.Present)
         {
-            ReportMissingOnBinarySide(context, operation.LeftOperand, leftSymbol, rightInfo.FirstValue, config);
+            ReportMissingOnBinarySide(context, operation.LeftOperand, leftSymbol, rightInfo, config);
         }
     }
 
@@ -604,7 +650,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         OperationAnalysisContext context,
         IOperation untaggedOperand,
         ISymbol? untaggedSymbol,
-        string? tag,
+        IdInfo taggedInfo,
         Config config)
     {
         // Only fix user-owned declarations. Library members (Guid.Empty etc.) can't carry
@@ -624,7 +670,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             missingSourceIdRule,
             untaggedOperand.Syntax.GetLocation(),
             untaggedSymbol,
-            tag));
+            taggedInfo));
     }
 
     static void AnalyzeArgument(OperationAnalysisContext context, Config config)
@@ -1215,6 +1261,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
+            if (TryGetGenericIdTag(attribute, out var genericTag))
+            {
+                if (seen.Add(genericTag))
+                {
+                    tags.Add(genericTag);
+                }
+
+                continue;
+            }
+
             if (IsAttributeNamed(attribute, unionIdMetadataName))
             {
                 foreach (var option in ExtractUnionOptions(attribute))
@@ -1314,13 +1370,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            // Fix site is the source symbol's declaration (add Id matching target).
-            // For multi-tag targets the fixer writes the first tag; the user can adjust.
+            // Fix site is the source symbol's declaration (add Id matching target). The
+            // codefix splits the pipe-delimited tags and offers one fix per option plus a
+            // combined [UnionId(...)] when the target is multi-tag.
             context.ReportDiagnostic(CreateFixableDiagnostic(
                 missingSourceIdRule,
                 location,
                 sourceSymbol,
-                target.FirstValue));
+                target));
             return;
         }
 
@@ -1356,7 +1413,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 droppedIdRule,
                 location,
                 targetSymbol,
-                source.FirstValue));
+                source));
         }
     }
 
@@ -1395,13 +1452,19 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         DiagnosticDescriptor rule,
         Location location,
         ISymbol? fixTarget,
-        string? value) =>
-        Diagnostic.Create(
+        IdInfo info)
+    {
+        // Pipe-delimited so a UnionId source can drive multiple codefix options (one
+        // [Id(x)] per tag + one combined [UnionId(...)]). Pipe is the same separator
+        // used in the rendered message — safe because tag values are identifier-like.
+        var joined = info.Tags.IsDefaultOrEmpty ? "" : string.Join("|", info.Tags);
+        return Diagnostic.Create(
             rule,
             location,
             additionalLocations: GetAdditionalLocations(fixTarget),
-            properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, value),
-            messageArgs: value ?? "");
+            properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, joined),
+            messageArgs: joined);
+    }
 
     static Location[]? GetAdditionalLocations(ISymbol? fixTarget)
     {

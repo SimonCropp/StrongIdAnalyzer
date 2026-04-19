@@ -586,6 +586,38 @@ public class AddIdCodeFixProviderTests
         Contains(fixedSource, "Obsolete");
     }
 
+    [Test]
+    public async Task SIA003_UnionSource_OffersUnionAndPerValueFixes()
+    {
+        // Names avoid the Id/XxxId convention so the target genuinely reads as untagged.
+        var source = """
+            public class Target
+            {
+                public System.Guid Subject { get; set; }
+            }
+
+            public class Holder
+            {
+                [UnionId("Customer", "Order")]
+                public System.Guid Subject { get; set; }
+
+                public Target Create() => new Target { Subject = Subject };
+            }
+            """;
+
+        var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
+
+        IsTrue(
+            titles.Any(_ => _ == "Add [UnionId(\"Customer\", \"Order\")] to property 'Subject'"),
+            $"missing union title, got: {string.Join(" | ", titles)}");
+        IsTrue(
+            titles.Any(_ => _ == "Add [Id(\"Customer\")] to property 'Subject'"),
+            $"missing Customer title, got: {string.Join(" | ", titles)}");
+        IsTrue(
+            titles.Any(_ => _ == "Add [Id(\"Order\")] to property 'Subject'"),
+            $"missing Order title, got: {string.Join(" | ", titles)}");
+    }
+
     static void Contains(string actual, string expected) =>
         IsTrue(
             actual.Contains(expected),

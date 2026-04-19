@@ -75,6 +75,82 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public void GenericIdAttribute_Matching_NoDiagnostic()
+    {
+        var source = """
+            public class Customer {}
+            public class Target
+            {
+                public void Consume([Id<Customer>] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id<Customer>]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void GenericIdAttribute_Mismatch_ReportsSIA001()
+    {
+        var source = """
+            public class Customer {}
+            public class Order {}
+            public class Target
+            {
+                public void Consume([Id<Order>] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id<Customer>]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+        var message = diagnostics[0].GetMessage();
+        IsTrue(message.Contains("Customer"));
+        IsTrue(message.Contains("Order"));
+    }
+
+    [Test]
+    public void GenericIdAttribute_EquivalentToStringForm()
+    {
+        // Source uses the generic form, target uses the string form — they must resolve
+        // to the same tag and not produce a mismatch.
+        var source = """
+            public class Customer {}
+            public class Target
+            {
+                public void Consume([Id("Customer")] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id<Customer>]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
     public void MethodReturnSource_Untagged_IsUnknown()
     {
         var source =
