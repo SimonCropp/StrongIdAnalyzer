@@ -246,9 +246,11 @@ public class SIA001Sample
 
 For flow-style mismatches (argument, assignment, property/field initializer) the analyzer attaches the **target** declaration as the fix site and offers:
 
- * **Change to `[Id("<source tag>")]`** — when the target already carries an explicit `[Id]` / `[UnionId]`, replaces it with the source's tag.
- * **Add `[Id("<source tag>")]`** — when the target is untagged (its current tag came from naming convention), adds the attribute.
- * **Rename to `<sourceTag>Id`** — when the target has no explicit attribute and its name matches the `XxxId` convention. First-character case is preserved (`bidId` → `treasuryBidId`, `BidId` → `TreasuryBidId`). Works for parameters, properties, and single-declarator fields.
+ * **Change attribute on `<kind> '<name>'` to `[Id("<source tag>")]`** — when the target already carries an explicit `[Id]` / `[UnionId]`, replaces it with the source's tag.
+ * **Add `[Id("<source tag>")]` to `<kind> '<name>'`** — when the target is untagged (its current tag came from naming convention), adds the attribute.
+ * **Rename `<kind> '<name>'` to `<sourceTag>Id`** — when the target has no explicit attribute and its name matches the `XxxId` convention. First-character case is preserved (`bidId` → `treasuryBidId`, `BidId` → `TreasuryBidId`). Works for parameters, properties, and single-declarator fields.
+
+The `<source tag>` is the receiver's static type, not the declaring type of the `Id` member. For `treasuryBid.Id` where `Id` is inherited from `BaseEntity`, the fix suggests `TreasuryBid` — what you read locally at the call site — rather than `BaseEntity`.
 
 The fixer always changes the *target* side because the analyzer picks a direction by fix site, not by blaming. If the source annotation is the one that's actually wrong, fix it by hand — a silent cross-domain rewrite would be a behavior change dressed as a fix.
 
