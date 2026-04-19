@@ -492,11 +492,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            var isWildcard = trimmed[trimmed.Length - 1] == '*';
-            var prefix = isWildcard ? trimmed.Substring(0, trimmed.Length - 1) : trimmed;
-            var segments = prefix.Length == 0
-                ? ImmutableArray<string>.Empty
-                : prefix.Split('.').ToImmutableArray();
+            var isWildcard = trimmed[^1] == '*';
+            var prefix = isWildcard ? trimmed[..^1] : trimmed;
+            ImmutableArray<string> segments = prefix.Length == 0
+                ? []
+                : [..prefix.Split('.')];
             builder.Add(new(segments, isWildcard));
         }
 
@@ -652,9 +652,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     continue;
                 }
 
-                var tags = rawValue.Length == 0
-                    ? ImmutableArray<string>.Empty
-                    : rawValue.Split(',').ToImmutableArray();
+                ImmutableArray<string> tags = rawValue.Length == 0
+                    ? []
+                    : [..rawValue.Split(',')];
                 dict[symbol] = tags;
             }
             return dict;
@@ -727,8 +727,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     // Returns true when `ns` is the single-segment root namespace `StrongIdAnalyzer`.
     static bool IsInIdNamespace(INamespaceSymbol? ns) =>
-        ns is { Name: idNamespace } &&
-        ns.ContainingNamespace is { IsGlobalNamespace: true };
+        ns is { Name: idNamespace, ContainingNamespace.IsGlobalNamespace: true};
 
     // Matches `[Id<T>]` — the generic counterpart of `[Id("T")]`. Reads the tag from the
     // type argument's short name, mirroring `nameof(T)`. Open/error type arguments and
@@ -773,7 +772,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // short name as a tag, mirroring `[UnionId(nameof(T1), nameof(T2), ...)]`.
     static bool TryGetGenericUnionIdTags(AttributeData attribute, out ImmutableArray<string> tags)
     {
-        tags = ImmutableArray<string>.Empty;
+        tags = [];
         var attributeClass = attribute.AttributeClass;
         if (attributeClass is null)
         {
@@ -822,7 +821,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // single-digit arities we support (2..unionIdMaxGenericArity).
     static bool IsUnionIdGenericMetadataName(string metadataName, int arity) =>
         metadataName.Length == unionIdGenericMetadataPrefix.Length + 1 &&
-        metadataName[metadataName.Length - 1] == (char)('0' + arity) &&
+        metadataName[^1] == (char)('0' + arity) &&
         metadataName.StartsWith(unionIdGenericMetadataPrefix, StringComparison.Ordinal);
 
     // Widens a source tag set to include ancestor type names. For every tag that resolves
@@ -836,7 +835,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // because equality is symmetric.
     static IdInfo Widen(IdInfo info, Config config)
     {
-        if (info.State != IdState.Present || info.Tags.IsDefaultOrEmpty)
+        if (info.State != IdState.Present ||
+            info.Tags.IsDefaultOrEmpty)
         {
             return info;
         }
@@ -855,7 +855,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (additions is null)
             {
                 additions = ImmutableArray.CreateBuilder<string>();
-                seen = new HashSet<string>(info.Tags, StringComparer.Ordinal);
+                seen = new(info.Tags, StringComparer.Ordinal);
             }
 
             foreach (var ancestor in ancestors)
@@ -872,10 +872,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return info;
         }
 
-        var combined = ImmutableArray.CreateBuilder<string>(info.Tags.Length + additions.Count);
-        combined.AddRange(info.Tags);
-        combined.AddRange(additions);
-        return IdInfo.Present(combined.ToImmutable());
+        return IdInfo.Present([.. info.Tags, .. additions]);
     }
 
     static ImmutableArray<string> GetAncestorTags(string tag, Config config)
@@ -924,7 +921,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return ImmutableArray<string>.Empty;
         }
 
-        return result.ToImmutableArray();
+        return [..result];
     }
 
     // Finds every named type whose simple name equals `name` across the source assembly
@@ -1390,10 +1387,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return IdInfo.NotPresent;
         }
 
-        var tags = ImmutableArray.CreateBuilder<string>(receiverTags.Count + memberTags.Count);
-        tags.AddRange(receiverTags);
-        tags.AddRange(memberTags);
-        return IdInfo.Present(tags.ToImmutable());
+        return IdInfo.Present([.. receiverTags, .. memberTags]);
     }
 
     // Yields the member and then every override/interface-impl target reachable from it.
@@ -1718,13 +1712,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         if (attribute.ConstructorArguments.Length == 0)
         {
-            return ImmutableArray<string>.Empty;
+            return [];
         }
 
         var first = attribute.ConstructorArguments[0];
         if (first.Kind != TypedConstantKind.Array)
         {
-            return ImmutableArray<string>.Empty;
+            return [];
         }
 
         var builder = ImmutableArray.CreateBuilder<string>(first.Values.Length);

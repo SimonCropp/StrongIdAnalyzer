@@ -119,14 +119,14 @@ public class AddIdCodeFixProvider : CodeFixProvider
             .GetRootAsync(context.CancellationToken)
             .ConfigureAwait(false);
         var declarationNode = declarationRoot.FindNode(declarationLocation.SourceSpan);
-        var host = FindAttributeHost(declarationNode);
+        var host = AttributeHost.Find(declarationNode);
         if (host is null)
         {
             return;
         }
 
-        var hasExplicit = HasIdFamilyAttribute(host);
-        var hostDescription = DescribeHost(host);
+        var hasExplicit = AttributeHost.HasIdFamilyAttribute(host);
+        var hostDescription = AttributeHost.Describe(host);
         var actionTitle = hasExplicit
             ? $"Change attribute on {hostDescription} to [Id(\"{value}\")]"
             : $"Add [Id(\"{value}\")] to {hostDescription}";
@@ -144,7 +144,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
                 equivalenceKey: $"ChangeId:{slot}:{value}"),
             diagnostic);
 
-        if (!hasExplicit && TryGetRenameTarget(host, value, out var newName))
+        if (!hasExplicit && AttributeHost.TryGetRenameTarget(host, value, out var newName))
         {
             context.RegisterCodeFix(
                 CodeAction.Create(
@@ -157,97 +157,6 @@ public class AddIdCodeFixProvider : CodeFixProvider
                     equivalenceKey: $"RenameId:{slot}:{newName}"),
                 diagnostic);
         }
-    }
-
-    // Human-readable "<kind> '<name>'" label (e.g. "parameter 'bidId'") so fix titles
-    // name both the role and the identifier being acted on — screenshots with just
-    // "Rename to 'treasuryBidId'" leave users guessing which side of the call is
-    // being renamed.
-    static string DescribeHost(SyntaxNode host)
-    {
-        switch (host)
-        {
-            case PropertyDeclarationSyntax property:
-                return $"property '{property.Identifier.Text}'";
-            case FieldDeclarationSyntax { Declaration.Variables.Count: > 0 } field:
-                return $"field '{field.Declaration.Variables[0].Identifier.Text}'";
-            case ParameterSyntax parameter:
-                return $"parameter '{parameter.Identifier.Text}'";
-            default:
-                return "declaration";
-        }
-    }
-
-    static bool HasIdFamilyAttribute(SyntaxNode host)
-    {
-        var lists = host switch
-        {
-            PropertyDeclarationSyntax property => property.AttributeLists,
-            FieldDeclarationSyntax field => field.AttributeLists,
-            ParameterSyntax parameter => parameter.AttributeLists,
-            _ => default
-        };
-
-        foreach (var list in lists)
-        {
-            foreach (var attribute in list.Attributes)
-            {
-                var name = GetAttributeName(attribute.Name);
-                if (name is "Id" or "IdAttribute" or "UnionId" or "UnionIdAttribute")
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    static string GetAttributeName(NameSyntax name) =>
-        name switch
-        {
-            QualifiedNameSyntax qualified => qualified.Right.Identifier.Text,
-            SimpleNameSyntax simple => simple.Identifier.Text,
-            _ => name.ToString()
-        };
-
-    // Rename heuristic: if the host name ends with "Id" (e.g. `bidId`, `BidId`), produce
-    // `<tag>Id` with the first character matching the original's case. Skips when the
-    // host is named just "Id" — fixing that would require renaming the containing type.
-    static bool TryGetRenameTarget(SyntaxNode host, string tag, out string newName)
-    {
-        newName = "";
-        if (tag.Length == 0)
-        {
-            return false;
-        }
-
-        var currentName = host switch
-        {
-            PropertyDeclarationSyntax property => property.Identifier.Text,
-            FieldDeclarationSyntax { Declaration.Variables.Count: 1 } field =>
-                field.Declaration.Variables[0].Identifier.Text,
-            ParameterSyntax parameter => parameter.Identifier.Text,
-            _ => null
-        };
-
-        if (currentName is null)
-        {
-            return false;
-        }
-
-        if (currentName.Length <= 2 ||
-            !currentName.EndsWith("Id", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var firstIsLower = char.IsLower(currentName[0]);
-        var adjusted = firstIsLower
-            ? char.ToLowerInvariant(tag[0]) + tag.Substring(1)
-            : char.ToUpperInvariant(tag[0]) + tag.Substring(1);
-        newName = adjusted + "Id";
-        return newName != currentName;
     }
 
     static async Task<Solution> ChangeOrAddAttributeAsync(
@@ -271,13 +180,13 @@ public class AddIdCodeFixProvider : CodeFixProvider
         }
 
         var declarationNode = root.FindNode(declarationLocation.SourceSpan);
-        var host = FindAttributeHost(declarationNode);
+        var host = AttributeHost.Find(declarationNode);
         if (host is null)
         {
             return solution;
         }
 
-        var newHost = ReplaceOrAddIdAttribute(host, value);
+        var newHost = IdAttributeFactory.ReplaceOrAddIdAttribute(host, value);
         if (newHost is null)
         {
             return solution;
@@ -330,58 +239,6 @@ public class AddIdCodeFixProvider : CodeFixProvider
             .ConfigureAwait(false);
     }
 
-    static SyntaxNode? ReplaceOrAddIdAttribute(SyntaxNode host, string value)
-    {
-        var lists = host switch
-        {
-            PropertyDeclarationSyntax property => property.AttributeLists,
-            FieldDeclarationSyntax field => field.AttributeLists,
-            ParameterSyntax parameter => parameter.AttributeLists,
-            _ => default
-        };
-
-        AttributeSyntax? existing = null;
-        foreach (var list in lists)
-        {
-            foreach (var attribute in list.Attributes)
-            {
-                var name = GetAttributeName(attribute.Name);
-                if (name is "Id" or "IdAttribute" or "UnionId" or "UnionIdAttribute")
-                {
-                    existing = attribute;
-                    break;
-                }
-            }
-
-            if (existing is not null)
-            {
-                break;
-            }
-        }
-
-        var argument = AttributeArgument(
-            LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(value)));
-        var replacement = Attribute(IdentifierName("Id"))
-            .WithArgumentList(AttributeArgumentList(SingletonSeparatedList(argument)));
-
-        if (existing is not null)
-        {
-            return host.ReplaceNode(
-                existing,
-                replacement.WithTriviaFrom(existing).WithAdditionalAnnotations(Formatter.Annotation));
-        }
-
-        var attributeList = AttributeList(SingletonSeparatedList(replacement))
-            .WithAdditionalAnnotations(Formatter.Annotation);
-        return host switch
-        {
-            PropertyDeclarationSyntax property => property.AddAttributeLists(attributeList),
-            FieldDeclarationSyntax field => field.AddAttributeLists(attributeList),
-            ParameterSyntax parameter => parameter.AddAttributeLists(attributeList),
-            _ => null
-        };
-    }
-
     static async Task RegisterAddFix(CodeFixContext context, Diagnostic diagnostic)
     {
         if (diagnostic.AdditionalLocations.Count == 0)
@@ -411,13 +268,14 @@ public class AddIdCodeFixProvider : CodeFixProvider
             .GetRootAsync(context.CancellationToken)
             .ConfigureAwait(false);
         var declarationNode = declarationRoot.FindNode(declarationLocation.SourceSpan);
-        var host = FindAttributeHost(declarationNode);
+        var host = AttributeHost.Find(declarationNode);
         if (host is null)
         {
             return;
         }
 
         var values = value.Split('|');
+        var hostDescription = AttributeHost.Describe(host);
 
         // When the source has [UnionId(a, b, ...)], offer a matching [UnionId] fix first
         // plus one [Id(x)] fix per tag — picking which option to accept is a human
@@ -427,7 +285,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
             var unionArgs = string.Join(", ", values.Select(_ => $"\"{_}\""));
             context.RegisterCodeFix(
                 CodeAction.Create(
-                    $"Add [UnionId({unionArgs})] to {DescribeHost(host)}",
+                    $"Add [UnionId({unionArgs})] to {hostDescription}",
                     cancel => AddUnionAttributeAsync(
                         context.Document.Project.Solution,
                         declarationLocation,
@@ -441,7 +299,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         {
             context.RegisterCodeFix(
                 CodeAction.Create(
-                    $"Add [Id(\"{singleValue}\")] to {DescribeHost(host)}",
+                    $"Add [Id(\"{singleValue}\")] to {hostDescription}",
                     cancel => AddAttributeAsync(
                         context.Document.Project.Solution,
                         declarationLocation,
@@ -476,8 +334,8 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return;
         }
 
-        var title = FindAttributeOwner(attribute) is { } owner
-            ? $"Replace [UnionId] on {DescribeHost(owner)} with [Id(\"{value}\")]"
+        var title = AttributeHost.FindOwner(attribute) is { } owner
+            ? $"Replace [UnionId] on {AttributeHost.Describe(owner)} with [Id(\"{value}\")]"
             : $"Replace [UnionId] with [Id(\"{value}\")]";
 
         context.RegisterCodeFix(
@@ -507,8 +365,8 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return;
         }
 
-        var title = FindAttributeOwner(attribute) is { } owner
-            ? $"Remove redundant [Id] from {DescribeHost(owner)}"
+        var title = AttributeHost.FindOwner(attribute) is { } owner
+            ? $"Remove redundant [Id] from {AttributeHost.Describe(owner)}"
             : "Remove redundant [Id] attribute";
 
         context.RegisterCodeFix(
@@ -518,18 +376,6 @@ public class AddIdCodeFixProvider : CodeFixProvider
                 equivalenceKey: "RemoveRedundantId"),
             diagnostic);
     }
-
-    // Walk up from an attribute to the property/field/parameter it decorates, so fix
-    // titles can name the owner. Returns null for attribute targets we don't fix
-    // against (e.g. method return attributes) — callers fall back to a generic title.
-    static SyntaxNode? FindAttributeOwner(AttributeSyntax attribute) =>
-        attribute.Parent?.Parent switch
-        {
-            PropertyDeclarationSyntax property => property,
-            FieldDeclarationSyntax field => field,
-            ParameterSyntax parameter => parameter,
-            _ => null
-        };
 
     static async Task<Solution> AddAttributeAsync(
         Solution solution,
@@ -552,13 +398,13 @@ public class AddIdCodeFixProvider : CodeFixProvider
         }
 
         var declarationNode = root.FindNode(declarationLocation.SourceSpan);
-        var targetNode = FindAttributeHost(declarationNode);
+        var targetNode = AttributeHost.Find(declarationNode);
         if (targetNode is null)
         {
             return solution;
         }
 
-        var newTargetNode = AddIdAttribute(targetNode, value);
+        var newTargetNode = IdAttributeFactory.AddIdAttribute(targetNode, value);
         if (newTargetNode is null)
         {
             return solution;
@@ -573,6 +419,49 @@ public class AddIdCodeFixProvider : CodeFixProvider
         // Rider/VS "remove unnecessary usings" cleanup when a global using was in scope —
         // each successive fix left behind a blank line of trivia where the redundant
         // local using had been.
+        newDocument = await Formatter
+            .FormatAsync(newDocument, Formatter.Annotation, cancellationToken: cancel)
+            .ConfigureAwait(false);
+
+        return newDocument.Project.Solution;
+    }
+
+    static async Task<Solution> AddUnionAttributeAsync(
+        Solution solution,
+        Location declarationLocation,
+        string[] values,
+        Cancel cancel)
+    {
+        var document = solution.GetDocument(declarationLocation.SourceTree);
+        if (document is null)
+        {
+            return solution;
+        }
+
+        var root = await document
+            .GetSyntaxRootAsync(cancel)
+            .ConfigureAwait(false);
+        if (root is null)
+        {
+            return solution;
+        }
+
+        var declarationNode = root.FindNode(declarationLocation.SourceSpan);
+        var targetNode = AttributeHost.Find(declarationNode);
+        if (targetNode is null)
+        {
+            return solution;
+        }
+
+        var newTargetNode = IdAttributeFactory.AddUnionIdAttribute(targetNode, values);
+        if (newTargetNode is null)
+        {
+            return solution;
+        }
+
+        var newRoot = root.ReplaceNode(targetNode, newTargetNode);
+        var newDocument = document.WithSyntaxRoot(newRoot);
+
         newDocument = await Formatter
             .FormatAsync(newDocument, Formatter.Annotation, cancellationToken: cancel)
             .ConfigureAwait(false);
@@ -601,15 +490,11 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return document;
         }
 
-        var argument = AttributeArgument(
-            LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(value)));
-        var newAttribute = Attribute(IdentifierName("Id"))
-            .WithArgumentList(AttributeArgumentList(SingletonSeparatedList(argument)))
-            .WithTriviaFrom(oldAttribute)
-            .WithAdditionalAnnotations(Formatter.Annotation);
-
-        var newRoot = root.ReplaceNode(oldAttribute, newAttribute);
-        return document.WithSyntaxRoot(newRoot);
+        // Replace the exact attribute at the diagnostic location rather than "first
+        // Id-family attribute on the owner" — a host can legitimately carry multiple
+        // attributes and only the one being diagnosed should be rewritten.
+        var newAttribute = IdAttributeFactory.BuildReplacement(value, oldAttribute);
+        return document.WithSyntaxRoot(root.ReplaceNode(oldAttribute, newAttribute));
     }
 
     static async Task<Document> RemoveAttributeAsync(
@@ -645,112 +530,5 @@ public class AddIdCodeFixProvider : CodeFixProvider
         }
 
         return document.WithSyntaxRoot(newRoot);
-    }
-
-    static SyntaxNode? FindAttributeHost(SyntaxNode node)
-    {
-        // IFieldSymbol.DeclaringSyntaxReferences points at the VariableDeclaratorSyntax
-        // (e.g. `a` in `public Guid a, b;`). Attribute lists live on the enclosing
-        // FieldDeclarationSyntax, which would apply the attribute to *all* declarators.
-        var declarator = node.FirstAncestorOrSelf<VariableDeclaratorSyntax>();
-        if (declarator is not null)
-        {
-            if (declarator.Parent is VariableDeclarationSyntax { Variables.Count: > 1 })
-            {
-                return null;
-            }
-
-            return declarator.FirstAncestorOrSelf<FieldDeclarationSyntax>();
-        }
-
-        return node.FirstAncestorOrSelf<SyntaxNode>(ancestor =>
-            ancestor is PropertyDeclarationSyntax or ParameterSyntax);
-    }
-
-    static async Task<Solution> AddUnionAttributeAsync(
-        Solution solution,
-        Location declarationLocation,
-        string[] values,
-        Cancel cancel)
-    {
-        var document = solution.GetDocument(declarationLocation.SourceTree);
-        if (document is null)
-        {
-            return solution;
-        }
-
-        var root = await document
-            .GetSyntaxRootAsync(cancel)
-            .ConfigureAwait(false);
-        if (root is null)
-        {
-            return solution;
-        }
-
-        var declarationNode = root.FindNode(declarationLocation.SourceSpan);
-        var targetNode = FindAttributeHost(declarationNode);
-        if (targetNode is null)
-        {
-            return solution;
-        }
-
-        var newTargetNode = AddUnionIdAttribute(targetNode, values);
-        if (newTargetNode is null)
-        {
-            return solution;
-        }
-
-        var newRoot = root.ReplaceNode(targetNode, newTargetNode);
-        var newDocument = document.WithSyntaxRoot(newRoot);
-
-        newDocument = await Formatter
-            .FormatAsync(newDocument, Formatter.Annotation, cancellationToken: cancel)
-            .ConfigureAwait(false);
-
-        return newDocument.Project.Solution;
-    }
-
-    static SyntaxNode? AddUnionIdAttribute(SyntaxNode host, string[] values)
-    {
-        var arguments = values.Select(value =>
-            AttributeArgument(LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(value))));
-
-        var attribute = Attribute(IdentifierName("UnionId"))
-            .WithArgumentList(AttributeArgumentList(SeparatedList(arguments)));
-
-        var attributeList = AttributeList(SingletonSeparatedList(attribute))
-            .WithAdditionalAnnotations(Formatter.Annotation);
-
-        return host switch
-        {
-            PropertyDeclarationSyntax property => property.AddAttributeLists(attributeList),
-            FieldDeclarationSyntax field => field.AddAttributeLists(attributeList),
-            ParameterSyntax parameter => parameter.AddAttributeLists(attributeList),
-            _ => null
-        };
-    }
-
-    static SyntaxNode? AddIdAttribute(SyntaxNode host, string value)
-    {
-        var attributeName = IdentifierName("Id");
-
-        var argument = AttributeArgument(
-            LiteralExpression(
-                SyntaxKind.StringLiteralExpression,
-                Literal(value)));
-
-        var attribute = Attribute(attributeName)
-            .WithArgumentList(AttributeArgumentList(SingletonSeparatedList(argument)));
-
-        var attributeList = AttributeList(SingletonSeparatedList(attribute))
-            .WithAdditionalAnnotations(Formatter.Annotation);
-
-        return host switch
-        {
-            PropertyDeclarationSyntax property => property.AddAttributeLists(attributeList),
-            FieldDeclarationSyntax field => field.AddAttributeLists(attributeList),
-            ParameterSyntax parameter => parameter.AddAttributeLists(attributeList),
-            _ => null
-        };
     }
 }
