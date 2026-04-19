@@ -2018,6 +2018,91 @@ public class IdMismatchAnalyzerTests
         IsTrue(message.Contains("Order"));
     }
 
+    [Test]
+    public void CrossAssembly_UnionIdOnReferencedProperty_FiresSIA003()
+    {
+        // Reproduces real-world cross-assembly usage: the UnionId-tagged property lives
+        // in a separate assembly (messages package) with its own internal copy of the
+        // generator-emitted UnionIdAttribute. The consumer assembly has its own copy
+        // too. Matching the attribute by metadata name rather than symbol identity is
+        // what keeps this working.
+        // Names deliberately avoid the `Id`/`XxxId` naming convention so the convention
+        // doesn't spuriously tag the untagged target — this isolates the cross-assembly
+        // attribute-read path.
+        var messagesSource =
+            """
+            public class Message
+            {
+                [UnionId("Customer", "Order")]
+                public System.Guid Subject { get; set; }
+            }
+            """;
+
+        var consumerSource =
+            """
+            public class Receiver
+            {
+                public System.Guid Value { get; set; }
+
+                public void Copy(Message message) => Value = message.Subject;
+            }
+            """;
+
+        var diagnostics = GetCrossAssemblyDiagnostics(messagesSource, consumerSource);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA003", diagnostics[0].Id);
+        IsTrue(diagnostics[0].GetMessage().Contains("Customer"));
+    }
+
+    static ImmutableArray<Diagnostic> GetCrossAssemblyDiagnostics(
+        string messagesSource,
+        string consumerSource)
+    {
+        var trustedAssemblies = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator)
+            .Select(_ => MetadataReference.CreateFromFile(_))
+            .ToList();
+
+        var messagesBase = CSharpCompilation.Create(
+            "Messages",
+            [CSharpSyntaxTree.ParseText(messagesSource)],
+            trustedAssemblies,
+            new(OutputKind.DynamicallyLinkedLibrary));
+        CSharpGeneratorDriver
+            .Create(new IdAttributeGenerator())
+            .RunGeneratorsAndUpdateCompilation(messagesBase, out var messagesCompilation, out _);
+
+        using var messagesStream = new MemoryStream();
+        var emit = messagesCompilation.Emit(messagesStream);
+        if (!emit.Success)
+        {
+            var errors = string.Join("\n", emit.Diagnostics.Where(_ => _.Severity == DiagnosticSeverity.Error));
+            throw new($"Messages compilation failed:\n{errors}");
+        }
+        messagesStream.Position = 0;
+        var messagesReference = MetadataReference.CreateFromStream(messagesStream);
+
+        var consumerBase = CSharpCompilation.Create(
+            "Consumer",
+            [CSharpSyntaxTree.ParseText(consumerSource)],
+            [..trustedAssemblies, messagesReference],
+            new(OutputKind.DynamicallyLinkedLibrary));
+        CSharpGeneratorDriver
+            .Create(new IdAttributeGenerator())
+            .RunGeneratorsAndUpdateCompilation(consumerBase, out var consumerCompilation, out _);
+
+        var analyzerOptions = new AnalyzerOptions(
+            [],
+            new TestAnalyzerConfigOptionsProvider(new Dictionary<string, string>()));
+
+        return consumerCompilation
+            .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
+            .GetAnalyzerDiagnosticsAsync()
+            .GetAwaiter()
+            .GetResult();
+    }
+
     static ImmutableArray<Diagnostic> GetDiagnostics(string source) =>
         GetDiagnosticsWithOptions(source, new Dictionary<string, string>());
 

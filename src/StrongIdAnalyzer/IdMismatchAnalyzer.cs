@@ -82,24 +82,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         context.RegisterCompilationStartAction(start =>
         {
-            // Resolve the source-generated IdAttribute once per compilation. If the consumer
-            // has not had the source generator run (e.g. the package isn't referenced), this
-            // returns null and the analyzer stays dormant.
-            var idType = start.Compilation
-                .GetTypeByMetadataName("StrongIdAnalyzer.IdAttribute");
-            if (idType is null)
-            {
-                return;
-            }
-
-            // UnionIdAttribute is ours too. If the generator shipped it, we wire the
-            // union-aware paths; otherwise we behave as if only [Id] exists.
-            var unionIdType = start.Compilation
-                .GetTypeByMetadataName("StrongIdAnalyzer.UnionIdAttribute");
-
+            // IdAttribute and UnionIdAttribute are source-generated as internal per
+            // assembly, so the same metadata name can resolve to distinct symbols across
+            // compilations (and Compilation.GetTypeByMetadataName returns null under
+            // ambiguity). Matching attributes by fully-qualified name instead of symbol
+            // identity keeps cross-assembly usage working — e.g. messages assembly tags
+            // a property with [Id("Customer")] and the consumer assembly assigns it.
             var suppressedNamespaces = ReadSuppressedNamespaces(
                 start.Options.AnalyzerConfigOptionsProvider);
-            var config = new Config(idType, unionIdType, suppressedNamespaces);
+            var config = new Config(suppressedNamespaces);
 
             start.RegisterOperationAction(
                 _ => AnalyzeArgument(_, config),
@@ -135,25 +126,22 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 SymbolKind.Field,
                 SymbolKind.Parameter);
 
-            if (unionIdType is not null)
-            {
-                start.RegisterSymbolAction(
-                    _ => AnalyzeSingletonUnion(_, unionIdType),
-                    SymbolKind.Property,
-                    SymbolKind.Field,
-                    SymbolKind.Parameter);
-            }
+            start.RegisterSymbolAction(
+                AnalyzeSingletonUnion,
+                SymbolKind.Property,
+                SymbolKind.Field,
+                SymbolKind.Parameter);
 
             start.RegisterCompilationEndAction(
                 _ => ReportConventionDiagnostics(_, ambiguity, redundantCandidates));
         });
     }
 
-    static void AnalyzeSingletonUnion(SymbolAnalysisContext context, INamedTypeSymbol unionIdType)
+    static void AnalyzeSingletonUnion(SymbolAnalysisContext context)
     {
         foreach (var attribute in context.Symbol.GetAttributes())
         {
-            if (!SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, unionIdType))
+            if (!IsAttributeNamed(attribute, unionIdMetadataName))
             {
                 continue;
             }
@@ -395,7 +383,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         foreach (var attribute in symbol.GetAttributes())
         {
-            if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.IdType))
+            if (IsAttributeNamed(attribute, idMetadataName))
             {
                 return attribute;
             }
@@ -430,13 +418,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         foreach (var attribute in attributes)
         {
-            if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.IdType))
-            {
-                return true;
-            }
-
-            if (config.UnionIdType is not null &&
-                SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.UnionIdType))
+            if (IsAttributeNamed(attribute, idMetadataName) ||
+                IsAttributeNamed(attribute, unionIdMetadataName))
             {
                 return true;
             }
@@ -548,15 +531,20 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
-    readonly struct Config(
-        INamedTypeSymbol idType,
-        INamedTypeSymbol? unionIdType,
-        ImmutableArray<string> suppressedNamespaces)
+    const string idMetadataName = "StrongIdAnalyzer.IdAttribute";
+    const string unionIdMetadataName = "StrongIdAnalyzer.UnionIdAttribute";
+
+    readonly struct Config(ImmutableArray<string> suppressedNamespaces)
     {
-        public INamedTypeSymbol IdType { get; } = idType;
-        public INamedTypeSymbol? UnionIdType { get; } = unionIdType;
         public ImmutableArray<string> SuppressedNamespaces { get; } = suppressedNamespaces;
     }
+
+    // ToDisplayString with the fully-qualified format yields "global::Namespace.TypeName"
+    // for non-generic types; compared as ordinal string. Works across assembly boundaries
+    // where each assembly has its own internal copy of the generated attribute.
+    static bool IsAttributeNamed(AttributeData attribute, string metadataName) =>
+        attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            .Equals("global::" + metadataName, StringComparison.Ordinal) == true;
 
     static void AnalyzeBinaryOperator(OperationAnalysisContext context, Config config)
     {
@@ -1215,7 +1203,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         foreach (var attribute in attributes)
         {
-            if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.IdType))
+            if (IsAttributeNamed(attribute, idMetadataName))
             {
                 if (attribute.ConstructorArguments.Length > 0 &&
                     attribute.ConstructorArguments[0].Value is string s &&
@@ -1227,8 +1215,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            if (config.UnionIdType is not null &&
-                SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, config.UnionIdType))
+            if (IsAttributeNamed(attribute, unionIdMetadataName))
             {
                 foreach (var option in ExtractUnionOptions(attribute))
                 {
