@@ -1609,6 +1609,64 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public void Convention_InheritedId_MismatchMessage_ReceiverTypeFirst()
+    {
+        // treasuryBid.Id inherits Id from BaseEntity. The tag set must list the receiver
+        // static type ("TreasuryBid") before the declaring type ("BaseEntity") so the
+        // diagnostic message — and the FirstValue used by the code fix — prefers the
+        // more specific name the user sees locally.
+        var source = """
+            public class BaseEntity
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class TreasuryBid : BaseEntity;
+
+            public class Holder
+            {
+                public static void BuildTreasureMeasures([Id("Order")] System.Guid value) { }
+
+                public void Use(TreasuryBid bid) => BuildTreasureMeasures(bid.Id);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source).Where(_ => _.Id == "SIA001").ToArray();
+
+        AreEqual(1, diagnostics.Length);
+        var message = diagnostics[0].GetMessage();
+        IsTrue(
+            message.Contains("TreasuryBid/BaseEntity"),
+            $"expected receiver-first tag order, got: {message}");
+    }
+
+    [Test]
+    public void Convention_InheritedId_DeepChain_MismatchMessage_MostDerivedFirst()
+    {
+        // leaf.Id walks Leaf → Mid → Root. The resulting tag list must be
+        // "Leaf/Mid/Root" (most-derived first) so code fixes pick the receiver type.
+        var source = """
+            public class Root { public System.Guid Id { get; set; } }
+            public class Mid : Root;
+            public class Leaf : Mid;
+
+            public class Holder
+            {
+                public static void TakeOther([Id("Other")] System.Guid value) { }
+
+                public void Use(Leaf leaf) => TakeOther(leaf.Id);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source).Where(_ => _.Id == "SIA001").ToArray();
+
+        AreEqual(1, diagnostics.Length);
+        IsTrue(
+            diagnostics[0].GetMessage().Contains("Leaf/Mid/Root"),
+            $"expected most-derived-first tag order, got: {diagnostics[0].GetMessage()}");
+    }
+
+    [Test]
     public void Convention_InheritedId_DeepChain_IncludesAllAncestors()
     {
         // leaf.Id walks Leaf → Mid → Root and carries all three tags.

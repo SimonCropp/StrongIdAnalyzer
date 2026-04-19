@@ -805,7 +805,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType, Config config)
     {
-        var tags = ImmutableArray.CreateBuilder<string>();
+        var receiverTags = ImmutableArray.CreateBuilder<string>();
+        var memberTags = ImmutableArray.CreateBuilder<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var coveredTypes = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
 
@@ -828,7 +829,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 {
                     if (seen.Add(tag))
                     {
-                        tags.Add(tag);
+                        memberTags.Add(tag);
                     }
                 }
 
@@ -848,7 +849,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     {
                         if (seen.Add(tag))
                         {
-                            tags.Add(tag);
+                            memberTags.Add(tag);
                         }
                     }
 
@@ -873,7 +874,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             {
                 if (seen.Add(convName))
                 {
-                    tags.Add(convName);
+                    memberTags.Add(convName);
                 }
             }
         }
@@ -902,7 +903,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     current.Name.Length > 0 &&
                     seen.Add(current.Name))
                 {
-                    tags.Add(current.Name);
+                    receiverTags.Add(current.Name);
                 }
 
                 if (SymbolEqualityComparer.Default.Equals(current.OriginalDefinition, boundary))
@@ -914,9 +915,20 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        return tags.Count == 0
-            ? IdInfo.NotPresent
-            : IdInfo.Present(tags.ToImmutable());
+        // Emit receiver-type tags (most-derived → base) before member-chain tags so the
+        // single-value accessor used by code fixes picks the receiver's static type. For
+        // `treasuryBid.Id` inherited from `BaseEntity`, FirstValue is "TreasuryBid"
+        // rather than "BaseEntity" — matches what the user reads locally at the call
+        // site and produces the more useful "Rename to treasuryBidId" suggestion.
+        if (receiverTags.Count == 0 && memberTags.Count == 0)
+        {
+            return IdInfo.NotPresent;
+        }
+
+        var tags = ImmutableArray.CreateBuilder<string>(receiverTags.Count + memberTags.Count);
+        tags.AddRange(receiverTags);
+        tags.AddRange(memberTags);
+        return IdInfo.Present(tags.ToImmutable());
     }
 
     // Yields the member and then every override/interface-impl target reachable from it.

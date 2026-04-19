@@ -362,6 +362,64 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA001_InheritedId_ReceiverTypeDrivesRename()
+    {
+        // bid.Id inherits Id from BaseEntity. The fix should propose renaming the
+        // target parameter using the receiver static type (TreasuryBid), not the
+        // declaring type (BaseEntity).
+        var source = """
+            public class BaseEntity
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class TreasuryBid : BaseEntity;
+
+            public class Target
+            {
+                public static void BuildTreasureMeasures(System.Guid orderId) { }
+            }
+
+            public class Holder
+            {
+                public void Use(TreasuryBid bid) => Target.BuildTreasureMeasures(bid.Id);
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename to");
+
+        Contains(fixedSource, "System.Guid treasuryBidId");
+        DoesNotContain(fixedSource, "orderId");
+    }
+
+    [Test]
+    public async Task SIA001_InheritedId_ReceiverTypeDrivesChangeAttribute()
+    {
+        var source = """
+            public class BaseEntity
+            {
+                public System.Guid Id { get; set; }
+            }
+
+            public class TreasuryBid : BaseEntity;
+
+            public class Target
+            {
+                public static void BuildTreasureMeasures([Id("Other")] System.Guid value) { }
+            }
+
+            public class Holder
+            {
+                public void Use(TreasuryBid bid) => Target.BuildTreasureMeasures(bid.Id);
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change to");
+
+        Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid value");
+    }
+
+    [Test]
     public async Task SIA005_RemovesRedundantAttribute_WhenOnlyAttribute()
     {
         var source = """
