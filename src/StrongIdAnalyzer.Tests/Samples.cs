@@ -3,6 +3,9 @@
 // ReSharper disable ClassNeverInstantiated.Local
 // ReSharper disable MemberCanBePrivate.Local
 // ReSharper disable CollectionNeverUpdated.Local
+// ReSharper disable UnusedParameter.Global
+// ReSharper disable ClassNeverInstantiated.Global
+// ReSharper disable MemberCanBePrivate.Global
 #pragma warning disable CS0414
 #pragma warning disable CA1822
 #pragma warning disable CA1002
@@ -206,11 +209,13 @@ namespace InheritanceAbstractClassExplicit
         public static void Run()
         {
             var child1 = new Child1();
-            Foo(child1.Id, child1.Id); // OK: child1.Id is tagged {"Child1","Base"}
+            // OK: child1.Id is tagged {"Child1","Base"}
+            Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
 #pragma warning disable SIA001
-            Foo(child2.Id, child2.Id); // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            Foo(child2.Id, child2.Id);
 #pragma warning restore SIA001
         }
     }
@@ -249,11 +254,13 @@ namespace InheritanceAbstractClassConvention
         public static void Run()
         {
             var child1 = new Child1();
-            Foo(child1.Id, child1.Id); // OK: override chain gives {"Child1","Base"}
+            // OK: override chain gives {"Child1","Base"}
+            Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
 #pragma warning disable SIA001
-            Foo(child2.Id, child2.Id); // SIA001 on arg 1: convention gives {"Child2","Base"}
+            // SIA001 on arg 1: convention gives {"Child2","Base"}
+            Foo(child2.Id, child2.Id);
 #pragma warning restore SIA001
         }
     }
@@ -292,11 +299,13 @@ namespace InheritanceInterfaceExplicit
         public static void Run()
         {
             var child1 = new Child1();
-            Foo(child1.Id, child1.Id); // OK: interface walk adds "Base" next to "Child1"
+            // OK: interface walk adds "Base" next to "Child1"
+            Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
 #pragma warning disable SIA001
-            Foo(child2.Id, child2.Id); // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            Foo(child2.Id, child2.Id);
 #pragma warning restore SIA001
         }
     }
@@ -334,11 +343,13 @@ namespace InheritanceInterfaceConvention
         public static void Run()
         {
             var child1 = new Child1();
-            Foo(child1.Id, child1.Id); // OK: convention tags {"Child1","Base"}
+            // OK: convention tags {"Child1","Base"}
+            Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
 #pragma warning disable SIA001
-            Foo(child2.Id, child2.Id); // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            Foo(child2.Id, child2.Id);
 #pragma warning restore SIA001
         }
     }
@@ -355,7 +366,8 @@ public static class RecordUsage
     public static void Consume([Id("Order")] Guid value) { }
 
     public static void Use(Holder holder) =>
-        Consume(holder.Value); // no diagnostic — attribute flows to property
+        // no diagnostic — attribute flows to property
+        Consume(holder.Value);
 }
 
 #endregion

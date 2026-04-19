@@ -50,7 +50,7 @@ public static class BuggyUsage
 #pragma warning restore SIA001
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L10-L45' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L13-L48' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The bug is the call to `service.GetOrderAmount(order.CustomerId)` — a customer's `Guid` is passed into a method expecting an order's `Guid`. Both are `Guid`, so the compiler is happy; at runtime the caller gets a `KeyNotFoundException`, or worse, if the `Guid` coincidentally hits a populated dictionary, silently wrong data.
@@ -90,7 +90,7 @@ public class EntityLookup
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L47-L78' title='Snippet source file'>snippet source</a> | <a href='#snippet-SilentMismatch' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L50-L81' title='Snippet source file'>snippet source</a> | <a href='#snippet-SilentMismatch' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -136,7 +136,7 @@ public static class FixedUsage
 #pragma warning restore SIA001
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L80-L117' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L83-L120' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The `IdAttribute` is source-generated into the consuming compilation — no runtime dependency on any attributes assembly. Install the analyzer package and start tagging.
@@ -296,7 +296,7 @@ public class SIA001Sample
 #pragma warning restore SIA001
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L119-L135' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA001Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L122-L138' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA001Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -337,7 +337,7 @@ public class SIA002Sample
 #pragma warning restore SIA002
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L137-L154' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA002Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L140-L157' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA002Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Suppressed when the untagged source lives in referenced metadata (e.g. `Guid.Empty`, a third-party property) — library authors can't apply `[Id]`, so the warning would offer no actionable fix.
@@ -365,7 +365,7 @@ public class SIA003Sample
 #pragma warning restore SIA003
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L156-L173' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L159-L176' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 SIA003 is suppressed when the tag can't meaningfully survive:
@@ -445,17 +445,19 @@ namespace InheritanceAbstractClassExplicit
         public static void Run()
         {
             var child1 = new Child1();
-            Foo(child1.Id, child1.Id); // OK: child1.Id is tagged {"Child1","Base"}
+            // OK: child1.Id is tagged {"Child1","Base"}
+            Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
 #pragma warning disable SIA001
-            Foo(child2.Id, child2.Id); // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            Foo(child2.Id, child2.Id);
 #pragma warning restore SIA001
         }
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L175-L219' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassExplicit' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L178-L224' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassExplicit' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### Abstract class + naming convention only
@@ -492,17 +494,19 @@ namespace InheritanceAbstractClassConvention
         public static void Run()
         {
             var child1 = new Child1();
-            Foo(child1.Id, child1.Id); // OK: override chain gives {"Child1","Base"}
+            // OK: override chain gives {"Child1","Base"}
+            Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
 #pragma warning disable SIA001
-            Foo(child2.Id, child2.Id); // SIA001 on arg 1: convention gives {"Child2","Base"}
+            // SIA001 on arg 1: convention gives {"Child2","Base"}
+            Foo(child2.Id, child2.Id);
 #pragma warning restore SIA001
         }
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L221-L262' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassConvention' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L226-L269' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassConvention' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### Interface + explicit `[Id]` on every level
@@ -539,17 +543,19 @@ namespace InheritanceInterfaceExplicit
         public static void Run()
         {
             var child1 = new Child1();
-            Foo(child1.Id, child1.Id); // OK: interface walk adds "Base" next to "Child1"
+            // OK: interface walk adds "Base" next to "Child1"
+            Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
 #pragma warning disable SIA001
-            Foo(child2.Id, child2.Id); // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            Foo(child2.Id, child2.Id);
 #pragma warning restore SIA001
         }
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L264-L305' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceExplicit' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L271-L314' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceExplicit' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### Interface + naming convention only
@@ -585,17 +591,19 @@ namespace InheritanceInterfaceConvention
         public static void Run()
         {
             var child1 = new Child1();
-            Foo(child1.Id, child1.Id); // OK: convention tags {"Child1","Base"}
+            // OK: convention tags {"Child1","Base"}
+            Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
 #pragma warning disable SIA001
-            Foo(child2.Id, child2.Id); // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
+            Foo(child2.Id, child2.Id);
 #pragma warning restore SIA001
         }
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L307-L347' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceConvention' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L316-L358' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceConvention' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -730,10 +738,11 @@ public static class RecordUsage
     public static void Consume([Id("Order")] Guid value) { }
 
     public static void Use(Holder holder) =>
-        Consume(holder.Value); // no diagnostic — attribute flows to property
+        // no diagnostic — attribute flows to property
+        Consume(holder.Value);
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L349-L361' title='Snippet source file'>snippet source</a> | <a href='#snippet-RecordPrimaryCtorParameter' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L360-L373' title='Snippet source file'>snippet source</a> | <a href='#snippet-RecordPrimaryCtorParameter' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 An explicit `[property: Id(...)]` on the property still wins — if both targets are attributed, the property's own attribute is used. Naming-convention inference (for properties named `Id` or `XxxId`) is only consulted after both the property's and the parameter's explicit attributes come up empty.

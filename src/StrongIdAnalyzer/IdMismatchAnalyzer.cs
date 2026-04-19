@@ -11,17 +11,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     public const string TargetValueKey = "IdValueTarget";
     public const string SourceValueKey = "IdValueSource";
 
-    // .editorconfig key for overriding the default namespace suppression list.
-    // Value is comma-separated; trailing `*` means prefix match (e.g. `System*` matches
-    // `System`, `System.Collections`, etc.). Setting an empty value disables suppression.
-    const string suppressedNamespacesOption = "strongidanalyzer.suppressed_namespaces";
-
-    // Library namespaces whose members we can't realistically tag. Noise for SIA002/SIA003
-    // when a tagged id flows into BCL / framework APIs (e.g. logging, serialization,
-    // dependency injection, Entity Framework). Users can override via .editorconfig.
-    static readonly ImmutableArray<NamespacePattern> defaultSuppressedNamespaces =
-        [new(["System"], true), new(["Microsoft"], true)];
-
     static readonly DiagnosticDescriptor idMismatchRule = new(
         id: "SIA001",
         title: "Id type mismatch",
@@ -88,7 +77,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // ambiguity). Matching attributes by fully-qualified name instead of symbol
             // identity keeps cross-assembly usage working — e.g. messages assembly tags
             // a property with [Id("Customer")] and the consumer assembly assigns it.
-            var suppressedNamespaces = ReadSuppressedNamespaces(
+            var suppressedNamespaces = NamespaceSuppression.Read(
                 start.Options.AnalyzerConfigOptionsProvider);
             var config = new Config(suppressedNamespaces, start.Compilation);
 
@@ -470,116 +459,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return null;
     }
 
-    static ImmutableArray<NamespacePattern> ReadSuppressedNamespaces(AnalyzerConfigOptionsProvider options)
-    {
-        if (!options.GlobalOptions.TryGetValue(suppressedNamespacesOption, out var raw))
-        {
-            return defaultSuppressedNamespaces;
-        }
-
-        // Explicit empty disables all suppression.
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return [];
-        }
-
-        var builder = ImmutableArray.CreateBuilder<NamespacePattern>();
-        foreach (var entry in raw.Split(','))
-        {
-            var trimmed = entry.Trim();
-            if (trimmed.Length == 0)
-            {
-                continue;
-            }
-
-            var isWildcard = trimmed[^1] == '*';
-            var prefix = isWildcard ? trimmed[..^1] : trimmed;
-            ImmutableArray<string> segments = prefix.Length == 0
-                ? []
-                : [..prefix.Split('.')];
-            builder.Add(new(segments, isWildcard));
-        }
-
-        return builder.ToImmutable();
-    }
-
-    // Matches the symbol's namespace against the pre-parsed patterns by walking the
-    // namespace chain segment-wise — no ToDisplayString, no string concatenation.
-    static bool IsInSuppressedNamespace(ISymbol symbol, ImmutableArray<NamespacePattern> patterns)
-    {
-        if (patterns.IsEmpty)
-        {
-            return false;
-        }
-
-        var ns = symbol.ContainingNamespace;
-        if (ns is null || ns.IsGlobalNamespace)
-        {
-            return false;
-        }
-
-        var depth = 0;
-        for (var walker = ns; walker is { IsGlobalNamespace: false }; walker = walker.ContainingNamespace)
-        {
-            depth++;
-        }
-
-        foreach (var pattern in patterns)
-        {
-            var segments = pattern.Segments;
-            var segmentCount = segments.Length;
-
-            // Bare `*` — empty prefix with wildcard — matches any namespace.
-            if (segmentCount == 0)
-            {
-                if (pattern.IsWildcard)
-                {
-                    return true;
-                }
-
-                continue;
-            }
-
-            if (pattern.IsWildcard ? depth < segmentCount : depth != segmentCount)
-            {
-                continue;
-            }
-
-            // Skip inner segments so `cursor` is the innermost segment of the pattern's
-            // root-rooted prefix, then walk outward comparing segment-by-segment.
-            var cursor = ns;
-            for (var i = 0; i < depth - segmentCount; i++)
-            {
-                cursor = cursor!.ContainingNamespace;
-            }
-
-            var matched = true;
-            for (var i = segmentCount - 1; i >= 0; i--)
-            {
-                if (cursor!.Name != segments[i])
-                {
-                    matched = false;
-                    break;
-                }
-
-                cursor = cursor.ContainingNamespace;
-            }
-
-            if (matched)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    readonly struct NamespacePattern(ImmutableArray<string> segments, bool isWildcard)
-    {
-        public ImmutableArray<string> Segments { get; } = segments;
-        public bool IsWildcard { get; } = isWildcard;
-    }
-
     const string idMetadataName = "IdAttribute";
     const string unionIdMetadataName = "UnionIdAttribute";
     const string indexAttributeMetadataName = "StrongIdIndexAttribute";
@@ -894,7 +773,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         var result = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var type in FindTypesByName(compilation, tag))
+        foreach (var type in TypeEnumeration.FindByName(compilation, tag))
         {
             var baseType = type.BaseType;
             while (baseType is not null && baseType.SpecialType != SpecialType.System_Object)
@@ -922,73 +801,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         return [..result];
-    }
-
-    // Finds every named type whose simple name equals `name` across the source assembly
-    // and every referenced assembly. Compilation.GetSymbolsWithName only searches source
-    // declarations — missing types defined in NuGet references or project dependencies.
-    static IEnumerable<INamedTypeSymbol> FindTypesByName(Compilation compilation, string name)
-    {
-        foreach (var type in EnumerateAllTypes(compilation.Assembly.GlobalNamespace))
-        {
-            if (string.Equals(type.Name, name, StringComparison.Ordinal))
-            {
-                yield return type;
-            }
-        }
-
-        foreach (var reference in compilation.References)
-        {
-            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
-            {
-                continue;
-            }
-
-            foreach (var type in EnumerateAllTypes(assembly.GlobalNamespace))
-            {
-                if (string.Equals(type.Name, name, StringComparison.Ordinal))
-                {
-                    yield return type;
-                }
-            }
-        }
-    }
-
-    static IEnumerable<INamedTypeSymbol> EnumerateAllTypes(INamespaceSymbol ns)
-    {
-        foreach (var member in ns.GetMembers())
-        {
-            switch (member)
-            {
-                case INamedTypeSymbol type:
-                    yield return type;
-                    foreach (var nested in EnumerateNestedTypes(type))
-                    {
-                        yield return nested;
-                    }
-
-                    break;
-                case INamespaceSymbol child:
-                    foreach (var type in EnumerateAllTypes(child))
-                    {
-                        yield return type;
-                    }
-
-                    break;
-            }
-        }
-    }
-
-    static IEnumerable<INamedTypeSymbol> EnumerateNestedTypes(INamedTypeSymbol type)
-    {
-        foreach (var nested in type.GetTypeMembers())
-        {
-            yield return nested;
-            foreach (var deeper in EnumerateNestedTypes(nested))
-            {
-                yield return deeper;
-            }
-        }
     }
 
     static void AnalyzeBinaryOperator(OperationAnalysisContext context, Config config)
@@ -1064,7 +876,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (IsInSuppressedNamespace(untaggedSymbol, config.SuppressedNamespaces))
+        if (NamespaceSuppression.IsSuppressed(untaggedSymbol, config.SuppressedNamespaces))
         {
             return;
         }
@@ -1786,7 +1598,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            if (IsInSuppressedNamespace(sourceSymbol, config.SuppressedNamespaces))
+            if (NamespaceSuppression.IsSuppressed(sourceSymbol, config.SuppressedNamespaces))
             {
                 return;
             }
@@ -1814,7 +1626,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            if (IsInSuppressedNamespace(targetSymbol, config.SuppressedNamespaces))
+            if (NamespaceSuppression.IsSuppressed(targetSymbol, config.SuppressedNamespaces))
             {
                 return;
             }
