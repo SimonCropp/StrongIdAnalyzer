@@ -91,9 +91,10 @@ public class AddIdCodeFixProvider : CodeFixProvider
         }
 
         var hasExplicit = HasIdFamilyAttribute(host);
+        var hostDescription = DescribeHost(host);
         var actionTitle = hasExplicit
-            ? $"Change to [Id(\"{value}\")]"
-            : $"Add [Id(\"{value}\")]";
+            ? $"Change attribute on {hostDescription} to [Id(\"{value}\")]"
+            : $"Add [Id(\"{value}\")] to {hostDescription}";
 
         context.RegisterCodeFix(
             CodeAction.Create(
@@ -110,7 +111,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         {
             context.RegisterCodeFix(
                 CodeAction.Create(
-                    $"Rename to '{newName}'",
+                    $"Rename {hostDescription} to '{newName}'",
                     cancel => RenameAsync(
                         context.Document,
                         declarationLocation,
@@ -118,6 +119,25 @@ public class AddIdCodeFixProvider : CodeFixProvider
                         cancel),
                     equivalenceKey: $"RenameId:{newName}"),
                 diagnostic);
+        }
+    }
+
+    // Human-readable "<kind> '<name>'" label (e.g. "parameter 'bidId'") so fix titles
+    // name both the role and the identifier being acted on — screenshots with just
+    // "Rename to 'treasuryBidId'" leave users guessing which side of the call is
+    // being renamed.
+    static string DescribeHost(SyntaxNode host)
+    {
+        switch (host)
+        {
+            case PropertyDeclarationSyntax property:
+                return $"property '{property.Identifier.Text}'";
+            case FieldDeclarationSyntax field when field.Declaration.Variables.Count > 0:
+                return $"field '{field.Declaration.Variables[0].Identifier.Text}'";
+            case ParameterSyntax parameter:
+                return $"parameter '{parameter.Identifier.Text}'";
+            default:
+                return "declaration";
         }
     }
 
@@ -353,14 +373,15 @@ public class AddIdCodeFixProvider : CodeFixProvider
             .GetRootAsync(context.CancellationToken)
             .ConfigureAwait(false);
         var declarationNode = declarationRoot.FindNode(declarationLocation.SourceSpan);
-        if (FindAttributeHost(declarationNode) is null)
+        var host = FindAttributeHost(declarationNode);
+        if (host is null)
         {
             return;
         }
 
         context.RegisterCodeFix(
             CodeAction.Create(
-                $"Add [Id(\"{value}\")]",
+                $"Add [Id(\"{value}\")] to {DescribeHost(host)}",
                 cancel => AddAttributeAsync(
                     context.Document.Project.Solution,
                     declarationLocation,
@@ -388,14 +409,19 @@ public class AddIdCodeFixProvider : CodeFixProvider
             .GetRootAsync(context.CancellationToken)
             .ConfigureAwait(false);
         var node = root.FindNode(location.SourceSpan);
-        if (node.FirstAncestorOrSelf<AttributeSyntax>() is null)
+        var attribute = node.FirstAncestorOrSelf<AttributeSyntax>();
+        if (attribute is null)
         {
             return;
         }
 
+        var title = FindAttributeOwner(attribute) is { } owner
+            ? $"Replace [UnionId] on {DescribeHost(owner)} with [Id(\"{value}\")]"
+            : $"Replace [UnionId] with [Id(\"{value}\")]";
+
         context.RegisterCodeFix(
             CodeAction.Create(
-                $"Replace with [Id(\"{value}\")]",
+                title,
                 cancel => ReplaceUnionWithIdAsync(context.Document, location, value, cancel),
                 equivalenceKey: $"ReplaceUnionWithId:{value}"),
             diagnostic);
@@ -420,13 +446,29 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return;
         }
 
+        var title = FindAttributeOwner(attribute) is { } owner
+            ? $"Remove redundant [Id] from {DescribeHost(owner)}"
+            : "Remove redundant [Id] attribute";
+
         context.RegisterCodeFix(
             CodeAction.Create(
-                "Remove redundant [Id] attribute",
+                title,
                 cancel => RemoveAttributeAsync(context.Document, location, cancel),
                 equivalenceKey: "RemoveRedundantId"),
             diagnostic);
     }
+
+    // Walk up from an attribute to the property/field/parameter it decorates, so fix
+    // titles can name the owner. Returns null for attribute targets we don't fix
+    // against (e.g. method return attributes) — callers fall back to a generic title.
+    static SyntaxNode? FindAttributeOwner(AttributeSyntax attribute) =>
+        attribute.Parent?.Parent switch
+        {
+            PropertyDeclarationSyntax property => property,
+            FieldDeclarationSyntax field => field,
+            ParameterSyntax parameter => parameter,
+            _ => null
+        };
 
     static async Task<Solution> AddAttributeAsync(
         Solution solution,

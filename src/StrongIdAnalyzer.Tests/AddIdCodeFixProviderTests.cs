@@ -227,7 +227,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change to");
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute");
 
         Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid value");
         DoesNotContain(fixedSource, "[Id(\"Bid\")]");
@@ -274,7 +274,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename to");
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
         Contains(fixedSource, "System.Guid treasuryBidId");
         DoesNotContain(fixedSource, "bidId");
@@ -298,7 +298,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename to");
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
         Contains(fixedSource, "public System.Guid TreasuryBidId");
         Contains(fixedSource, "target.TreasuryBidId = Id");
@@ -322,7 +322,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename to");
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
         Contains(fixedSource, "public System.Guid TreasuryBidId;");
         Contains(fixedSource, "target.TreasuryBidId = Id");
@@ -358,7 +358,7 @@ public class AddIdCodeFixProviderTests
 
         var built = actions.ToImmutable();
         AreEqual(1, built.Length);
-        IsTrue(built[0].Title.StartsWith("Change to", StringComparison.Ordinal));
+        IsTrue(built[0].Title.StartsWith("Change attribute", StringComparison.Ordinal));
     }
 
     [Test]
@@ -386,7 +386,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename to");
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
         Contains(fixedSource, "System.Guid treasuryBidId");
         DoesNotContain(fixedSource, "orderId");
@@ -414,9 +414,84 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change to");
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute");
 
         Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid value");
+    }
+
+    [Test]
+    public async Task FixTitles_NameTheTargetHost()
+    {
+        // Titles should identify the kind and name of the declaration being acted on,
+        // so the IDE popup tells the user which side of the call is affected.
+        var mismatchSource = """
+            public class Target
+            {
+                public static void Consume(System.Guid orderId) { }
+            }
+
+            public class Bid
+            {
+                [Id("TreasuryBid")]
+                public System.Guid Id { get; set; }
+
+                public void Use() => Target.Consume(Id);
+            }
+            """;
+
+        var mismatchTitles = (await GetCodeActions(mismatchSource)).Select(_ => _.Title).ToArray();
+        IsTrue(
+            mismatchTitles.Any(_ => _ == "Add [Id(\"TreasuryBid\")] to parameter 'orderId'"),
+            $"missing add title, got: {string.Join(" | ", mismatchTitles)}");
+        IsTrue(
+            mismatchTitles.Any(_ => _ == "Rename parameter 'orderId' to 'treasuryBidId'"),
+            $"missing rename title, got: {string.Join(" | ", mismatchTitles)}");
+
+        var changeSource = """
+            public class Target
+            {
+                public static void Consume([Id("Order")] System.Guid value) { }
+            }
+
+            public class Bid
+            {
+                [Id("TreasuryBid")]
+                public System.Guid Id { get; set; }
+
+                public void Use() => Target.Consume(Id);
+            }
+            """;
+
+        var changeTitles = (await GetCodeActions(changeSource)).Select(_ => _.Title).ToArray();
+        IsTrue(
+            changeTitles.Any(_ => _ == "Change attribute on parameter 'value' to [Id(\"TreasuryBid\")]"),
+            $"missing change title, got: {string.Join(" | ", changeTitles)}");
+
+        var redundantSource = """
+            public class OrderRedundant
+            {
+                [Id("OrderRedundant")]
+                public System.Guid Id { get; set; }
+            }
+            """;
+
+        var redundantTitles = (await GetCodeActions(redundantSource)).Select(_ => _.Title).ToArray();
+        IsTrue(
+            redundantTitles.Any(_ => _ == "Remove redundant [Id] from property 'Id'"),
+            $"missing redundant title, got: {string.Join(" | ", redundantTitles)}");
+
+        var unionSource = """
+            public class Holder
+            {
+                [UnionId("Order")]
+                public System.Guid OrderId { get; set; }
+            }
+            """;
+
+        var unionTitles = (await GetCodeActions(unionSource)).Select(_ => _.Title).ToArray();
+        IsTrue(
+            unionTitles.Any(_ => _ == "Replace [UnionId] on property 'OrderId' with [Id(\"Order\")]"),
+            $"missing union title, got: {string.Join(" | ", unionTitles)}");
     }
 
     [Test]
