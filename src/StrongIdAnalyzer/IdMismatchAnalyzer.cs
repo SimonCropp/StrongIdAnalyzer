@@ -5,6 +5,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 {
     public const string ValueKey = "IdValue";
 
+    // SIA001 emits both sides' tags so the fixer can offer a fix for either side:
+    // TargetValueKey = tag to apply if the user fixes the target (= source's first tag).
+    // SourceValueKey = tag to apply if the user fixes the source (= target's first tag).
+    public const string TargetValueKey = "IdValueTarget";
+    public const string SourceValueKey = "IdValueSource";
+
     // .editorconfig key for overriding the default namespace suppression list.
     // Value is comma-separated; trailing `*` means prefix match (e.g. `System*` matches
     // `System`, `System.Collections`, etc.). Setting an empty value disables suppression.
@@ -576,11 +582,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
+            // Equality is symmetric so the left/right → source/target labelling is a
+            // convention for the message; the fixer doesn't care which is which, it just
+            // needs both declarations and both tags available.
             context.ReportDiagnostic(Diagnostic.Create(
                 idMismatchRule,
                 operation.Syntax.GetLocation(),
-                leftInfo.Format(),
-                rightInfo.Format()));
+                additionalLocations: GetMismatchLocations(rightSymbol, leftSymbol),
+                properties: BuildMismatchProperties(leftInfo.FirstValue, rightInfo.FirstValue),
+                messageArgs: new object[] { leftInfo.Format(), rightInfo.Format() }));
             return;
         }
 
@@ -1286,14 +1296,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // union-tagged targets (`[UnionId("A","B")]` accepts "A" or "B") uniformly.
             if (!target.IntersectsWith(source))
             {
-                // Attach the target declaration as an additional location so the code fix
-                // can either replace its [Id] or rename it. Library targets (no syntax
-                // refs) stay report-only — the fixer checks AdditionalLocations.Count.
+                // Attach both declarations as additional locations so the code fix can
+                // offer to fix either side. Slot 0 is always the target; slot 1 is the
+                // source (when user-owned; library refs are reported as null sentinel).
                 context.ReportDiagnostic(Diagnostic.Create(
                     idMismatchRule,
                     location,
-                    additionalLocations: GetAdditionalLocations(targetSymbol),
-                    properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, source.FirstValue),
+                    additionalLocations: GetMismatchLocations(targetSymbol, sourceSymbol),
+                    properties: BuildMismatchProperties(source.FirstValue, target.FirstValue),
                     messageArgs: new object[] { source.Format(), target.Format() }));
             }
 
@@ -1415,6 +1425,38 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         return [Location.Create(declaration.SyntaxTree, declaration.Span)];
+    }
+
+    // Build a positional [target, source] location array for SIA001. Slots without a
+    // user-owned declaration (library refs, locals, etc.) use Location.None as a
+    // sentinel so the slot index stays stable — the fixer checks IsInSource before
+    // offering a fix for either side.
+    static Location[] GetMismatchLocations(ISymbol? targetSymbol, ISymbol? sourceSymbol) =>
+    [
+        ResolveDeclarationLocation(targetSymbol),
+        ResolveDeclarationLocation(sourceSymbol)
+    ];
+
+    static Location ResolveDeclarationLocation(ISymbol? symbol)
+    {
+        var declaration = symbol?.DeclaringSyntaxReferences.FirstOrDefault();
+        if (declaration is null)
+        {
+            return Location.None;
+        }
+
+        return Location.Create(declaration.SyntaxTree, declaration.Span);
+    }
+
+    static ImmutableDictionary<string, string?> BuildMismatchProperties(string? sourceValue, string? targetValue)
+    {
+        var properties = ImmutableDictionary<string, string?>.Empty
+            // Kept for backward-compat: older fixer versions read IdValue and apply it
+            // to AdditionalLocations[0] (the target). New fixer prefers the typed keys.
+            .Add(ValueKey, sourceValue)
+            .Add(TargetValueKey, sourceValue)
+            .Add(SourceValueKey, targetValue);
+        return properties;
     }
 
     enum IdState

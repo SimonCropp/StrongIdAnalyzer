@@ -227,7 +227,9 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute");
+        // Disambiguate: there's also a source-side "Change attribute on property 'Id'"
+        // fix now (see SIA001_OffersFixOnSourceSide_WhenTargetHasExplicitAttribute).
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute on parameter 'value'");
 
         Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid value");
         DoesNotContain(fixedSource, "[Id(\"Bid\")]");
@@ -357,8 +359,10 @@ public class AddIdCodeFixProviderTests
         await new AddIdCodeFixProvider().RegisterCodeFixesAsync(context);
 
         var built = actions.ToImmutable();
-        AreEqual(1, built.Length);
-        IsTrue(built[0].Title.StartsWith("Change attribute", StringComparison.Ordinal));
+        // Both sides have explicit attributes, so only "Change attribute" fixes are
+        // offered (no rename variants) — one per side.
+        AreEqual(2, built.Length);
+        IsTrue(built.All(_ => _.Title.StartsWith("Change attribute", StringComparison.Ordinal)));
     }
 
     [Test]
@@ -417,6 +421,54 @@ public class AddIdCodeFixProviderTests
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute");
 
         Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid value");
+    }
+
+    [Test]
+    public async Task SIA001_OffersFixOnSourceSide_WhenTargetHasExplicitAttribute()
+    {
+        // Convention-tagged source + explicitly-tagged target: the fix must offer a
+        // source-side option (override the convention with an explicit attribute on
+        // the source declaration), not only the target-side option that would
+        // demote the target's tag.
+        var source = """
+            public record ProgramBillOutcomeInput(System.Guid VariationId);
+
+            public class Input
+            {
+                public System.Collections.Generic.IReadOnlyList<ProgramBillOutcomeInput> Outcomes { get; set; } = [];
+
+                public ProgramBillOutcomeInput ForId([Id("VariationBase")] System.Guid guid) =>
+                    System.Linq.Enumerable.Single(Outcomes, _ => _.VariationId == guid);
+            }
+            """;
+
+        var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
+        IsTrue(
+            titles.Any(_ => _ == "Add [Id(\"VariationBase\")] to parameter 'VariationId'"),
+            $"missing source-side add title, got: {string.Join(" | ", titles)}");
+    }
+
+    [Test]
+    public async Task SIA001_AppliesFixOnSourceSide_Parameter()
+    {
+        var source = """
+            public record ProgramBillOutcomeInput(System.Guid VariationId);
+
+            public class Input
+            {
+                public System.Collections.Generic.IReadOnlyList<ProgramBillOutcomeInput> Outcomes { get; set; } = [];
+
+                public ProgramBillOutcomeInput ForId([Id("VariationBase")] System.Guid guid) =>
+                    System.Linq.Enumerable.Single(Outcomes, _ => _.VariationId == guid);
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(
+            source,
+            "SIA001",
+            "Add [Id(\"VariationBase\")] to parameter 'VariationId'");
+
+        Contains(fixedSource, "[Id(\"VariationBase\")] System.Guid VariationId");
     }
 
     [Test]

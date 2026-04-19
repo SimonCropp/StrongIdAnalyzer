@@ -7,6 +7,8 @@ public class AddIdCodeFixProvider : CodeFixProvider
     // Kept in sync with IdMismatchAnalyzer. Duplicated instead of shared to keep
     // the analyzer project free of a back-reference from the codefix project.
     const string valueKey = "IdValue";
+    const string targetValueKey = "IdValueTarget";
+    const string sourceValueKey = "IdValueSource";
     const string idMismatchId = "SIA001";
     const string missingSourceIdId = "SIA002";
     const string droppedIdId = "SIA003";
@@ -62,13 +64,46 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return;
         }
 
-        if (!diagnostic.Properties.TryGetValue(valueKey, out var value) ||
-            value is null)
+        // Slot 0 is the target declaration, slot 1 (if present) is the source.
+        // Each side gets offered the OTHER side's tag as the replacement value.
+        // Older analyzer versions only populate slot 0 and IdValue; the typed keys
+        // fall back to IdValue (target) or skip (source) in that case.
+        var targetValue = ReadProperty(diagnostic, targetValueKey) ?? ReadProperty(diagnostic, valueKey);
+        var sourceValue = ReadProperty(diagnostic, sourceValueKey);
+
+        await TryRegisterSideFix(
+                context,
+                diagnostic,
+                slot: 0,
+                value: targetValue)
+            .ConfigureAwait(false);
+
+        if (diagnostic.AdditionalLocations.Count > 1)
+        {
+            await TryRegisterSideFix(
+                    context,
+                    diagnostic,
+                    slot: 1,
+                    value: sourceValue)
+                .ConfigureAwait(false);
+        }
+    }
+
+    static string? ReadProperty(Diagnostic diagnostic, string key) =>
+        diagnostic.Properties.TryGetValue(key, out var value) ? value : null;
+
+    static async Task TryRegisterSideFix(
+        CodeFixContext context,
+        Diagnostic diagnostic,
+        int slot,
+        string? value)
+    {
+        if (value is null)
         {
             return;
         }
 
-        var declarationLocation = diagnostic.AdditionalLocations[0];
+        var declarationLocation = diagnostic.AdditionalLocations[slot];
         if (!declarationLocation.IsInSource)
         {
             return;
@@ -96,6 +131,8 @@ public class AddIdCodeFixProvider : CodeFixProvider
             ? $"Change attribute on {hostDescription} to [Id(\"{value}\")]"
             : $"Add [Id(\"{value}\")] to {hostDescription}";
 
+        // Equivalence keys include the slot so target-side and source-side fixes with
+        // the same literal tag don't collide in Fix All / multi-diagnostic scenarios.
         context.RegisterCodeFix(
             CodeAction.Create(
                 actionTitle,
@@ -104,7 +141,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
                     declarationLocation,
                     value,
                     cancel),
-                equivalenceKey: $"ChangeId:{value}"),
+                equivalenceKey: $"ChangeId:{slot}:{value}"),
             diagnostic);
 
         if (!hasExplicit && TryGetRenameTarget(host, value, out var newName))
@@ -117,7 +154,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
                         declarationLocation,
                         newName,
                         cancel),
-                    equivalenceKey: $"RenameId:{newName}"),
+                    equivalenceKey: $"RenameId:{slot}:{newName}"),
                 diagnostic);
         }
     }
