@@ -1069,16 +1069,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    static IdInfo GetId(ISymbol? symbol)
-    {
-        if (symbol is null)
-        {
-            return IdInfo.Unknown;
-        }
-
-        return GetIdWithInheritance(symbol);
-    }
-
     // Reads the [Id] attribute off a symbol, walking override / interface-impl chains
     // for properties so a derived class inherits the base's tag without having to
     // repeat the attribute. `new`-hide is NOT walked — `new` declares a fresh property
