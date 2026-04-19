@@ -50,7 +50,7 @@ public static class BuggyUsage
 #pragma warning restore SIA001
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L9-L44' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L10-L45' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The bug is the call to `service.GetOrderAmount(order.CustomerId)` — a customer's `Guid` is passed into a method expecting an order's `Guid`. Both are `Guid`, so the compiler is happy; at runtime the caller gets a `KeyNotFoundException`, or worse, if the `Guid` coincidentally hits a populated dictionary, silently wrong data.
@@ -90,7 +90,7 @@ public class EntityLookup
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L46-L77' title='Snippet source file'>snippet source</a> | <a href='#snippet-SilentMismatch' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L47-L78' title='Snippet source file'>snippet source</a> | <a href='#snippet-SilentMismatch' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -136,7 +136,7 @@ public static class FixedUsage
 #pragma warning restore SIA001
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L79-L116' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L80-L117' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The `IdAttribute` is source-generated into the consuming compilation — no runtime dependency on any attributes assembly. Install the analyzer package and start tagging.
@@ -296,7 +296,7 @@ public class SIA001Sample
 #pragma warning restore SIA001
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L118-L134' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA001Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L119-L135' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA001Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -337,7 +337,7 @@ public class SIA002Sample
 #pragma warning restore SIA002
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L136-L153' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA002Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L137-L154' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA002Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Suppressed when the untagged source lives in referenced metadata (e.g. `Guid.Empty`, a third-party property) — library authors can't apply `[Id]`, so the warning would offer no actionable fix.
@@ -365,7 +365,7 @@ public class SIA003Sample
 #pragma warning restore SIA003
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L155-L172' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L156-L173' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 SIA003 is suppressed when the tag can't meaningfully survive:
@@ -455,7 +455,7 @@ namespace InheritanceAbstractClassExplicit
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L174-L218' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassExplicit' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L175-L219' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassExplicit' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### Abstract class + naming convention only
@@ -502,7 +502,7 @@ namespace InheritanceAbstractClassConvention
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L220-L261' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassConvention' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L221-L262' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassConvention' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### Interface + explicit `[Id]` on every level
@@ -549,7 +549,7 @@ namespace InheritanceInterfaceExplicit
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L263-L304' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceExplicit' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L264-L305' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceExplicit' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### Interface + naming convention only
@@ -595,7 +595,7 @@ namespace InheritanceInterfaceConvention
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L306-L346' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceConvention' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L307-L347' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceConvention' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -733,7 +733,7 @@ public static class RecordUsage
         Consume(holder.Value); // no diagnostic — attribute flows to property
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L348-L360' title='Snippet source file'>snippet source</a> | <a href='#snippet-RecordPrimaryCtorParameter' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L349-L361' title='Snippet source file'>snippet source</a> | <a href='#snippet-RecordPrimaryCtorParameter' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 An explicit `[property: Id(...)]` on the property still wins — if both targets are attributed, the property's own attribute is used. Naming-convention inference (for properties named `Id` or `XxxId`) is only consulted after both the property's and the parameter's explicit attributes come up empty.
