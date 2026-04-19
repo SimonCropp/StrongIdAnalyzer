@@ -151,6 +151,107 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public void GenericUnionIdAttribute_SourceInOptions_NoDiagnostic()
+    {
+        var source = """
+            public class Customer {}
+            public class Order {}
+            public class Target
+            {
+                public void Consume([UnionId<Customer, Order>] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id<Customer>]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void GenericUnionIdAttribute_SourceNotInOptions_ReportsSIA001()
+    {
+        var source = """
+            public class Customer {}
+            public class Order {}
+            public class Product {}
+            public class Target
+            {
+                public void Consume([UnionId<Customer, Order>] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id<Product>]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void GenericUnionIdAttribute_FiveArgs_NoDiagnostic()
+    {
+        var source = """
+            public class A {}
+            public class B {}
+            public class C {}
+            public class D {}
+            public class E {}
+            public class Target
+            {
+                public void Consume([UnionId<A, B, C, D, E>] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id<E>]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void GenericUnionIdAttribute_EquivalentToStringForm()
+    {
+        var source = """
+            public class Customer {}
+            public class Order {}
+            public class Target
+            {
+                public void Consume([UnionId("Customer", "Order")] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [UnionId<Customer, Order>]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
     public void MethodReturnSource_Untagged_IsUnknown()
     {
         var source =

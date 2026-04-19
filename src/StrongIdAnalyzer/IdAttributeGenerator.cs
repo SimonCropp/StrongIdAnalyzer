@@ -67,6 +67,57 @@ public class IdAttributeGenerator : IIncrementalGenerator
         [ExcludeFromCodeCoverage]
         [DebuggerNonUserCode]
         sealed class IdAttribute<T> : Attribute;
+
+        /// <summary>
+        /// Generic form of <see cref="UnionIdAttribute"/>. <c>[UnionId&lt;Customer, Order&gt;]</c>
+        /// is equivalent to <c>[UnionId("Customer", "Order")]</c>.
+        /// </summary>
+        [AttributeUsage(
+            AttributeTargets.Property |
+            AttributeTargets.Field |
+            AttributeTargets.Parameter |
+            AttributeTargets.ReturnValue,
+            AllowMultiple = false,
+            Inherited = false)]
+        [ExcludeFromCodeCoverage]
+        [DebuggerNonUserCode]
+        sealed class UnionIdAttribute<T1, T2> : Attribute;
+
+        /// <summary>Three-type generic form of <see cref="UnionIdAttribute"/>.</summary>
+        [AttributeUsage(
+            AttributeTargets.Property |
+            AttributeTargets.Field |
+            AttributeTargets.Parameter |
+            AttributeTargets.ReturnValue,
+            AllowMultiple = false,
+            Inherited = false)]
+        [ExcludeFromCodeCoverage]
+        [DebuggerNonUserCode]
+        sealed class UnionIdAttribute<T1, T2, T3> : Attribute;
+
+        /// <summary>Four-type generic form of <see cref="UnionIdAttribute"/>.</summary>
+        [AttributeUsage(
+            AttributeTargets.Property |
+            AttributeTargets.Field |
+            AttributeTargets.Parameter |
+            AttributeTargets.ReturnValue,
+            AllowMultiple = false,
+            Inherited = false)]
+        [ExcludeFromCodeCoverage]
+        [DebuggerNonUserCode]
+        sealed class UnionIdAttribute<T1, T2, T3, T4> : Attribute;
+
+        /// <summary>Five-type generic form of <see cref="UnionIdAttribute"/>.</summary>
+        [AttributeUsage(
+            AttributeTargets.Property |
+            AttributeTargets.Field |
+            AttributeTargets.Parameter |
+            AttributeTargets.ReturnValue,
+            AllowMultiple = false,
+            Inherited = false)]
+        [ExcludeFromCodeCoverage]
+        [DebuggerNonUserCode]
+        sealed class UnionIdAttribute<T1, T2, T3, T4, T5> : Attribute;
         """;
 
     public void Initialize(IncrementalGeneratorInitializationContext context)

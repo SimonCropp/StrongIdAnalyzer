@@ -419,7 +419,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         foreach (var attribute in attributes)
         {
             if (IsAnyIdAttribute(attribute) ||
-                IsAttributeNamed(attribute, unionIdMetadataName))
+                IsAnyUnionIdAttribute(attribute))
             {
                 return true;
             }
@@ -540,6 +540,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     const string unionIdMetadataName = "StrongIdAnalyzer.UnionIdAttribute";
     const string idNamespace = "StrongIdAnalyzer";
     const string idGenericMetadataName = "IdAttribute`1";
+    const string unionIdGenericMetadataPrefix = "UnionIdAttribute`";
+    const int unionIdMaxGenericArity = 5;
 
     readonly struct Config(ImmutableArray<string> suppressedNamespaces)
     {
@@ -591,6 +593,55 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static bool IsAnyIdAttribute(AttributeData attribute) =>
         IsAttributeNamed(attribute, idMetadataName) ||
         TryGetGenericIdTag(attribute, out _);
+
+    // Matches `[UnionId<T1, T2, ...>]` (arities 2..5). Each type argument contributes its
+    // short name as a tag, mirroring `[UnionId(nameof(T1), nameof(T2), ...)]`.
+    static bool TryGetGenericUnionIdTags(AttributeData attribute, out ImmutableArray<string> tags)
+    {
+        tags = ImmutableArray<string>.Empty;
+        var attributeClass = attribute.AttributeClass;
+        if (attributeClass is null)
+        {
+            return false;
+        }
+
+        var arity = attributeClass.Arity;
+        if (arity < 2 || arity > unionIdMaxGenericArity)
+        {
+            return false;
+        }
+
+        var original = attributeClass.OriginalDefinition;
+        if (original.MetadataName != unionIdGenericMetadataPrefix + arity ||
+            original.ContainingNamespace?.ToDisplayString() != idNamespace)
+        {
+            return false;
+        }
+
+        var builder = ImmutableArray.CreateBuilder<string>(arity);
+        foreach (var typeArgument in attributeClass.TypeArguments)
+        {
+            if (typeArgument.TypeKind is TypeKind.Error or TypeKind.TypeParameter)
+            {
+                return false;
+            }
+
+            var name = typeArgument.Name;
+            if (string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+
+            builder.Add(name);
+        }
+
+        tags = builder.ToImmutable();
+        return true;
+    }
+
+    static bool IsAnyUnionIdAttribute(AttributeData attribute) =>
+        IsAttributeNamed(attribute, unionIdMetadataName) ||
+        TryGetGenericUnionIdTags(attribute, out _);
 
     static void AnalyzeBinaryOperator(OperationAnalysisContext context, Config config)
     {
@@ -1274,6 +1325,19 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (IsAttributeNamed(attribute, unionIdMetadataName))
             {
                 foreach (var option in ExtractUnionOptions(attribute))
+                {
+                    if (seen.Add(option))
+                    {
+                        tags.Add(option);
+                    }
+                }
+
+                continue;
+            }
+
+            if (TryGetGenericUnionIdTags(attribute, out var genericUnionTags))
+            {
+                foreach (var option in genericUnionTags)
                 {
                     if (seen.Add(option))
                     {
