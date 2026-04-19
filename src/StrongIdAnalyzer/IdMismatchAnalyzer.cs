@@ -720,18 +720,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return ImmutableArray<string>.Empty;
         }
 
-        // GetSymbolsWithName searches source and referenced metadata in one pass and uses
-        // the compilation's internal index — cheaper than walking GlobalNamespace.
-        var matches = compilation.GetSymbolsWithName(tag, SymbolFilter.Type)
-            .OfType<INamedTypeSymbol>()
-            .ToArray();
-        if (matches.Length == 0)
-        {
-            return ImmutableArray<string>.Empty;
-        }
-
         var result = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var type in matches)
+        foreach (var type in FindTypesByName(compilation, tag))
         {
             var baseType = type.BaseType;
             while (baseType is not null && baseType.SpecialType != SpecialType.System_Object)
@@ -759,6 +749,73 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         return result.ToImmutableArray();
+    }
+
+    // Finds every named type whose simple name equals `name` across the source assembly
+    // and every referenced assembly. Compilation.GetSymbolsWithName only searches source
+    // declarations — missing types defined in NuGet references or project dependencies.
+    static IEnumerable<INamedTypeSymbol> FindTypesByName(Compilation compilation, string name)
+    {
+        foreach (var type in EnumerateAllTypes(compilation.Assembly.GlobalNamespace))
+        {
+            if (string.Equals(type.Name, name, StringComparison.Ordinal))
+            {
+                yield return type;
+            }
+        }
+
+        foreach (var reference in compilation.References)
+        {
+            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
+            {
+                continue;
+            }
+
+            foreach (var type in EnumerateAllTypes(assembly.GlobalNamespace))
+            {
+                if (string.Equals(type.Name, name, StringComparison.Ordinal))
+                {
+                    yield return type;
+                }
+            }
+        }
+    }
+
+    static IEnumerable<INamedTypeSymbol> EnumerateAllTypes(INamespaceSymbol ns)
+    {
+        foreach (var member in ns.GetMembers())
+        {
+            switch (member)
+            {
+                case INamedTypeSymbol type:
+                    yield return type;
+                    foreach (var nested in EnumerateNestedTypes(type))
+                    {
+                        yield return nested;
+                    }
+
+                    break;
+                case INamespaceSymbol child:
+                    foreach (var type in EnumerateAllTypes(child))
+                    {
+                        yield return type;
+                    }
+
+                    break;
+            }
+        }
+    }
+
+    static IEnumerable<INamedTypeSymbol> EnumerateNestedTypes(INamedTypeSymbol type)
+    {
+        foreach (var nested in type.GetTypeMembers())
+        {
+            yield return nested;
+            foreach (var deeper in EnumerateNestedTypes(nested))
+            {
+                yield return deeper;
+            }
+        }
     }
 
     static void AnalyzeBinaryOperator(OperationAnalysisContext context, Config config)

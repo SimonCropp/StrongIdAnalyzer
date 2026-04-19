@@ -2357,6 +2357,37 @@ public class IdMismatchAnalyzerTests
         IsTrue(diagnostics[0].GetMessage().Contains("Customer"));
     }
 
+    [Test]
+    public void CrossAssembly_DerivedTagFlowsToBaseTarget_NoDiagnostic()
+    {
+        // Real-world case: derived/base types live in a referenced assembly (e.g. the
+        // data-model package) while the consumer assembly sends a message that widens
+        // via the base class. The type-name lookup must walk referenced metadata,
+        // not just source declarations.
+        var messagesSource =
+            """
+            public abstract class ProgramBillBase {}
+            public class ProgramBill : ProgramBillBase {}
+
+            public record GenerateSnapshot([Id("ProgramBillBase")] System.Guid BillId);
+            """;
+
+        var consumerSource =
+            """
+            public class Handler
+            {
+                [Id("ProgramBill")]
+                public System.Guid Value { get; set; }
+
+                public GenerateSnapshot Build() => new(Value);
+            }
+            """;
+
+        var diagnostics = GetCrossAssemblyDiagnostics(messagesSource, consumerSource);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
     static ImmutableArray<Diagnostic> GetCrossAssemblyDiagnostics(
         string messagesSource,
         string consumerSource)
