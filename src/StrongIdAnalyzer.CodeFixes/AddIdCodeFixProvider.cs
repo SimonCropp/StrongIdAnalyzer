@@ -132,7 +132,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         {
             case PropertyDeclarationSyntax property:
                 return $"property '{property.Identifier.Text}'";
-            case FieldDeclarationSyntax field when field.Declaration.Variables.Count > 0:
+            case FieldDeclarationSyntax { Declaration.Variables.Count: > 0 } field:
                 return $"field '{field.Declaration.Variables[0].Identifier.Text}'";
             case ParameterSyntax parameter:
                 return $"parameter '{parameter.Identifier.Text}'";
@@ -188,7 +188,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         var currentName = host switch
         {
             PropertyDeclarationSyntax property => property.Identifier.Text,
-            FieldDeclarationSyntax field when field.Declaration.Variables.Count == 1 =>
+            FieldDeclarationSyntax { Declaration.Variables.Count: 1 } field =>
                 field.Declaration.Variables[0].Identifier.Text,
             ParameterSyntax parameter => parameter.Identifier.Text,
             _ => null
@@ -199,7 +199,8 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return false;
         }
 
-        if (currentName.Length <= 2 || !currentName.EndsWith("Id", System.StringComparison.Ordinal))
+        if (currentName.Length <= 2 ||
+            !currentName.EndsWith("Id", StringComparison.Ordinal))
         {
             return false;
         }
@@ -286,7 +287,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
             .RenameSymbolAsync(
                 document.Project.Solution,
                 symbol,
-                new SymbolRenameOptions(),
+                new(),
                 newName,
                 cancel)
             .ConfigureAwait(false);

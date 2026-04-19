@@ -53,7 +53,7 @@ public static class BuggyUsage
 <sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L9-L44' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-The bug is the call to `service.GetOrderAmount(order.CustomerId)` — a customer's `Guid` is passed into a method expecting an order's `Guid`. Both are `Guid`, so the compiler is happy; at runtime you get a `KeyNotFoundException`, or worse, if the `Guid` coincidentally hits a populated dictionary, silently wrong data.
+The bug is the call to `service.GetOrderAmount(order.CustomerId)` — a customer's `Guid` is passed into a method expecting an order's `Guid`. Both are `Guid`, so the compiler is happy; at runtime the caller gets a `KeyNotFoundException`, or worse, if the `Guid` coincidentally hits a populated dictionary, silently wrong data.
 
 
 ### A more insidious variant
@@ -139,12 +139,70 @@ public static class FixedUsage
 <sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L79-L116' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-The `IdAttribute` is source-generated into your compilation — you don't take a runtime dependency on any attributes assembly. Just install the analyzer package and start tagging.
+The `IdAttribute` is source-generated into the consuming compilation — no runtime dependency on any attributes assembly. Install the analyzer package and start tagging.
+
+
+## Alternatives, and why this one
+
+The "cross-wired IDs" problem has three established families of solutions in .NET. Each makes a different trade between enforcement strength, runtime cost, and integration effort.
+
+### 1. Hand-rolled wrapper types
+
+A `readonly record struct CustomerId(Guid Value)` per domain type. Conversions are explicit; the compiler enforces type separation with no analyzer needed.
+
+* **Pros:** strongest guarantee — a `Guid` cannot flow into a `CustomerId` slot without an explicit cast. Works uniformly at runtime and compile time (deserialization that produces the wrong wrapper is a serialization bug, not a silent identity mixup).
+* **Cons:**
+   * **Every library in the stack has to learn the type.** EF Core won't map `CustomerId` to a column without a `ValueConverter`. System.Text.Json won't read or write it without a `JsonConverter`. ASP.NET Core route/query/form binding needs a `TypeConverter` or custom `IModelBinder`. Dapper needs an `ITypeHandler`. gRPC/Protobuf needs a custom serializer or a `.proto` message. Logging producers, cache serializers, hash keys, OpenTelemetry tags, Swagger schemas, and message-bus contracts each need their own adapter. The cost is paid *per wrapper type × per integration*.
+   * **Primitives can no longer cross domain boundaries.** The wrapper definitions have to live somewhere every consumer can reference — typically a shared `Domain.Core` / `SharedKernel` assembly. Independent bounded contexts that previously exchanged `Guid`s across a boundary now share a type dependency; services that serialize to a wire format outside the team's control (legacy SOAP, a partner's REST API, a third-party queue) still have to round-trip through the primitive and re-wrap, so the guarantee disappears at the edges anyway.
+   * **High cost to retrofit.** Introducing a wrapper into an existing codebase touches every call site that reads or passes the ID. Equality, `ToString()`, comparison, and debugger display all change shape; a column type change may require a database migration or at minimum a regenerated EF model snapshot.
+* **Best fit:** greenfield domain models where the team controls the full stack end-to-end and the ceremony is worth the permanent guarantee.
+
+### 2. Source-generated wrapper types
+
+Libraries like [`StronglyTypedId`](https://github.com/andrewlock/StronglyTypedId) (Andrew Lock) and [`Vogen`](https://github.com/SteveDunn/Vogen) (Steve Dunn) automate family #1. Declaring `[StronglyTypedId] public partial record struct CustomerId;` triggers the generator to emit the struct, equality, converters, and integration glue.
+
+* **Pros:** same runtime guarantee as hand-rolling with a fraction of the boilerplate. Generators ship converters for the *common* stacks out of the box — EF Core, Dapper, System.Text.Json, Newtonsoft, Swashbuckle.
+* **Cons:**
+   * **The wrapper type is still a custom type at runtime.** The integration surface is smaller than hand-rolling (the generator writes the common converters) but not zero — any stack the generator doesn't target needs a hand-written adapter. "Does the serializer / ORM / binder / cache / bus know about `CustomerId`?" becomes a checklist item for every new dependency.
+   * **Same domain-coupling problem as #1.** The generated wrapper types have to be visible to every project that touches the ID. Two services that were previously decoupled via a primitive `Guid` on a message contract now need a shared types assembly — or they marshal through the primitive at the boundary and lose the guarantee on the wire.
+   * **Big-bang migration.** Converting a primitive-ID codebase to wrappers is an all-or-nothing change across every call site — half-adoption is impossible because a `CustomerId` and a `Guid` don't implicitly convert.
+* **Best fit:** new projects, or projects already paying the migration cost to get the runtime-level guarantee where the integration stack falls inside the generator's supported surface.
+
+### 3. Nominal type aliases / phantom types
+
+C# 12 `using CustomerId = System.Guid;` at file scope, or generic `Id<Customer>` phantom types. Both *look* like type safety but aren't — the aliases are structural (a `CustomerId` is still exactly a `Guid` to the compiler), and phantom types degrade to primitives across API boundaries that aren't generic-aware.
+
+* **Pros:** zero runtime cost, zero integration friction.
+* **Cons:** no actual enforcement. The compiler treats `CustomerId` and `OrderId` as the same type. Useful as documentation, not as a guarantee.
+* **Best fit:** readability, not correctness.
+
+### 4. This project — compile-time tagging
+
+`[Id("Customer")]` on the primitive itself. The analyzer enforces separation at build time; the runtime type stays `Guid`/`int`/`string`.
+
+* **Pros:**
+   * **No new runtime type — the primitive stays a primitive.** EF Core columns, JSON payloads, ASP.NET binders, Dapper parameters, `Dictionary<Guid, …>`, and every serializer, logger, cache, and message bus already in the stack keep working unchanged. No `ValueConverter`s, no `JsonConverter`s, no `IModelBinder`s, no per-wrapper-type adapters.
+   * **No shared-type coupling between domains.** Two bounded contexts (or two services) can each tag a `Guid Id` with a local `[Id("...")]` independently and still exchange the value as a plain `Guid` across any boundary — no shared `Domain.Core` assembly, no wire-format adapter. The tag is metadata on the declaration; the wire sees only the primitive.
+   * **Incremental adoption.** Tag the declarations that matter, ignore the rest. No big-bang refactor — a codebase can go from zero tagged IDs to partially tagged to fully tagged without ever being in a broken state. Naming convention covers the common `Id` / `XxxId` case so most declarations need no attribute at all.
+   * **Inheritance and interface hierarchies are modeled** (see [Inheritance and covariant Id tagging](#inheritance-and-covariant-id-tagging)) — covariant tag sets mean `child.Id` satisfies parameters tagged for either the derived or base type.
+* **Cons:** enforcement is **compile-time only**. A `Guid` deserialized from an untrusted source isn't checked; flow through `object` / `dynamic` / reflection isn't tracked; expressions like ternaries, casts, and locals are intentionally `Unknown` (see [Sources the analyzer can resolve](#sources-the-analyzer-can-resolve)) to keep noise low, which means a few code shapes slip through. Where a runtime guarantee is required regardless of the code path, use family #1 or #2 instead.
+* **Best fit:** existing codebases where wrapper types would require a sprawling migration, or teams that want the compile-time catch without changing their serialization, ORM, or transport stack.
+
+### Picking between them
+
+| Need | Pick |
+| --- | --- |
+| Runtime guarantee that survives deserialization, reflection, and `object`-typed flows | #1 or #2 |
+| New project, willing to pay integration cost up front | #2 |
+| Existing project, want compile-time catch without touching serialization/ORM/transport | **this** |
+| Documentation only, no real enforcement | #3 |
+
+This analyzer is deliberately complementary to families #1 and #2 — not a replacement. Projects already running `StronglyTypedId` or `Vogen` don't need it. For teams that have evaluated the cost of introducing wrapper types across a large existing codebase and decided it isn't worth paying, this is the alternative that provides most of the catch without the migration.
 
 
 ## Naming conventions
 
-Most declarations don't need an explicit `[Id("...")]` — the analyzer infers a tag from two naming rules. Whatever falls through the rules stays untagged (no tag, no diagnostic) until you add an explicit attribute.
+Most declarations don't need an explicit `[Id("...")]` — the analyzer infers a tag from two naming rules. Whatever falls through the rules stays untagged (no tag, no diagnostic) until an explicit attribute is added.
 
 ### The two rules
 
@@ -169,8 +227,8 @@ Most declarations don't need an explicit `[Id("...")]` — the analyzer infers a
 
 ### What does *not* get a convention tag
 
-- **Parameters named just `id`** — rule 1 doesn't apply to parameters (a bare `id` has no containing-type equivalent, and parameters should be name-driven so method signatures read cleanly). Write `orderId`, or add `[Id("Order")]` explicitly.
-- **Names that are just `Id`** (on parameters) or shorter than 3 characters under rule 2 — so a property literally named `Id` only matches rule 1, never rule 2.
+- **Parameters named exactly `id`** — rule 1 doesn't apply to parameters (a bare `id` has no containing-type equivalent, and parameters should be name-driven so method signatures read cleanly). Write `orderId`, or add `[Id("Order")]` explicitly.
+- **Names that are exactly `Id`** (on parameters) or shorter than 3 characters under rule 2 — so a property literally named `Id` only matches rule 1, never rule 2.
 - **Anonymous-type properties** — `new { CustomerId = x }`. They can't carry `[Id]`, so tagging them would produce diagnostics the user has no way to silence (matters for EF `HasIndex`, LINQ projections, etc.).
 - **Indexers** — `this[Guid id]` never participates.
 - **Implicitly-declared fields** — backing fields, primary-constructor capture fields, and similar compiler-synthesized members.
@@ -194,7 +252,7 @@ At access sites (`child.Id`), covariant receiver-type walking unions the current
 
 ### Overriding the convention
 
-Any `[Id("...")]` / `[UnionId("...")]` on the symbol wins over the convention, so you can broaden, narrow, or rename at will:
+Any `[Id("...")]` / `[UnionId("...")]` on the symbol wins over the convention, so the tag can be broadened, narrowed, or renamed at will:
 
 ```cs
 public class Customer
@@ -250,7 +308,7 @@ For flow-style mismatches (argument, assignment, property/field initializer) the
  * **Add `[Id("<source tag>")]` to `<kind> '<name>'`** — when the target is untagged (its current tag came from naming convention), adds the attribute.
  * **Rename `<kind> '<name>'` to `<sourceTag>Id`** — when the target has no explicit attribute and its name matches the `XxxId` convention. First-character case is preserved (`bidId` → `treasuryBidId`, `BidId` → `TreasuryBidId`). Works for parameters, properties, and single-declarator fields.
 
-The `<source tag>` is the receiver's static type, not the declaring type of the `Id` member. For `treasuryBid.Id` where `Id` is inherited from `BaseEntity`, the fix suggests `TreasuryBid` — what you read locally at the call site — rather than `BaseEntity`.
+The `<source tag>` is the receiver's static type, not the declaring type of the `Id` member. For `treasuryBid.Id` where `Id` is inherited from `BaseEntity`, the fix suggests `TreasuryBid` — what reads locally at the call site — rather than `BaseEntity`.
 
 The fixer always changes the *target* side because the analyzer picks a direction by fix site, not by blaming. If the source annotation is the one that's actually wrong, fix it by hand — a silent cross-domain rewrite would be a behavior change dressed as a fix.
 
@@ -574,7 +632,7 @@ strongidanalyzer.suppressed_namespaces =
 Diagnostics fire on:
 
  * Method, constructor, indexer, and delegate arguments
- * Simple assignments (`=`), including inside object initializers
+ * Direct assignments (`=`), including inside object initializers
  * Property and field inline initializers
  * Equality comparisons (`==`, `!=`) — SIA001 when both sides carry different `[Id]` values; SIA002 (with fix) when only one side is tagged and the other is a user-owned untagged member. Comparisons against `Guid.Empty`, literals, locals, and method results stay silent.
 
