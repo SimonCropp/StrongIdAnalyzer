@@ -537,6 +537,113 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     const string idMetadataName = "StrongIdAnalyzer.IdAttribute";
     const string unionIdMetadataName = "StrongIdAnalyzer.UnionIdAttribute";
+    const string indexAttributeMetadataName = "StrongIdAnalyzer.StrongIdIndexAttribute";
+
+    // Looks up pre-resolved tags for `symbol` in the containing-assembly index, if one
+    // was shipped. A hit returns the full tag set; callers can skip the usual override /
+    // interface / convention walk entirely. Returns false when the symbol is in the
+    // source assembly (no cross-assembly walk to skip) or the containing assembly has
+    // no index attribute.
+    static bool TryGetFromIndex(ISymbol symbol, Config config, out ImmutableArray<string> tags)
+    {
+        tags = default;
+        var assembly = symbol.ContainingAssembly;
+        if (assembly is null ||
+            SymbolEqualityComparer.Default.Equals(assembly, config.Compilation.Assembly))
+        {
+            return false;
+        }
+
+        // Manual TryGetValue/TryAdd avoids the closure allocation that GetOrAdd(key, lambda)
+        // would make per call — Compilation would be captured every time.
+        if (!config.IndexCache.TryGetValue(assembly, out var index))
+        {
+            index = LoadIndex(assembly, config.Compilation);
+            config.IndexCache.TryAdd(assembly, index);
+        }
+
+        return index is not null && index.TryGetValue(symbol, out tags);
+    }
+
+    // Reads [assembly: StrongIdIndex("...")] and pre-resolves every "DocId=Tag1,Tag2;..."
+    // entry into an ISymbol → tags map. Parameter DocIds use a custom "M:...::paramName"
+    // form since Roslyn has no native parameter DocId. Returns null when the assembly
+    // has no index attribute; callers treat that as "fall back to the walk".
+    static Dictionary<ISymbol, ImmutableArray<string>>? LoadIndex(IAssemblySymbol assembly, Compilation compilation)
+    {
+        foreach (var attribute in assembly.GetAttributes())
+        {
+            if (!IsAttributeNamed(attribute, indexAttributeMetadataName))
+            {
+                continue;
+            }
+
+            if (attribute.ConstructorArguments.Length == 0 ||
+                attribute.ConstructorArguments[0].Value is not string encoded)
+            {
+                return null;
+            }
+
+            var dict = new Dictionary<ISymbol, ImmutableArray<string>>(SymbolEqualityComparer.Default);
+            foreach (var entry in encoded.Split(';'))
+            {
+                if (entry.Length == 0)
+                {
+                    continue;
+                }
+
+                var eq = entry.IndexOf('=');
+                if (eq < 0)
+                {
+                    continue;
+                }
+
+                var rawKey = entry.Substring(0, eq);
+                var rawValue = entry.Substring(eq + 1);
+
+                var symbol = ResolveIndexSymbol(rawKey, compilation);
+                if (symbol is null)
+                {
+                    continue;
+                }
+
+                var tags = rawValue.Length == 0
+                    ? ImmutableArray<string>.Empty
+                    : rawValue.Split(',').ToImmutableArray();
+                dict[symbol] = tags;
+            }
+            return dict;
+        }
+
+        return null;
+    }
+
+    static ISymbol? ResolveIndexSymbol(string key, Compilation compilation)
+    {
+        var sep = key.IndexOf("::", StringComparison.Ordinal);
+        if (sep < 0)
+        {
+            return DocumentationCommentId.GetFirstSymbolForDeclarationId(key, compilation);
+        }
+
+        var methodId = key.Substring(0, sep);
+        var paramName = key.Substring(sep + 2);
+        if (DocumentationCommentId.GetFirstSymbolForDeclarationId(methodId, compilation)
+            is not IMethodSymbol method)
+        {
+            return null;
+        }
+
+        foreach (var parameter in method.Parameters)
+        {
+            if (parameter.Name == paramName)
+            {
+                return parameter;
+            }
+        }
+
+        return null;
+    }
     const string idNamespace = "StrongIdAnalyzer";
     const string idGenericMetadataName = "IdAttribute`1";
     const string unionIdGenericMetadataPrefix = "UnionIdAttribute`";
@@ -552,6 +659,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // the tag. Computed lazily and shared across all comparisons in the same compilation.
         public ConcurrentDictionary<string, ImmutableArray<string>> AncestorTagCache { get; } =
             new(StringComparer.Ordinal);
+
+        // Per-assembly tag index loaded lazily from [assembly: StrongIdIndex(...)].
+        // When a referenced assembly ships an index, per-symbol tag lookups skip the
+        // inheritance walk entirely — a hit returns the pre-resolved tag set directly.
+        // Null entries mean "this assembly has no index, fall back to the walk".
+        public ConcurrentDictionary<IAssemblySymbol, Dictionary<ISymbol, ImmutableArray<string>>?> IndexCache { get; } =
+            new(SymbolEqualityComparer.Default);
     }
 
     // ToDisplayString with the fully-qualified format yields "global::Namespace.TypeName"
@@ -829,8 +943,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         var leftSymbol = GetSymbol(operation.LeftOperand);
         var rightSymbol = GetSymbol(operation.RightOperand);
-        var leftInfo = GetAccessInfo(operation.LeftOperand);
-        var rightInfo = GetAccessInfo(operation.RightOperand);
+        var leftInfo = GetAccessInfo(operation.LeftOperand, config);
+        var rightInfo = GetAccessInfo(operation.RightOperand, config);
 
         // Equality is symmetric: if the two tag sets share any tag, the values could
         // represent the same identity. Only fire SIA001 when the sets are disjoint.
@@ -912,9 +1026,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var targetInfo = GetIdWithInheritance(parameter);
+        var targetInfo = GetIdWithInheritance(parameter, config);
         var sourceSymbol = GetSymbol(argument.Value);
-        var sourceInfo = GetAccessInfo(argument.Value);
+        var sourceInfo = GetAccessInfo(argument.Value, config);
         Report(
             context,
             argument.Value.Syntax.GetLocation(),
@@ -937,9 +1051,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Target walks its receiver chain too — `parent.Id = value` carries Parent's
         // receiver context just like a read would, so assignments use the same multi-tag
         // view on both sides.
-        var targetInfo = GetAccessInfo(assignment.Target);
+        var targetInfo = GetAccessInfo(assignment.Target, config);
         var sourceSymbol = GetSymbol(assignment.Value);
-        var sourceInfo = GetAccessInfo(assignment.Value);
+        var sourceInfo = GetAccessInfo(assignment.Value, config);
         Report(
             context,
             assignment.Value.Syntax.GetLocation(),
@@ -954,10 +1068,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         var init = (IPropertyInitializerOperation)context.Operation;
         var sourceSymbol = GetSymbol(init.Value);
-        var sourceInfo = GetAccessInfo(init.Value);
+        var sourceInfo = GetAccessInfo(init.Value, config);
         foreach (var property in init.InitializedProperties)
         {
-            var targetInfo = GetIdWithInheritance(property);
+            var targetInfo = GetIdWithInheritance(property, config);
             Report(
                 context,
                 init.Value.Syntax.GetLocation(),
@@ -973,10 +1087,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         var init = (IFieldInitializerOperation)context.Operation;
         var sourceSymbol = GetSymbol(init.Value);
-        var sourceInfo = GetAccessInfo(init.Value);
+        var sourceInfo = GetAccessInfo(init.Value, config);
         foreach (var field in init.InitializedFields)
         {
-            var targetInfo = GetIdWithInheritance(field);
+            var targetInfo = GetIdWithInheritance(field, config);
             Report(
                 context,
                 init.Value.Syntax.GetLocation(),
@@ -1005,15 +1119,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // named `Id` walks the receiver's static-type chain (up to the declaring type) and
     // adds the convention tag for each level — so `child1.Id` carries both "Child1" and
     // "Base" and can flow into parameters tagged either way.
-    static IdInfo GetAccessInfo(IOperation operation)
+    static IdInfo GetAccessInfo(IOperation operation, Config config)
     {
         operation = Unwrap(operation);
         return operation switch
         {
-            IPropertyReferenceOperation prop => GetMemberAccessInfo(prop.Property, prop.Instance?.Type),
-            IFieldReferenceOperation field => GetMemberAccessInfo(field.Field, field.Instance?.Type),
-            IParameterReferenceOperation param => GetIdWithInheritance(param.Parameter),
-            IInvocationOperation invocation => GetReturnInfo(invocation.TargetMethod),
+            IPropertyReferenceOperation prop => GetMemberAccessInfo(prop.Property, prop.Instance?.Type, config),
+            IFieldReferenceOperation field => GetMemberAccessInfo(field.Field, field.Instance?.Type, config),
+            IParameterReferenceOperation param => GetIdWithInheritance(param.Parameter, config),
+            IInvocationOperation invocation => GetReturnInfo(invocation.TargetMethod, config),
             _ => IdInfo.Unknown
         };
     }
@@ -1023,8 +1137,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // No naming convention — method names aren't a reliable tag source. Absence of an
     // attribute produces Unknown (not NotPresent) so untagged invocations like
     // `Guid.NewGuid()` stay silent — same policy as local variables and literals.
-    static IdInfo GetReturnInfo(IMethodSymbol method)
+    static IdInfo GetReturnInfo(IMethodSymbol method, Config config)
     {
+        if (TryGetFromIndex(method, config, out var indexed))
+        {
+            return indexed.IsDefaultOrEmpty ? IdInfo.Unknown : IdInfo.Present(indexed);
+        }
+
         var direct = GetIdFromAttributes(method.GetReturnTypeAttributes());
         if (direct.State == IdState.Present)
         {
@@ -1077,8 +1196,18 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return IdInfo.Unknown;
     }
 
-    static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType)
+    static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType, Config config)
     {
+        // Pre-resolved index covers the library-side (member + its declaring-type receiver)
+        // tag set directly. When hit, skip EnumerateMemberChain (AllInterfaces walk) AND
+        // the receiver-type walk — the producer has already folded those contributions in
+        // for the concrete types it owns. Consumer-side subclass receivers fall through
+        // because ContainingAssembly is the source assembly.
+        if (TryGetFromIndex(member, config, out var indexed))
+        {
+            return indexed.IsDefaultOrEmpty ? IdInfo.NotPresent : IdInfo.Present(indexed);
+        }
+
         var receiverTags = ImmutableArray.CreateBuilder<string>();
         var memberTags = ImmutableArray.CreateBuilder<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -1259,8 +1388,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     //   2. Inherited [Id] via override/interface impl chain (properties & parameters).
     //   3. Naming convention (properties/fields only).
     //   4. NotPresent.
-    static IdInfo GetIdWithInheritance(ISymbol symbol)
+    static IdInfo GetIdWithInheritance(ISymbol symbol, Config config)
     {
+        if (TryGetFromIndex(symbol, config, out var indexed))
+        {
+            return indexed.IsDefaultOrEmpty ? IdInfo.NotPresent : IdInfo.Present(indexed);
+        }
+
         var direct = GetIdFromAttributes(symbol.GetAttributes());
         if (direct.State == IdState.Present)
         {

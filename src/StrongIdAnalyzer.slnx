@@ -6,6 +6,7 @@
     <File Path="global.json" />
     <File Path="nuget.config" />
   </Folder>
+  <Project Path="Benchmarks/Benchmarks.csproj" />
   <Project Path="StrongIdAnalyzer/StrongIdAnalyzer.csproj" />
   <Project Path="StrongIdAnalyzer.CodeFixes/StrongIdAnalyzer.CodeFixes.csproj" />
   <Project Path="StrongIdAnalyzer.Tests/StrongIdAnalyzer.Tests.csproj" />
