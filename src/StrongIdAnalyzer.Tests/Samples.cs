@@ -2,6 +2,7 @@
 // ReSharper disable UnusedParameter.Local
 // ReSharper disable ClassNeverInstantiated.Local
 // ReSharper disable MemberCanBePrivate.Local
+// ReSharper disable CollectionNeverUpdated.Local
 #pragma warning disable CS0414
 #pragma warning disable CA1822
 #pragma warning disable CA1002

@@ -726,7 +726,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         var arity = attributeClass.Arity;
-        if (arity < 2 || arity > unionIdMaxGenericArity)
+        if (arity is < 2 or > unionIdMaxGenericArity)
         {
             return false;
         }

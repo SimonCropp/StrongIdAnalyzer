@@ -6,7 +6,7 @@
 [TestFixture]
 public class IndexTests
 {
-    const string IndexAttributeDeclaration =
+    const string indexAttributeDeclaration =
         """
         namespace StrongIdAnalyzer
         {
@@ -66,7 +66,7 @@ public class IndexTests
             library,
             index: "P:Vault.Token=Order",
             consumer);
-        Assert.That(withIndexOrder.Select(_ => _.Id), Is.EquivalentTo(new[] { "SIA001" }),
+        Assert.That(withIndexOrder.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]),
             "index gives Vault.Token the Order tag; target is Customer → SIA001 (index was read).");
     }
 
@@ -110,7 +110,7 @@ public class IndexTests
             index: "P:Vault.Token=Order",
             consumer);
 
-        Assert.That(diagnostics.Select(_ => _.Id), Is.EquivalentTo(new[] { "SIA001" }));
+        Assert.That(diagnostics.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]));
         Assert.That(diagnostics[0].GetMessage(), Does.Contain("Order").And.Contain("Customer"));
     }
 
@@ -160,7 +160,7 @@ public class IndexTests
             index: "P:Vault.Token=Customer,Order",
             consumer);
 
-        Assert.That(diagnostics.Select(_ => _.Id), Is.EquivalentTo(new[] { "SIA001" }));
+        Assert.That(diagnostics.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]));
         Assert.That(diagnostics[0].GetMessage(), Does.Contain("Invoice"));
     }
 
@@ -209,7 +209,7 @@ public class IndexTests
             library,
             index: "M:Methods.Take(System.Guid)::id=Order",
             consumer);
-        Assert.That(withIndex.Select(_ => _.Id), Is.EquivalentTo(new[] { "SIA001" }),
+        Assert.That(withIndex.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]),
             "index gives parameter the Order tag; source is Customer → SIA001");
     }
 
@@ -301,7 +301,7 @@ public class IndexTests
 
         var diagnostics = GetCrossAssemblyDiagnostics(library, index: null, consumer);
 
-        Assert.That(diagnostics.Select(_ => _.Id), Is.EquivalentTo(new[] { "SIA001" }),
+        Assert.That(diagnostics.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]),
             "walk finds Customer tag on ICustomer.Id via AllInterfaces; target is Order → SIA001");
     }
 
@@ -331,10 +331,10 @@ public class IndexTests
             // namespace declarations — smashing it into one file with the library types
             // would violate CS1730 ordering.
             libraryTrees.Add(CSharpSyntaxTree.ParseText(
-                $$"""
-                [assembly: StrongIdAnalyzer.StrongIdIndexAttribute("{{index}}")]
+                $"""
+                [assembly: StrongIdAnalyzer.StrongIdIndexAttribute("{index}")]
 
-                {{IndexAttributeDeclaration}}
+                {indexAttributeDeclaration}
                 """));
         }
 
