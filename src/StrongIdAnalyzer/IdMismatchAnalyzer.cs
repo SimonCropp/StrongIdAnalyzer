@@ -90,7 +90,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // a property with [Id("Customer")] and the consumer assembly assigns it.
             var suppressedNamespaces = ReadSuppressedNamespaces(
                 start.Options.AnalyzerConfigOptionsProvider);
-            var config = new Config(suppressedNamespaces);
+            var config = new Config(suppressedNamespaces, start.Compilation);
 
             start.RegisterOperationAction(
                 _ => AnalyzeArgument(_, config),
@@ -542,9 +542,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     const string unionIdGenericMetadataPrefix = "UnionIdAttribute`";
     const int unionIdMaxGenericArity = 5;
 
-    readonly struct Config(ImmutableArray<string> suppressedNamespaces)
+    readonly struct Config(ImmutableArray<string> suppressedNamespaces, Compilation compilation)
     {
         public ImmutableArray<string> SuppressedNamespaces { get; } = suppressedNamespaces;
+        public Compilation Compilation { get; } = compilation;
+
+        // Tag-to-ancestor-name cache. Keyed by a tag string; value is the union of base-type
+        // and interface names for every type in the compilation whose simple name equals
+        // the tag. Computed lazily and shared across all comparisons in the same compilation.
+        public ConcurrentDictionary<string, ImmutableArray<string>> AncestorTagCache { get; } =
+            new(StringComparer.Ordinal);
     }
 
     // ToDisplayString with the fully-qualified format yields "global::Namespace.TypeName"
@@ -642,6 +649,118 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         IsAttributeNamed(attribute, unionIdMetadataName) ||
         TryGetGenericUnionIdTags(attribute, out _);
 
+    // Widens a source tag set to include ancestor type names. For every tag that resolves
+    // to one or more types in the compilation, adds the names of all base classes (up to
+    // but not including System.Object) and all implemented interfaces. Tags that don't
+    // resolve to any type are left as-is — exact-match only, same as before.
+    //
+    // Source-only widening models covariance: a value tagged `ProgramBill` flows into a
+    // target tagged `ProgramBillBase` because the derived id IS a base id. The reverse
+    // still fails because the target isn't widened. Equality comparisons widen both sides
+    // because equality is symmetric.
+    static IdInfo Widen(IdInfo info, Config config)
+    {
+        if (info.State != IdState.Present || info.Tags.IsDefaultOrEmpty)
+        {
+            return info;
+        }
+
+        ImmutableArray<string>.Builder? additions = null;
+        HashSet<string>? seen = null;
+
+        foreach (var tag in info.Tags)
+        {
+            var ancestors = GetAncestorTags(tag, config);
+            if (ancestors.IsDefaultOrEmpty)
+            {
+                continue;
+            }
+
+            if (additions is null)
+            {
+                additions = ImmutableArray.CreateBuilder<string>();
+                seen = new HashSet<string>(info.Tags, StringComparer.Ordinal);
+            }
+
+            foreach (var ancestor in ancestors)
+            {
+                if (seen!.Add(ancestor))
+                {
+                    additions.Add(ancestor);
+                }
+            }
+        }
+
+        if (additions is null || additions.Count == 0)
+        {
+            return info;
+        }
+
+        var combined = ImmutableArray.CreateBuilder<string>(info.Tags.Length + additions.Count);
+        combined.AddRange(info.Tags);
+        combined.AddRange(additions);
+        return IdInfo.Present(combined.ToImmutable());
+    }
+
+    static ImmutableArray<string> GetAncestorTags(string tag, Config config)
+    {
+        if (config.AncestorTagCache.TryGetValue(tag, out var cached))
+        {
+            return cached;
+        }
+
+        var computed = ComputeAncestorTags(tag, config.Compilation);
+        return config.AncestorTagCache.GetOrAdd(tag, computed);
+    }
+
+    static ImmutableArray<string> ComputeAncestorTags(string tag, Compilation compilation)
+    {
+        if (string.IsNullOrEmpty(tag))
+        {
+            return ImmutableArray<string>.Empty;
+        }
+
+        // GetSymbolsWithName searches source and referenced metadata in one pass and uses
+        // the compilation's internal index — cheaper than walking GlobalNamespace.
+        var matches = compilation.GetSymbolsWithName(tag, SymbolFilter.Type)
+            .OfType<INamedTypeSymbol>()
+            .ToArray();
+        if (matches.Length == 0)
+        {
+            return ImmutableArray<string>.Empty;
+        }
+
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var type in matches)
+        {
+            var baseType = type.BaseType;
+            while (baseType is not null && baseType.SpecialType != SpecialType.System_Object)
+            {
+                if (baseType.Name.Length > 0)
+                {
+                    result.Add(baseType.Name);
+                }
+
+                baseType = baseType.BaseType;
+            }
+
+            foreach (var iface in type.AllInterfaces)
+            {
+                if (iface.Name.Length > 0)
+                {
+                    result.Add(iface.Name);
+                }
+            }
+        }
+
+        if (result.Count == 0)
+        {
+            return ImmutableArray<string>.Empty;
+        }
+
+        return result.ToImmutableArray();
+    }
+
     static void AnalyzeBinaryOperator(OperationAnalysisContext context, Config config)
     {
         var operation = (IBinaryOperation)context.Operation;
@@ -661,7 +780,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (leftInfo.State == IdState.Present &&
             rightInfo.State == IdState.Present)
         {
-            if (leftInfo.IntersectsWith(rightInfo))
+            // Equality is symmetric, so widen both sides — a derived id comparing equal
+            // to a base id is legitimate (the actual entity might be the derived type).
+            var leftWidened = Widen(leftInfo, config);
+            var rightWidened = Widen(rightInfo, config);
+            if (leftWidened.IntersectsWith(rightWidened))
             {
                 return;
             }
@@ -1385,7 +1508,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // value could legitimately flow in. Intersection is symmetric, so it handles
             // both receiver-walked covariant sources (`child.Id` = {"Child","Base"}) and
             // union-tagged targets (`[UnionId("A","B")]` accepts "A" or "B") uniformly.
-            if (!target.IntersectsWith(source))
+            // Widen the source only: a derived-tagged value can flow where a base-tagged
+            // target is expected, but not the other way around.
+            var widenedSource = Widen(source, config);
+            if (!target.IntersectsWith(widenedSource))
             {
                 // Attach both declarations as additional locations so the code fix can
                 // offer to fix either side. Slot 0 is always the target; slot 1 is the

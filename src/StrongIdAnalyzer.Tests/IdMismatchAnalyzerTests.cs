@@ -252,6 +252,131 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public void DerivedTagFlowsToBaseTarget_NoDiagnostic()
+    {
+        var source = """
+            public abstract class ProgramBillBase {}
+            public class ProgramBill : ProgramBillBase {}
+            public class Target
+            {
+                public void Consume([Id("ProgramBillBase")] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id("ProgramBill")]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void BaseTagToDerivedTarget_ReportsSIA001()
+    {
+        // Opposite direction of covariance: a base-tagged value must NOT silently flow
+        // into a derived-tagged target. Only the source side widens.
+        var source = """
+            public abstract class ProgramBillBase {}
+            public class ProgramBill : ProgramBillBase {}
+            public class Target
+            {
+                public void Consume([Id("ProgramBill")] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id("ProgramBillBase")]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void InterfaceTagFlowsFromImplementingTag_NoDiagnostic()
+    {
+        var source = """
+            public interface IBill {}
+            public class ProgramBill : IBill {}
+            public class Target
+            {
+                public void Consume([Id("IBill")] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id("ProgramBill")]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public void UnresolvedTag_KeepsExactMatchSemantics()
+    {
+        // Tag names that don't correspond to any type in the compilation should behave
+        // as before — no widening, exact match only.
+        var source = """
+            public class Target
+            {
+                public void Consume([Id("LegacyThingA")] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id("LegacyThingB")]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public void Equality_BaseAndDerivedTags_NoDiagnostic()
+    {
+        // Equality is symmetric — widening both sides lets a derived id compare to a
+        // base id without firing SIA001.
+        var source = """
+            public abstract class ProgramBillBase {}
+            public class ProgramBill : ProgramBillBase {}
+            public class Holder
+            {
+                [Id("ProgramBill")]
+                public System.Guid Derived { get; set; }
+
+                [Id("ProgramBillBase")]
+                public System.Guid Base { get; set; }
+
+                public bool Compare() => Derived == Base;
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
     public void MethodReturnSource_Untagged_IsUnknown()
     {
         var source =
