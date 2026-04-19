@@ -121,7 +121,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 (ISymbol Symbol, string Value, SyntaxReference Reference)>();
 
             start.RegisterSymbolAction(
-                _ => CollectConvention(_, config, ambiguity, redundantCandidates),
+                _ => CollectConvention(_, ambiguity, redundantCandidates),
                 SymbolKind.Property,
                 SymbolKind.Field,
                 SymbolKind.Parameter);
@@ -171,7 +171,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static void CollectConvention(
         SymbolAnalysisContext context,
-        Config config,
         ConcurrentDictionary<string, ConcurrentBag<ISymbol>> ambiguity,
         ConcurrentBag<(ISymbol Symbol, string Value, SyntaxReference Reference)> redundantCandidates)
     {
@@ -186,8 +185,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var explicitAttribute = GetExplicitIdAttribute(symbol, config);
-        var hasAnyIdFamily = HasAnyIdFamilyAttribute(symbol, config);
+        var explicitAttribute = GetExplicitIdAttribute(symbol);
+        var hasAnyIdFamily = HasAnyIdFamilyAttribute(symbol);
 
         // Only the containing-type-named rule (`public Guid Id`) feeds ambiguity tracking.
         // Any explicit Id-family attribute ([Id] or [UnionId]) opts out — it resolves the
@@ -379,7 +378,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // Returns the symbol's [Id] attribute specifically — not [UnionId]. Used by the
     // SIA005 "redundant" check, which only applies to single-tag [Id("X")] values that
     // happen to equal what the convention would infer.
-    static AttributeData? GetExplicitIdAttribute(ISymbol symbol, Config config)
+    static AttributeData? GetExplicitIdAttribute(ISymbol symbol)
     {
         foreach (var attribute in symbol.GetAttributes())
         {
@@ -395,9 +394,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // True when the symbol carries any Id-family attribute — [Id] or [UnionId]. Used by
     // SIA004 ambiguity tracking so explicitly-tagged declarations drop out of the pool
     // that convention alone would have collided.
-    static bool HasAnyIdFamilyAttribute(ISymbol symbol, Config config)
+    static bool HasAnyIdFamilyAttribute(ISymbol symbol)
     {
-        if (HasIdFamilyAttribute(symbol.GetAttributes(), config))
+        if (HasIdFamilyAttribute(symbol.GetAttributes()))
         {
             return true;
         }
@@ -408,13 +407,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (symbol is IPropertySymbol property &&
             FindRecordPrimaryParameter(property) is { } parameter)
         {
-            return HasIdFamilyAttribute(parameter.GetAttributes(), config);
+            return HasIdFamilyAttribute(parameter.GetAttributes());
         }
 
         return false;
     }
 
-    static bool HasIdFamilyAttribute(ImmutableArray<AttributeData> attributes, Config config)
+    static bool HasIdFamilyAttribute(ImmutableArray<AttributeData> attributes)
     {
         foreach (var attribute in attributes)
         {
@@ -654,8 +653,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         var leftSymbol = GetSymbol(operation.LeftOperand);
         var rightSymbol = GetSymbol(operation.RightOperand);
-        var leftInfo = GetAccessInfo(operation.LeftOperand, config);
-        var rightInfo = GetAccessInfo(operation.RightOperand, config);
+        var leftInfo = GetAccessInfo(operation.LeftOperand);
+        var rightInfo = GetAccessInfo(operation.RightOperand);
 
         // Equality is symmetric: if the two tag sets share any tag, the values could
         // represent the same identity. Only fire SIA001 when the sets are disjoint.
@@ -675,7 +674,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 operation.Syntax.GetLocation(),
                 additionalLocations: GetMismatchLocations(rightSymbol, leftSymbol),
                 properties: BuildMismatchProperties(leftInfo.FirstValue, rightInfo.FirstValue),
-                messageArgs: new object[] { leftInfo.Format(), rightInfo.Format() }));
+                messageArgs: [leftInfo.Format(), rightInfo.Format()]));
             return;
         }
 
@@ -733,9 +732,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var targetInfo = GetIdWithInheritance(parameter, config);
+        var targetInfo = GetIdWithInheritance(parameter);
         var sourceSymbol = GetSymbol(argument.Value);
-        var sourceInfo = GetAccessInfo(argument.Value, config);
+        var sourceInfo = GetAccessInfo(argument.Value);
         Report(
             context,
             argument.Value.Syntax.GetLocation(),
@@ -758,9 +757,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Target walks its receiver chain too — `parent.Id = value` carries Parent's
         // receiver context just like a read would, so assignments use the same multi-tag
         // view on both sides.
-        var targetInfo = GetAccessInfo(assignment.Target, config);
+        var targetInfo = GetAccessInfo(assignment.Target);
         var sourceSymbol = GetSymbol(assignment.Value);
-        var sourceInfo = GetAccessInfo(assignment.Value, config);
+        var sourceInfo = GetAccessInfo(assignment.Value);
         Report(
             context,
             assignment.Value.Syntax.GetLocation(),
@@ -775,10 +774,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         var init = (IPropertyInitializerOperation)context.Operation;
         var sourceSymbol = GetSymbol(init.Value);
-        var sourceInfo = GetAccessInfo(init.Value, config);
+        var sourceInfo = GetAccessInfo(init.Value);
         foreach (var property in init.InitializedProperties)
         {
-            var targetInfo = GetIdWithInheritance(property, config);
+            var targetInfo = GetIdWithInheritance(property);
             Report(
                 context,
                 init.Value.Syntax.GetLocation(),
@@ -794,10 +793,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         var init = (IFieldInitializerOperation)context.Operation;
         var sourceSymbol = GetSymbol(init.Value);
-        var sourceInfo = GetAccessInfo(init.Value, config);
+        var sourceInfo = GetAccessInfo(init.Value);
         foreach (var field in init.InitializedFields)
         {
-            var targetInfo = GetIdWithInheritance(field, config);
+            var targetInfo = GetIdWithInheritance(field);
             Report(
                 context,
                 init.Value.Syntax.GetLocation(),
@@ -826,15 +825,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // named `Id` walks the receiver's static-type chain (up to the declaring type) and
     // adds the convention tag for each level — so `child1.Id` carries both "Child1" and
     // "Base" and can flow into parameters tagged either way.
-    static IdInfo GetAccessInfo(IOperation operation, Config config)
+    static IdInfo GetAccessInfo(IOperation operation)
     {
         operation = Unwrap(operation);
         return operation switch
         {
-            IPropertyReferenceOperation prop => GetMemberAccessInfo(prop.Property, prop.Instance?.Type, config),
-            IFieldReferenceOperation field => GetMemberAccessInfo(field.Field, field.Instance?.Type, config),
-            IParameterReferenceOperation param => GetIdWithInheritance(param.Parameter, config),
-            IInvocationOperation invocation => GetReturnInfo(invocation.TargetMethod, config),
+            IPropertyReferenceOperation prop => GetMemberAccessInfo(prop.Property, prop.Instance?.Type),
+            IFieldReferenceOperation field => GetMemberAccessInfo(field.Field, field.Instance?.Type),
+            IParameterReferenceOperation param => GetIdWithInheritance(param.Parameter),
+            IInvocationOperation invocation => GetReturnInfo(invocation.TargetMethod),
             _ => IdInfo.Unknown
         };
     }
@@ -844,9 +843,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // No naming convention — method names aren't a reliable tag source. Absence of an
     // attribute produces Unknown (not NotPresent) so untagged invocations like
     // `Guid.NewGuid()` stay silent — same policy as local variables and literals.
-    static IdInfo GetReturnInfo(IMethodSymbol method, Config config)
+    static IdInfo GetReturnInfo(IMethodSymbol method)
     {
-        var direct = GetIdFromAttributes(method.GetReturnTypeAttributes(), config);
+        var direct = GetIdFromAttributes(method.GetReturnTypeAttributes());
         if (direct.State == IdState.Present)
         {
             return direct;
@@ -855,7 +854,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var overridden = method.OverriddenMethod;
         while (overridden is not null)
         {
-            var info = GetIdFromAttributes(overridden.GetReturnTypeAttributes(), config);
+            var info = GetIdFromAttributes(overridden.GetReturnTypeAttributes());
             if (info.State == IdState.Present)
             {
                 return info;
@@ -866,7 +865,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         foreach (var ifaceMember in method.ExplicitInterfaceImplementations)
         {
-            var info = GetIdFromAttributes(ifaceMember.GetReturnTypeAttributes(), config);
+            var info = GetIdFromAttributes(ifaceMember.GetReturnTypeAttributes());
             if (info.State == IdState.Present)
             {
                 return info;
@@ -886,7 +885,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                         continue;
                     }
 
-                    var info = GetIdFromAttributes(ifaceMember.GetReturnTypeAttributes(), config);
+                    var info = GetIdFromAttributes(ifaceMember.GetReturnTypeAttributes());
                     if (info.State == IdState.Present)
                     {
                         return info;
@@ -898,7 +897,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return IdInfo.Unknown;
     }
 
-    static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType, Config config)
+    static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType)
     {
         var receiverTags = ImmutableArray.CreateBuilder<string>();
         var memberTags = ImmutableArray.CreateBuilder<string>();
@@ -917,7 +916,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 coveredTypes.Add(ct.OriginalDefinition);
             }
 
-            var explicitInfo = GetIdFromAttributes(level.GetAttributes(), config);
+            var explicitInfo = GetIdFromAttributes(level.GetAttributes());
             if (explicitInfo.State == IdState.Present)
             {
                 foreach (var tag in explicitInfo.Tags)
@@ -937,7 +936,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (level is IPropertySymbol recordProperty &&
                 FindRecordPrimaryParameter(recordProperty) is { } recordParameter)
             {
-                var parameterInfo = GetIdFromAttributes(recordParameter.GetAttributes(), config);
+                var parameterInfo = GetIdFromAttributes(recordParameter.GetAttributes());
                 if (parameterInfo.State == IdState.Present)
                 {
                     foreach (var tag in parameterInfo.Tags)
@@ -1070,14 +1069,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    static IdInfo GetId(ISymbol? symbol, Config config)
+    static IdInfo GetId(ISymbol? symbol)
     {
         if (symbol is null)
         {
             return IdInfo.Unknown;
         }
 
-        return GetIdWithInheritance(symbol, config);
+        return GetIdWithInheritance(symbol);
     }
 
     // Reads the [Id] attribute off a symbol, walking override / interface-impl chains
@@ -1090,9 +1089,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     //   2. Inherited [Id] via override/interface impl chain (properties & parameters).
     //   3. Naming convention (properties/fields only).
     //   4. NotPresent.
-    static IdInfo GetIdWithInheritance(ISymbol symbol, Config config)
+    static IdInfo GetIdWithInheritance(ISymbol symbol)
     {
-        var direct = GetIdFromAttributes(symbol.GetAttributes(), config);
+        var direct = GetIdFromAttributes(symbol.GetAttributes());
         if (direct.State == IdState.Present)
         {
             return direct;
@@ -1100,7 +1099,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         if (symbol is IPropertySymbol property)
         {
-            var inherited = GetPropertyIdFromHierarchy(property, config);
+            var inherited = GetPropertyIdFromHierarchy(property);
             if (inherited.State == IdState.Present)
             {
                 return inherited;
@@ -1108,7 +1107,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
             if (FindRecordPrimaryParameter(property) is { } recordParameter)
             {
-                var fromParameter = GetIdFromAttributes(recordParameter.GetAttributes(), config);
+                var fromParameter = GetIdFromAttributes(recordParameter.GetAttributes());
                 if (fromParameter.State == IdState.Present)
                 {
                     return fromParameter;
@@ -1117,7 +1116,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
         else if (symbol is IParameterSymbol parameter)
         {
-            var inherited = GetParameterIdFromHierarchy(parameter, config);
+            var inherited = GetParameterIdFromHierarchy(parameter);
             if (inherited.State == IdState.Present)
             {
                 return inherited;
@@ -1137,7 +1136,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return direct;
     }
 
-    static IdInfo GetParameterIdFromHierarchy(IParameterSymbol parameter, Config config)
+    static IdInfo GetParameterIdFromHierarchy(IParameterSymbol parameter)
     {
         if (parameter.ContainingSymbol is not IMethodSymbol method)
         {
@@ -1152,8 +1151,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (ordinal < overridden.Parameters.Length)
             {
                 var info = GetIdFromAttributes(
-                    overridden.Parameters[ordinal].GetAttributes(),
-                    config);
+                    overridden.Parameters[ordinal].GetAttributes());
                 if (info.State == IdState.Present)
                 {
                     return info;
@@ -1171,8 +1169,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
 
             var info = GetIdFromAttributes(
-                ifaceMember.Parameters[ordinal].GetAttributes(),
-                config);
+                ifaceMember.Parameters[ordinal].GetAttributes());
             if (info.State == IdState.Present)
             {
                 return info;
@@ -1201,8 +1198,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 }
 
                 var info = GetIdFromAttributes(
-                    ifaceMember.Parameters[ordinal].GetAttributes(),
-                    config);
+                    ifaceMember.Parameters[ordinal].GetAttributes());
                 if (info.State == IdState.Present)
                 {
                     return info;
@@ -1213,13 +1209,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return IdInfo.NotPresent;
     }
 
-    static IdInfo GetPropertyIdFromHierarchy(IPropertySymbol property, Config config)
+    static IdInfo GetPropertyIdFromHierarchy(IPropertySymbol property)
     {
         // Walk the `override` chain bottom-up. First [Id] found wins.
         var overridden = property.OverriddenProperty;
         while (overridden is not null)
         {
-            var info = GetIdFromAttributes(overridden.GetAttributes(), config);
+            var info = GetIdFromAttributes(overridden.GetAttributes());
             if (info.State == IdState.Present)
             {
                 return info;
@@ -1231,7 +1227,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Explicit interface implementations carry their target interface member directly.
         foreach (var ifaceMember in property.ExplicitInterfaceImplementations)
         {
-            var info = GetIdFromAttributes(ifaceMember.GetAttributes(), config);
+            var info = GetIdFromAttributes(ifaceMember.GetAttributes());
             if (info.State == IdState.Present)
             {
                 return info;
@@ -1256,7 +1252,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     continue;
                 }
 
-                var info = GetIdFromAttributes(ifaceMember.GetAttributes(), config);
+                var info = GetIdFromAttributes(ifaceMember.GetAttributes());
                 if (info.State == IdState.Present)
                 {
                     return info;
@@ -1288,9 +1284,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    static IdInfo GetIdFromAttributes(
-        ImmutableArray<AttributeData> attributes,
-        Config config)
+    static IdInfo GetIdFromAttributes(ImmutableArray<AttributeData> attributes)
     {
         // Id and UnionId on the same declaration are rare but legal (different attribute
         // classes). If they coexist the tags union, which is consistent with the rest of
@@ -1411,7 +1405,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     location,
                     additionalLocations: GetMismatchLocations(targetSymbol, sourceSymbol),
                     properties: BuildMismatchProperties(source.FirstValue, target.FirstValue),
-                    messageArgs: new object[] { source.Format(), target.Format() }));
+                    messageArgs: [source.Format(), target.Format()]));
             }
 
             return;
@@ -1486,7 +1480,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Anonymous-type members can't carry [Id], so flowing a tagged value into one
         // (e.g. `new { BillId = order.BillId }` in an EF `HasIndex` expression) has no
         // fix site. Treat as boundary so SIA003 stays quiet.
-        if (target is IPropertySymbol { ContainingType: { IsAnonymousType: true } })
+        if (target is IPropertySymbol { ContainingType.IsAnonymousType: true })
         {
             return true;
         }

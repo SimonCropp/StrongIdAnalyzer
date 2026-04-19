@@ -123,8 +123,7 @@ public class IdAttributeGenerator : IIncrementalGenerator
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var supportsGenericAttributes = context.ParseOptionsProvider.Select((options, _) =>
-            options is CSharpParseOptions cs &&
-            cs.LanguageVersion >= LanguageVersion.CSharp11);
+            options is CSharpParseOptions { LanguageVersion: >= LanguageVersion.CSharp11 });
 
         context.RegisterSourceOutput(supportsGenericAttributes, (spc, supportsGeneric) =>
         {
