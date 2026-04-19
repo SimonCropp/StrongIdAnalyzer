@@ -707,7 +707,7 @@ public class AddIdCodeFixProviderTests
             assemblyName: "Tests",
             language: LanguageNames.CSharp,
             compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
-            metadataReferences: TrustedReferences());
+            metadataReferences: TrustedReferences.All);
 
         var solution = workspace.CurrentSolution.AddProject(projectInfo);
         var idAttrId = DocumentId.CreateNewId(projectInfo.Id);
@@ -728,9 +728,4 @@ public class AddIdCodeFixProviderTests
 
         return (document, diagnostic);
     }
-
-    static IEnumerable<MetadataReference> TrustedReferences() =>
-        ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-            .Split(Path.PathSeparator)
-            .Select(path => MetadataReference.CreateFromFile(path));
 }

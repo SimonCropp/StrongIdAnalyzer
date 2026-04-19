@@ -2419,15 +2419,10 @@ public class IdMismatchAnalyzerTests
         string messagesSource,
         string consumerSource)
     {
-        var trustedAssemblies = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-            .Split(Path.PathSeparator)
-            .Select(_ => MetadataReference.CreateFromFile(_))
-            .ToList();
-
         var messagesBase = CSharpCompilation.Create(
             "Messages",
             [CSharpSyntaxTree.ParseText(messagesSource)],
-            trustedAssemblies,
+            TrustedReferences.All,
             new(OutputKind.DynamicallyLinkedLibrary));
         CSharpGeneratorDriver
             .Create(new IdAttributeGenerator())
@@ -2446,7 +2441,7 @@ public class IdMismatchAnalyzerTests
         var consumerBase = CSharpCompilation.Create(
             "Consumer",
             [CSharpSyntaxTree.ParseText(consumerSource)],
-            [..trustedAssemblies, messagesReference],
+            [..TrustedReferences.All, messagesReference],
             new(OutputKind.DynamicallyLinkedLibrary));
         CSharpGeneratorDriver
             .Create(new IdAttributeGenerator())
@@ -2519,19 +2514,10 @@ public class IdMismatchAnalyzerTests
             globals;
     }
 
-    static CSharpCompilation BuildCompilation(string source)
-    {
-        var syntaxTree = CSharpSyntaxTree.ParseText(source);
-
-        var trustedAssemblies = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-            .Split(Path.PathSeparator)
-            .Select(_ => MetadataReference.CreateFromFile(_))
-            .ToList();
-
-        return CSharpCompilation.Create(
+    static CSharpCompilation BuildCompilation(string source) =>
+        CSharpCompilation.Create(
             "Tests",
-            [syntaxTree],
-            trustedAssemblies,
+            [CSharpSyntaxTree.ParseText(source)],
+            TrustedReferences.All,
             new(OutputKind.DynamicallyLinkedLibrary));
-    }
 }

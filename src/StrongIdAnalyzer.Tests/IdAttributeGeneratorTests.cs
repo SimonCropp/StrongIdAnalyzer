@@ -57,16 +57,10 @@ public class IdAttributeGeneratorTests
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
-    static CSharpCompilation BuildCompilation(string source)
-    {
-        var trusted = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-            .Split(Path.PathSeparator)
-            .Select(path => MetadataReference.CreateFromFile(path));
-
-        return CSharpCompilation.Create(
+    static CSharpCompilation BuildCompilation(string source) =>
+        CSharpCompilation.Create(
             "Tests",
             [CSharpSyntaxTree.ParseText(source)],
-            trusted,
+            TrustedReferences.All,
             new(OutputKind.DynamicallyLinkedLibrary));
-    }
 }

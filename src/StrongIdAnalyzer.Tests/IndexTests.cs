@@ -317,12 +317,8 @@ public class IndexTests
         // Strip the test assembly itself — it already defines `Customer` / `Order` etc.
         // in other test files, and TPA includes every loaded assembly, which causes
         // CS0433 ("type exists in both") when the library redefines those names.
-        var tpaReferences = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-            .Split(Path.PathSeparator)
-            .Where(_ => _.Length > 0)
-            .Where(_ => !_.EndsWith("StrongIdAnalyzer.Tests.dll", StringComparison.OrdinalIgnoreCase))
-            .Select(_ => (MetadataReference)MetadataReference.CreateFromFile(_))
-            .ToArray();
+        var tpaReferences = TrustedReferences.Where(_ =>
+            !_.EndsWith("StrongIdAnalyzer.Tests.dll", StringComparison.OrdinalIgnoreCase));
 
         var libraryTrees = new List<SyntaxTree> { CSharpSyntaxTree.ParseText(library) };
         if (index is not null)
