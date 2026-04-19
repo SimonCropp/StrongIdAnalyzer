@@ -9,4 +9,4 @@ obj/
 nugets/
 *~*
 nul
-/src/Benchmarks
+/src/Benchmarks/BenchmarkDotNet.Artifacts
