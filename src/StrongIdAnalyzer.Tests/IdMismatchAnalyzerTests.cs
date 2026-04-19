@@ -352,6 +352,33 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public void DeepInheritanceChain_GrandbaseTargetAcceptsDerived_NoDiagnostic()
+    {
+        // Confirms the base walk traverses more than one level — a three-deep chain still
+        // widens the source tag all the way up to the grandbase.
+        var source = """
+            public abstract class Root {}
+            public abstract class Middle : Root {}
+            public class Leaf : Middle {}
+            public class Target
+            {
+                public void Consume([Id("Root")] System.Guid value) { }
+            }
+            public class Holder
+            {
+                [Id("Leaf")]
+                public System.Guid Value { get; set; }
+
+                public void Use(Target target) => target.Consume(Value);
+            }
+            """;
+
+        var diagnostics = GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
     public void Equality_BaseAndDerivedTags_NoDiagnostic()
     {
         // Equality is symmetric — widening both sides lets a derived id compare to a
