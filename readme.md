@@ -721,10 +721,11 @@ public class OrderWriter
     public void Go(CustomerList list) =>
         // SIA001 on the argument: `id` inherits "Customer" from list.Ids, which is
         // then passed into a parameter tagged "Order".
+        // ReSharper disable once ReturnValueOfPureMethodIsNotUsed
         list.Ids.Select(id => { Consume(id); return id; }).ToList();
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L355-L376' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionLinqLambda' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L355-L377' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionLinqLambda' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Only **explicit** `[Id]` / `[UnionId]` attributes on a collection-typed declaration participate in element-tag flow. Naming-convention inference (`Id` / `XxxId`) is not applied to collection-typed members — the common case of a `List<Guid>` happening to be named `CustomerIds` would otherwise spuriously acquire a tag that no caller can change.
@@ -769,7 +770,7 @@ public class CustomerScan
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L378-L397' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionForEach' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L379-L398' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionForEach' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -802,7 +803,7 @@ public class PagedReader
     public void Copy() => LatestId = Ids.TakePage(0, 10).First();
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L399-L423' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionUserExtension' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L400-L424' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionUserExtension' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Lambda-parameter binding applies to any extension method on `IEnumerable<T>` regardless of its return type — so `Action<T>` callbacks and void-returning helpers flow tags the same way.
@@ -826,7 +827,7 @@ public class CustomerOrderMap
     public Dictionary<Guid, string> OrdersByCustomer { get; set; } = [];
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L425-L436' title='Snippet source file'>snippet source</a> | <a href='#snippet-UnsupportedMultiTCollection' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L426-L437' title='Snippet source file'>snippet source</a> | <a href='#snippet-UnsupportedMultiTCollection' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Distinct attributes for the key and value positions, plus tuple-field-level tagging, are on the roadmap but will require a dedicated design pass.

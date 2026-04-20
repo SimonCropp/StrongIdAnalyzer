@@ -370,6 +370,7 @@ public class OrderWriter
     public void Go(CustomerList list) =>
         // SIA001 on the argument: `id` inherits "Customer" from list.Ids, which is
         // then passed into a parameter tagged "Order".
+        // ReSharper disable once ReturnValueOfPureMethodIsNotUsed
         list.Ids.Select(id => { Consume(id); return id; }).ToList();
 }
 

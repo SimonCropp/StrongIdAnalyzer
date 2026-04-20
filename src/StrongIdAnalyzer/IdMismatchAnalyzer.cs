@@ -1228,42 +1228,49 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // element type can differ from the source — the selector decides the new tag.
     static IdInfo GetReceiverElementTags(IOperation receiver, Config config)
     {
-        receiver = Unwrap(receiver);
-
-        if (receiver is IInvocationOperation inv)
+        // Iterates element-preserving LINQ chains instead of recursing — long method
+        // chains (common in query-heavy code) would otherwise grow the stack linearly
+        // with chain length.
+        while (true)
         {
-            var targetMethod = inv.TargetMethod;
+            receiver = Unwrap(receiver);
 
-            if (IsSelectCall(targetMethod))
+            if (receiver is IInvocationOperation inv)
             {
-                return GetSelectElementTags(inv, config);
-            }
+                var targetMethod = inv.TargetMethod;
 
-            if (IsElementPreserving(targetMethod))
-            {
-                var next = GetLinqReceiver(inv);
-                if (next is null)
+                if (IsSelectCall(targetMethod))
                 {
-                    return IdInfo.Unknown;
+                    return GetSelectElementTags(inv, config);
                 }
 
-                return GetReceiverElementTags(next, config);
+                if (IsElementPreserving(targetMethod))
+                {
+                    var next = GetLinqReceiver(inv);
+                    if (next is null)
+                    {
+                        return IdInfo.Unknown;
+                    }
+
+                    receiver = next;
+                    continue;
+                }
             }
-        }
 
-        var symbol = GetSymbol(receiver);
-        if (symbol is null)
-        {
-            return IdInfo.Unknown;
-        }
+            var symbol = GetSymbol(receiver);
+            if (symbol is null)
+            {
+                return IdInfo.Unknown;
+            }
 
-        var symbolType = GetSymbolType(symbol);
-        if (TryGetEnumerableElementType(symbolType) is null)
-        {
-            return IdInfo.Unknown;
-        }
+            var symbolType = GetSymbolType(symbol);
+            if (TryGetEnumerableElementType(symbolType) is null)
+            {
+                return IdInfo.Unknown;
+            }
 
-        return GetExplicitCollectionTags(symbol, config);
+            return GetExplicitCollectionTags(symbol, config);
+        }
     }
 
     // Resolve `[Id]` / `[UnionId]` attributes for a collection-typed symbol, walking
