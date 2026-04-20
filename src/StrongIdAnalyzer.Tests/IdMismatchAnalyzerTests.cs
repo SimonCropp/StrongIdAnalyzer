@@ -2,7 +2,7 @@
 public class IdMismatchAnalyzerTests
 {
     [Test]
-    public void IdMismatch_ArgumentToParameter()
+    public async Task IdMismatch_ArgumentToParameter()
     {
         var source = """
             public class Target
@@ -19,7 +19,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
@@ -29,7 +29,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void IdMismatch_PropertyToProperty_Assignment()
+    public async Task IdMismatch_PropertyToProperty_Assignment()
     {
         // OrderId / CustomerId are auto-tagged by the naming convention.
         var source =
@@ -44,14 +44,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void IdMismatch_ObjectInitializer()
+    public async Task IdMismatch_ObjectInitializer()
     {
         var source =
             """
@@ -68,14 +68,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void GenericIdAttribute_Matching_NoDiagnostic()
+    public async Task GenericIdAttribute_Matching_NoDiagnostic()
     {
         var source = """
             public class Customer {}
@@ -92,13 +92,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void GenericIdAttribute_Mismatch_ReportsSIA001()
+    public async Task GenericIdAttribute_Mismatch_ReportsSIA001()
     {
         var source = """
             public class Customer {}
@@ -116,7 +116,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
@@ -126,7 +126,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void GenericIdAttribute_EquivalentToStringForm()
+    public async Task GenericIdAttribute_EquivalentToStringForm()
     {
         // Source uses the generic form, target uses the string form — they must resolve
         // to the same tag and not produce a mismatch.
@@ -145,13 +145,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void GenericUnionIdAttribute_SourceInOptions_NoDiagnostic()
+    public async Task GenericUnionIdAttribute_SourceInOptions_NoDiagnostic()
     {
         var source = """
             public class Customer {}
@@ -169,13 +169,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void GenericUnionIdAttribute_SourceNotInOptions_ReportsSIA001()
+    public async Task GenericUnionIdAttribute_SourceNotInOptions_ReportsSIA001()
     {
         var source = """
             public class Customer {}
@@ -194,14 +194,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void GenericUnionIdAttribute_FiveArgs_NoDiagnostic()
+    public async Task GenericUnionIdAttribute_FiveArgs_NoDiagnostic()
     {
         var source = """
             public class A {}
@@ -222,13 +222,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void GenericUnionIdAttribute_EquivalentToStringForm()
+    public async Task GenericUnionIdAttribute_EquivalentToStringForm()
     {
         var source = """
             public class Customer {}
@@ -246,13 +246,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void DerivedTagFlowsToBaseTarget_NoDiagnostic()
+    public async Task DerivedTagFlowsToBaseTarget_NoDiagnostic()
     {
         var source = """
             public abstract class ProgramBillBase {}
@@ -270,13 +270,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void BaseTagToDerivedTarget_ReportsSIA001()
+    public async Task BaseTagToDerivedTarget_ReportsSIA001()
     {
         // Opposite direction of covariance: a base-tagged value must NOT silently flow
         // into a derived-tagged target. Only the source side widens.
@@ -296,14 +296,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void InterfaceTagFlowsFromImplementingTag_NoDiagnostic()
+    public async Task InterfaceTagFlowsFromImplementingTag_NoDiagnostic()
     {
         var source = """
             public interface IBill {}
@@ -321,13 +321,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void UnresolvedTag_KeepsExactMatchSemantics()
+    public async Task UnresolvedTag_KeepsExactMatchSemantics()
     {
         // Tag names that don't correspond to any type in the compilation should behave
         // as before — no widening, exact match only.
@@ -345,14 +345,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void DeepInheritanceChain_GrandbaseTargetAcceptsDerived_NoDiagnostic()
+    public async Task DeepInheritanceChain_GrandbaseTargetAcceptsDerived_NoDiagnostic()
     {
         // Confirms the base walk traverses more than one level — a three-deep chain still
         // widens the source tag all the way up to the grandbase.
@@ -373,13 +373,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void Equality_BaseAndDerivedTags_NoDiagnostic()
+    public async Task Equality_BaseAndDerivedTags_NoDiagnostic()
     {
         // Equality is symmetric — widening both sides lets a derived id compare to a
         // base id without firing SIA001.
@@ -398,13 +398,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void MethodReturnSource_Untagged_IsUnknown()
+    public async Task MethodReturnSource_Untagged_IsUnknown()
     {
         var source =
             """
@@ -418,13 +418,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void MethodReturnSource_TaggedMatching_NoDiagnostic()
+    public async Task MethodReturnSource_TaggedMatching_NoDiagnostic()
     {
         var source =
             """
@@ -439,13 +439,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void MethodReturnSource_TaggedMismatch_FiresSIA001()
+    public async Task MethodReturnSource_TaggedMismatch_FiresSIA001()
     {
         var source =
             """
@@ -460,7 +460,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
@@ -470,7 +470,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void MethodReturnSource_UnionOverlap_NoDiagnostic()
+    public async Task MethodReturnSource_UnionOverlap_NoDiagnostic()
     {
         var source =
             """
@@ -485,13 +485,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void MethodReturnSource_UnionDisjoint_FiresSIA001()
+    public async Task MethodReturnSource_UnionDisjoint_FiresSIA001()
     {
         var source =
             """
@@ -506,14 +506,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void MethodReturnSource_UnwrapsAwait()
+    public async Task MethodReturnSource_UnwrapsAwait()
     {
         var source =
             """
@@ -530,14 +530,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void MethodReturnSource_InheritedFromOverride_FiresSIA001()
+    public async Task MethodReturnSource_InheritedFromOverride_FiresSIA001()
     {
         var source =
             """
@@ -560,14 +560,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void MethodReturnSource_InheritedFromInterface_FiresSIA001()
+    public async Task MethodReturnSource_InheritedFromInterface_FiresSIA001()
     {
         var source =
             """
@@ -590,14 +590,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void MissingSourceId_ArgumentToParameter()
+    public async Task MissingSourceId_ArgumentToParameter()
     {
         var source =
             """
@@ -614,7 +614,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA002", diagnostics[0].Id);
@@ -622,7 +622,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void MissingSourceId_PropertyAssignment()
+    public async Task MissingSourceId_PropertyAssignment()
     {
         var source =
             """
@@ -639,14 +639,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA002", diagnostics[0].Id);
     }
 
     [Test]
-    public void DroppedId_AssignPropertyToUnattributed()
+    public async Task DroppedId_AssignPropertyToUnattributed()
     {
         var source =
             """
@@ -663,7 +663,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA003", diagnostics[0].Id);
@@ -671,7 +671,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void DroppedId_ArgumentToParameter()
+    public async Task DroppedId_ArgumentToParameter()
     {
         var source =
             """
@@ -688,14 +688,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA003", diagnostics[0].Id);
     }
 
     [Test]
-    public void MatchingIds_NoDiagnostic()
+    public async Task MatchingIds_NoDiagnostic()
     {
         var source = """
             public class Target
@@ -711,13 +711,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void LocalVariableSource_NoDiagnostic()
+    public async Task LocalVariableSource_NoDiagnostic()
     {
         var source = """
             public class Target
@@ -735,13 +735,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void NoIdAttributeAnywhere_NoDiagnostic()
+    public async Task NoIdAttributeAnywhere_NoDiagnostic()
     {
         var source = """
             public class Target
@@ -757,13 +757,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void CaseDifference_IsMismatch()
+    public async Task CaseDifference_IsMismatch()
     {
         // Unlike StringSyntax which special-cases the first character, Id values are
         // user-defined tags and are compared ordinally. "Order" vs "order" is a mismatch.
@@ -782,14 +782,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void FieldSource_Mismatch()
+    public async Task FieldSource_Mismatch()
     {
         var source = """
             public class Holder
@@ -803,14 +803,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void GuidStringInt_AllWorkWithAnyTag()
+    public async Task GuidStringInt_AllWorkWithAnyTag()
     {
         // The analyzer ignores the primitive type — it only compares the Id tag string.
         var source = """
@@ -824,14 +824,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void EqualityCheck_MismatchedIds_Fires()
+    public async Task EqualityCheck_MismatchedIds_Fires()
     {
         var source = """
             public class Holder
@@ -844,14 +844,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void InequalityCheck_MismatchedIds_Fires()
+    public async Task InequalityCheck_MismatchedIds_Fires()
     {
         var source = """
             public class Holder
@@ -864,14 +864,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void EqualityCheck_MatchingIds_NoDiagnostic()
+    public async Task EqualityCheck_MatchingIds_NoDiagnostic()
     {
         var source = """
             public class Holder
@@ -886,13 +886,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void EqualityCheck_OneSideMissing_FiresSIA002()
+    public async Task EqualityCheck_OneSideMissing_FiresSIA002()
     {
         var source = """
             public class Holder
@@ -905,7 +905,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA002", diagnostics[0].Id);
@@ -913,7 +913,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void EqualityCheck_OneSideMissing_RightToLeft_FiresSIA002()
+    public async Task EqualityCheck_OneSideMissing_RightToLeft_FiresSIA002()
     {
         // Same as above but the tagged side is on the right — fixer should target the left.
         var source = """
@@ -927,14 +927,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA002", diagnostics[0].Id);
     }
 
     [Test]
-    public void EqualityCheck_AgainstEmpty_NoDiagnostic()
+    public async Task EqualityCheck_AgainstEmpty_NoDiagnostic()
     {
         // Comparing a tagged id to Guid.Empty or a literal is routine and must not fire.
         var source = """
@@ -946,13 +946,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void DictionaryIndexer_LibraryTarget_NoDiagnostic()
+    public async Task DictionaryIndexer_LibraryTarget_NoDiagnostic()
     {
         // Passing a tagged Guid to Dictionary<Guid, T>.this[Guid] previously fired SIA003
         // because the indexer's parameter has no [Id]. Library-declared targets are now
@@ -970,13 +970,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void GuidEquals_LibraryTarget_NoDiagnostic()
+    public async Task GuidEquals_LibraryTarget_NoDiagnostic()
     {
         // Guid.Equals(Guid) and object.Equals(object) are library boundary methods —
         // they don't carry [Id] semantics, so passing a tagged value must not fire SIA003.
@@ -993,13 +993,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void InheritedProperty_InheritsTagFromBase()
+    public async Task InheritedProperty_InheritsTagFromBase()
     {
         // Base has [Id("Order")]; derived inherits without redeclaring. Accessing
         // derived.Id resolves to the base property symbol, so this works naturally
@@ -1024,14 +1024,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void OverriddenProperty_InheritsTagFromBase()
+    public async Task OverriddenProperty_InheritsTagFromBase()
     {
         // Derived overrides without repeating [Id]. The analyzer walks OverriddenProperty
         // so passing derived.Id where [Id("Customer")] is expected still fires SIA001.
@@ -1058,14 +1058,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void ImplicitInterfaceProperty_InheritsTagFromInterface()
+    public async Task ImplicitInterfaceProperty_InheritsTagFromInterface()
     {
         var source = """
             public interface IEntity
@@ -1090,14 +1090,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void ExplicitInterfaceProperty_InheritsTagFromInterface()
+    public async Task ExplicitInterfaceProperty_InheritsTagFromInterface()
     {
         // Access via the interface type since explicit impls are not accessible on the
         // concrete type. The explicit-impl path of the hierarchy walk is exercised.
@@ -1124,14 +1124,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void NewHideProperty_DoesNotInheritTag()
+    public async Task NewHideProperty_DoesNotInheritTag()
     {
         // `new` hide is an explicit fresh declaration. The derived property has its own
         // (empty) attribute set and SHOULD NOT pick up the base's [Id]. Access via the
@@ -1161,7 +1161,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
@@ -1171,7 +1171,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void OverriddenMethodParameter_InheritsTagFromBase()
+    public async Task OverriddenMethodParameter_InheritsTagFromBase()
     {
         // Abstract base has an explicit non-convention tag on the parameter so the rename
         // can't be satisfied by the naming convention. Override drops the attribute; call
@@ -1195,14 +1195,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void ObjectParameter_DoesNotFireSIA003()
+    public async Task ObjectParameter_DoesNotFireSIA003()
     {
         // Logger-style helper: tagged id passed into an `object` parameter. The [Id] tag
         // is erased through `object`, so firing SIA003 here would be constant noise.
@@ -1220,13 +1220,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void GenericTypeParameter_DoesNotFireSIA003()
+    public async Task GenericTypeParameter_DoesNotFireSIA003()
     {
         // Generic pass-through methods (identity, container helpers) can't carry tags.
         var source = """
@@ -1243,13 +1243,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void SuppressedNamespace_DefaultSystem_NoSIA003()
+    public async Task SuppressedNamespace_DefaultSystem_NoSIA003()
     {
         // User-declared class in a `System.*` namespace lives in source, so the metadata
         // suppression doesn't cover it — only the namespace rule does.
@@ -1270,13 +1270,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void SuppressedNamespace_DefaultMicrosoft_NoSIA003()
+    public async Task SuppressedNamespace_DefaultMicrosoft_NoSIA003()
     {
         var source = """
             namespace Microsoft.Fake
@@ -1295,13 +1295,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void UserNamespace_NotSuppressed_StillFires()
+    public async Task UserNamespace_NotSuppressed_StillFires()
     {
         var source = """
             namespace MyCompany.Logging
@@ -1320,14 +1320,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA003", diagnostics[0].Id);
     }
 
     [Test]
-    public void SuppressedNamespace_CustomOverride_AppliesToConfiguredPrefix()
+    public async Task SuppressedNamespace_CustomOverride_AppliesToConfiguredPrefix()
     {
         // With the option set, MyCompany.* should be suppressed while System.* should NOT
         // (user value fully replaces the defaults).
@@ -1360,7 +1360,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnosticsWithOptions(
+        var diagnostics = await GetDiagnosticsWithOptions(
             source,
             new Dictionary<string, string>
             {
@@ -1373,7 +1373,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void SuppressedNamespace_EmptyOverride_DisablesAllSuppression()
+    public async Task SuppressedNamespace_EmptyOverride_DisablesAllSuppression()
     {
         // Empty value = no suppression. A user-declared class in System.Fake now fires.
         var source = """
@@ -1393,7 +1393,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnosticsWithOptions(
+        var diagnostics = await GetDiagnosticsWithOptions(
             source,
             new Dictionary<string, string>
             {
@@ -1405,7 +1405,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_IdOnType_InferredAsTypeName()
+    public async Task Convention_IdOnType_InferredAsTypeName()
     {
         // Order.Id has no [Id] but the naming convention tags it "Order"; passing into an
         // [Id("Customer")] parameter fires SIA001 with "Order" vs "Customer".
@@ -1426,7 +1426,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
@@ -1436,7 +1436,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_XxxIdProperty_InferredAsPrefix()
+    public async Task Convention_XxxIdProperty_InferredAsPrefix()
     {
         // CustomerId -> convention "Customer"; passing into [Id("Order")] fires SIA001.
         var source = """
@@ -1450,14 +1450,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void Convention_CrossTypeMatch_NoDiagnostic()
+    public async Task Convention_CrossTypeMatch_NoDiagnostic()
     {
         // Customer.Id (convention "Customer") and Order.CustomerId (convention "Customer")
         // reference the same conceptual Id — the analyzer must accept matching flow.
@@ -1480,13 +1480,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void Convention_FieldConvention_Applies()
+    public async Task Convention_FieldConvention_Applies()
     {
         var source = """
             public class Holder
@@ -1499,14 +1499,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void Convention_NonIdName_NoConvention()
+    public async Task Convention_NonIdName_NoConvention()
     {
         // "Value" isn't an Id-convention name, so no inferred tag — passing to an [Id]
         // parameter fires SIA002 (not SIA001).
@@ -1521,14 +1521,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA002", diagnostics[0].Id);
     }
 
     [Test]
-    public void Convention_ExplicitAttributeOverridesConvention()
+    public async Task Convention_ExplicitAttributeOverridesConvention()
     {
         // CustomerId would be "Customer" by convention, but explicit [Id("Special")] wins.
         var source = """
@@ -1543,7 +1543,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
@@ -1553,7 +1553,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void SIA004_TwoTypesSameName_DifferentNamespaces_Fires()
+    public async Task SIA004_TwoTypesSameName_DifferentNamespaces_Fires()
     {
         // Two Order classes in separate namespaces both map to conventional name "Order".
         // SIA004 fires on each declaration.
@@ -1575,7 +1575,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var sia004 = diagnostics.Where(_ => _.Id == "SIA004").ToArray();
 
         AreEqual(2, sia004.Length);
@@ -1583,7 +1583,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void SIA004_NestedUnderDifferentParents_Fires()
+    public async Task SIA004_NestedUnderDifferentParents_Fires()
     {
         var source = """
             public class A
@@ -1603,14 +1603,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var sia004 = diagnostics.Where(_ => _.Id == "SIA004").ToArray();
 
         AreEqual(2, sia004.Length);
     }
 
     [Test]
-    public void SIA004_ExplicitAttributeOnOne_Disambiguates()
+    public async Task SIA004_ExplicitAttributeOnOne_Disambiguates()
     {
         // Adding an explicit [Id("...")] (with a different value) on one declaration takes
         // it out of the ambiguity set — SIA004 no longer fires on either side.
@@ -1633,13 +1633,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Count(_ => _.Id == "SIA004"));
     }
 
     [Test]
-    public void SIA004_SameXxxIdOnDifferentTypes_NoDiagnostic()
+    public async Task SIA004_SameXxxIdOnDifferentTypes_NoDiagnostic()
     {
         // `XxxId` convention does not feed the ambiguity map: two types each having a
         // `CustomerId` property are expected and desirable.
@@ -1655,13 +1655,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Count(_ => _.Id == "SIA004"));
     }
 
     [Test]
-    public void SIA005_RedundantAttributeOnId_Fires()
+    public async Task SIA005_RedundantAttributeOnId_Fires()
     {
         var source = """
             public class Order
@@ -1671,7 +1671,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
 
         AreEqual(1, sia005.Length);
@@ -1679,7 +1679,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void SIA005_RedundantAttributeOnXxxId_Fires()
+    public async Task SIA005_RedundantAttributeOnXxxId_Fires()
     {
         var source = """
             public class Holder
@@ -1689,7 +1689,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
 
         AreEqual(1, sia005.Length);
@@ -1697,7 +1697,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_InheritedId_CarriesBaseAndDerivedTags_Match()
+    public async Task Convention_InheritedId_CarriesBaseAndDerivedTags_Match()
     {
         // child1.Id carries the set {"Child1", "Base"} — both parameters are satisfied.
         // (The parameter attributes are dropped because convention infers them.)
@@ -1721,7 +1721,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(
             0,
@@ -1730,7 +1730,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_InheritedId_SiblingDerivedType_FiresMismatch()
+    public async Task Convention_InheritedId_SiblingDerivedType_FiresMismatch()
     {
         // child2.Id is {"Child2", "Base"} — satisfies the Base parameter but NOT the
         // Child1 parameter; SIA001 fires only on the first argument.
@@ -1755,7 +1755,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
@@ -1765,7 +1765,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_InheritedId_StaticReceiverIsBase_DoesNotCarryDerivedTag()
+    public async Task Convention_InheritedId_StaticReceiverIsBase_DoesNotCarryDerivedTag()
     {
         // When the static receiver type is Base, the access carries only "Base" — the
         // derived-type tags aren't inferred because the caller didn't express them.
@@ -1785,14 +1785,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void Convention_InheritedId_AbstractClassWithExplicitAttributes_UnionsTags()
+    public async Task Convention_InheritedId_AbstractClassWithExplicitAttributes_UnionsTags()
     {
         // Abstract class Base + override properties with explicit [Id] at every level.
         // Override chain walks Child1.Id -> Base.Id and unions both tags, so child1.Id
@@ -1832,7 +1832,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var flow = diagnostics.Where(_ => _.Id is "SIA001" or "SIA002" or "SIA003").ToArray();
 
         AreEqual(1, flow.Length);
@@ -1843,7 +1843,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_InheritedId_InterfaceWithExplicitAttributes_UnionsTags()
+    public async Task Convention_InheritedId_InterfaceWithExplicitAttributes_UnionsTags()
     {
         // Interface Base + class impls with explicit [Id] at every level. Implicit
         // interface implementation is walked, so child1.Id carries {"Child1","Base"}.
@@ -1881,7 +1881,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var flow = diagnostics.Where(_ => _.Id is "SIA001" or "SIA002" or "SIA003").ToArray();
 
         AreEqual(1, flow.Length);
@@ -1892,7 +1892,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_InheritedId_InterfaceWithConventionOnly_UnionsTags()
+    public async Task Convention_InheritedId_InterfaceWithConventionOnly_UnionsTags()
     {
         // Interface Base with an abstract Id, children implement without explicit [Id].
         // Both convention tags (Child1/Child2 + Base) come from the interface walk.
@@ -1927,7 +1927,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var flow = diagnostics.Where(_ => _.Id is "SIA001" or "SIA002" or "SIA003").ToArray();
 
         AreEqual(1, flow.Length);
@@ -1938,7 +1938,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_InheritedId_MismatchMessage_ReceiverTypeFirst()
+    public async Task Convention_InheritedId_MismatchMessage_ReceiverTypeFirst()
     {
         // treasuryBid.Id inherits Id from BaseEntity. The tag set must list the receiver
         // static type ("TreasuryBid") before the declaring type ("BaseEntity") so the
@@ -1960,7 +1960,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source).Where(_ => _.Id == "SIA001").ToArray();
+        var diagnostics = (await GetDiagnostics(source)).Where(_ => _.Id == "SIA001").ToArray();
 
         AreEqual(1, diagnostics.Length);
         var message = diagnostics[0].GetMessage();
@@ -1970,7 +1970,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_InheritedId_DeepChain_MismatchMessage_MostDerivedFirst()
+    public async Task Convention_InheritedId_DeepChain_MismatchMessage_MostDerivedFirst()
     {
         // leaf.Id walks Leaf → Mid → Root. The resulting tag list must be
         // "Leaf/Mid/Root" (most-derived first) so code fixes pick the receiver type.
@@ -1987,7 +1987,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source).Where(_ => _.Id == "SIA001").ToArray();
+        var diagnostics = (await GetDiagnostics(source)).Where(_ => _.Id == "SIA001").ToArray();
 
         AreEqual(1, diagnostics.Length);
         IsTrue(
@@ -1996,7 +1996,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_InheritedId_DeepChain_IncludesAllAncestors()
+    public async Task Convention_InheritedId_DeepChain_IncludesAllAncestors()
     {
         // leaf.Id walks Leaf → Mid → Root and carries all three tags.
         var source = """
@@ -2019,13 +2019,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void Convention_ParameterCamelCase_InferredAsPascal()
+    public async Task Convention_ParameterCamelCase_InferredAsPascal()
     {
         // Parameter `orderId` (camelCase) -> "Order" tag; passing into a "Customer"-tagged
         // target fires SIA001 with "Order" vs "Customer".
@@ -2040,7 +2040,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
@@ -2050,7 +2050,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Convention_ParameterBareId_NoConvention()
+    public async Task Convention_ParameterBareId_NoConvention()
     {
         // A parameter named just `id` has no containing-type equivalent and must NOT
         // receive an inferred tag — otherwise generic helpers would be over-tagged.
@@ -2065,14 +2065,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA003", diagnostics[0].Id);
     }
 
     [Test]
-    public void SIA005_RedundantAttributeOnParameter_Fires()
+    public async Task SIA005_RedundantAttributeOnParameter_Fires()
     {
         var source = """
             public class Holder
@@ -2081,7 +2081,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
 
         AreEqual(1, sia005.Length);
@@ -2089,7 +2089,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void SIA005_DifferentExplicitValue_NoDiagnostic()
+    public async Task SIA005_DifferentExplicitValue_NoDiagnostic()
     {
         var source = """
             public class Order
@@ -2099,13 +2099,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Count(_ => _.Id == "SIA005"));
     }
 
     [Test]
-    public void Union_SourceUnion_TargetSingleInOverlap_NoDiagnostic()
+    public async Task Union_SourceUnion_TargetSingleInOverlap_NoDiagnostic()
     {
         // [UnionId("Customer","Product")] source overlaps with [Id("Customer")] target.
         var source = """
@@ -2120,13 +2120,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void Union_SourceUnion_TargetSingleDisjoint_FiresSIA001()
+    public async Task Union_SourceUnion_TargetSingleDisjoint_FiresSIA001()
     {
         var source = """
             public class Holder
@@ -2140,7 +2140,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
@@ -2151,7 +2151,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void Union_TargetUnion_SourceSingleInOverlap_NoDiagnostic()
+    public async Task Union_TargetUnion_SourceSingleInOverlap_NoDiagnostic()
     {
         var source = """
             public class Holder
@@ -2165,13 +2165,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void Union_UnionAndUnionOverlap_NoDiagnostic()
+    public async Task Union_UnionAndUnionOverlap_NoDiagnostic()
     {
         var source = """
             public class Holder
@@ -2185,13 +2185,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void Union_UnionAndUnionDisjoint_FiresSIA001()
+    public async Task Union_UnionAndUnionDisjoint_FiresSIA001()
     {
         var source = """
             public class Holder
@@ -2205,14 +2205,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
     [Test]
-    public void Union_CoexistsWithConvention_UnionsTags()
+    public async Task Union_CoexistsWithConvention_UnionsTags()
     {
         // A property named `CustomerId` with explicit [UnionId("Order")] — convention
         // would give "Customer" and the explicit union adds "Order". Passing it to an
@@ -2229,14 +2229,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var flow = diagnostics.Where(_ => _.Id is "SIA001" or "SIA002" or "SIA003").ToArray();
 
         AreEqual(0, flow.Length);
     }
 
     [Test]
-    public void SIA006_SingletonUnion_Fires()
+    public async Task SIA006_SingletonUnion_Fires()
     {
         var source = """
             public class Holder
@@ -2246,7 +2246,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var sia006 = diagnostics.Where(_ => _.Id == "SIA006").ToArray();
 
         AreEqual(1, sia006.Length);
@@ -2254,7 +2254,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void SIA006_SingletonUnion_OnParameter_Fires()
+    public async Task SIA006_SingletonUnion_OnParameter_Fires()
     {
         var source = """
             public class Holder
@@ -2263,14 +2263,14 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
         var sia006 = diagnostics.Where(_ => _.Id == "SIA006").ToArray();
 
         AreEqual(1, sia006.Length);
     }
 
     [Test]
-    public void SIA006_MultiOptionUnion_NoDiagnostic()
+    public async Task SIA006_MultiOptionUnion_NoDiagnostic()
     {
         var source = """
             public class Holder
@@ -2280,13 +2280,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Count(_ => _.Id == "SIA006"));
     }
 
     [Test]
-    public void AnonymousType_PropertyConvention_IsSkipped()
+    public async Task AnonymousType_PropertyConvention_IsSkipped()
     {
         var source = """
             public class Holder
@@ -2298,13 +2298,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void RecordPrimaryCtorParameterAttribute_AppliesToGeneratedProperty()
+    public async Task RecordPrimaryCtorParameterAttribute_AppliesToGeneratedProperty()
     {
         var source =
             """
@@ -2318,13 +2318,13 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(0, diagnostics.Length);
     }
 
     [Test]
-    public void RecordPrimaryCtorParameterAttribute_PropertyMismatchAgainstTarget()
+    public async Task RecordPrimaryCtorParameterAttribute_PropertyMismatchAgainstTarget()
     {
         var source =
             """
@@ -2338,7 +2338,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetDiagnostics(source);
+        var diagnostics = await GetDiagnostics(source);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA001", diagnostics[0].Id);
@@ -2348,7 +2348,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void CrossAssembly_UnionIdOnReferencedProperty_FiresSIA003()
+    public async Task CrossAssembly_UnionIdOnReferencedProperty_FiresSIA003()
     {
         // Reproduces real-world cross-assembly usage: the UnionId-tagged property lives
         // in a separate assembly (messages package) with its own internal copy of the
@@ -2377,7 +2377,7 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetCrossAssemblyDiagnostics(messagesSource, consumerSource);
+        var diagnostics = await GetCrossAssemblyDiagnostics(messagesSource, consumerSource);
 
         AreEqual(1, diagnostics.Length);
         AreEqual("SIA003", diagnostics[0].Id);
@@ -2385,7 +2385,7 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public void CrossAssembly_DerivedTagFlowsToBaseTarget_NoDiagnostic()
+    public async Task CrossAssembly_DerivedTagFlowsToBaseTarget_NoDiagnostic()
     {
         // Real-world case: derived/base types live in a referenced assembly (e.g. the
         // data-model package) while the consumer assembly sends a message that widens
@@ -2410,12 +2410,12 @@ public class IdMismatchAnalyzerTests
             }
             """;
 
-        var diagnostics = GetCrossAssemblyDiagnostics(messagesSource, consumerSource);
+        var diagnostics = await GetCrossAssemblyDiagnostics(messagesSource, consumerSource);
 
         AreEqual(0, diagnostics.Length);
     }
 
-    static ImmutableArray<Diagnostic> GetCrossAssemblyDiagnostics(
+    static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string messagesSource,
         string consumerSource)
     {
@@ -2453,15 +2453,13 @@ public class IdMismatchAnalyzerTests
 
         return consumerCompilation
             .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
-            .GetAnalyzerDiagnosticsAsync()
-            .GetAwaiter()
-            .GetResult();
+            .GetAnalyzerDiagnosticsAsync();
     }
 
-    static ImmutableArray<Diagnostic> GetDiagnostics(string source) =>
+    static Task<ImmutableArray<Diagnostic>> GetDiagnostics(string source) =>
         GetDiagnosticsWithOptions(source, new Dictionary<string, string>());
 
-    static ImmutableArray<Diagnostic> GetDiagnosticsWithOptions(
+    static Task<ImmutableArray<Diagnostic>> GetDiagnosticsWithOptions(
         string source,
         IDictionary<string, string> globalOptions)
     {
@@ -2478,9 +2476,7 @@ public class IdMismatchAnalyzerTests
 
         return updated
             .WithAnalyzers([analyzer], analyzerOptions)
-            .GetAnalyzerDiagnosticsAsync()
-            .GetAwaiter()
-            .GetResult();
+            .GetAnalyzerDiagnosticsAsync();
     }
 
     sealed class TestAnalyzerConfigOptions(IDictionary<string, string> options)

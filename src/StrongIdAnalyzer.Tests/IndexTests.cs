@@ -26,7 +26,7 @@ public class IndexTests
     // the index to force a flip. See IndexEntry_MismatchWithTargetReportsSIA001 for
     // the matching-case shape; this one proves the NotPresent → Present transition.
     [Test]
-    public void IndexEntry_SuppliesTagForOtherwiseUnknownMember()
+    public async Task IndexEntry_SuppliesTagForOtherwiseUnknownMember()
     {
         var library =
             """
@@ -57,12 +57,12 @@ public class IndexTests
             }
             """;
 
-        var withoutIndex = GetCrossAssemblyDiagnostics(library, index: null, consumer);
+        var withoutIndex = await GetCrossAssemblyDiagnostics(library, index: null, consumer);
         Assert.That(withoutIndex, Is.Empty,
             "source is NotPresent and target is Present, but SIA002 is suppressed when " +
             "the source lives in referenced metadata (can't be fixed).");
 
-        var withIndexOrder = GetCrossAssemblyDiagnostics(
+        var withIndexOrder = await GetCrossAssemblyDiagnostics(
             library,
             index: "P:Vault.Token=Order",
             consumer);
@@ -74,7 +74,7 @@ public class IndexTests
     // the source a tag that conflicts with the target. Proves the index value is
     // actually consumed (not just that the lookup path runs).
     [Test]
-    public void IndexEntry_MismatchWithTargetReportsSIA001()
+    public async Task IndexEntry_MismatchWithTargetReportsSIA001()
     {
         var library =
             """
@@ -105,7 +105,7 @@ public class IndexTests
             }
             """;
 
-        var diagnostics = GetCrossAssemblyDiagnostics(
+        var diagnostics = await GetCrossAssemblyDiagnostics(
             library,
             index: "P:Vault.Token=Order",
             consumer);
@@ -117,7 +117,7 @@ public class IndexTests
     // Comma-separated tag values decode to a multi-tag set — the analyzer treats it
     // like a UnionId. Target requiring any one of the options is satisfied.
     [Test]
-    public void IndexEntry_MultipleTags_MatchesAnyOne()
+    public async Task IndexEntry_MultipleTags_MatchesAnyOne()
     {
         var library =
             """
@@ -155,7 +155,7 @@ public class IndexTests
             }
             """;
 
-        var diagnostics = GetCrossAssemblyDiagnostics(
+        var diagnostics = await GetCrossAssemblyDiagnostics(
             library,
             index: "P:Vault.Token=Customer,Order",
             consumer);
@@ -168,7 +168,7 @@ public class IndexTests
     // no native parameter DocId. The analyzer decodes the `::` split in
     // ResolveIndexSymbol and looks up the matching parameter on the resolved method.
     [Test]
-    public void IndexEntry_ParameterForm_ResolvesToParameter()
+    public async Task IndexEntry_ParameterForm_ResolvesToParameter()
     {
         var library =
             """
@@ -201,11 +201,11 @@ public class IndexTests
             }
             """;
 
-        var withoutIndex = GetCrossAssemblyDiagnostics(library, index: null, consumer);
+        var withoutIndex = await GetCrossAssemblyDiagnostics(library, index: null, consumer);
         Assert.That(withoutIndex, Is.Empty,
             "no index + no [Id] on parameter → target Unknown, no diagnostic fires");
 
-        var withIndex = GetCrossAssemblyDiagnostics(
+        var withIndex = await GetCrossAssemblyDiagnostics(
             library,
             index: "M:Methods.Take(System.Guid)::id=Order",
             consumer);
@@ -217,7 +217,7 @@ public class IndexTests
     // wrong signature, removed member). Other entries in the same attribute still
     // load correctly. Guards against a stale index taking the analyzer down with it.
     [Test]
-    public void IndexEntry_UnresolvableKeys_AreIgnored()
+    public async Task IndexEntry_UnresolvableKeys_AreIgnored()
     {
         var library =
             """
@@ -248,7 +248,7 @@ public class IndexTests
             }
             """;
 
-        var diagnostics = GetCrossAssemblyDiagnostics(
+        var diagnostics = await GetCrossAssemblyDiagnostics(
             library,
             // First entry is garbage (type doesn't exist); second is well-formed.
             index: "P:DoesNotExist.Missing=Whatever;P:Vault.Token=Customer",
@@ -264,7 +264,7 @@ public class IndexTests
     // inheritance walk picks it up from the interface member even though the concrete
     // class doesn't repeat the attribute.
     [Test]
-    public void NoIndexAttribute_FallsBackToWalk()
+    public async Task NoIndexAttribute_FallsBackToWalk()
     {
         var library =
             """
@@ -299,7 +299,7 @@ public class IndexTests
             }
             """;
 
-        var diagnostics = GetCrossAssemblyDiagnostics(library, index: null, consumer);
+        var diagnostics = await GetCrossAssemblyDiagnostics(library, index: null, consumer);
 
         Assert.That(diagnostics.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]),
             "walk finds Customer tag on ICustomer.Id via AllInterfaces; target is Order → SIA001");
@@ -309,7 +309,7 @@ public class IndexTests
     // [assembly: StrongIdIndexAttribute(...)]), then compiles `consumer` with that
     // dll as a metadata reference and runs the analyzer. Returns the analyzer's
     // diagnostics on the consumer only.
-    static ImmutableArray<Diagnostic> GetCrossAssemblyDiagnostics(
+    static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string library,
         string? index,
         string consumer)
@@ -372,8 +372,6 @@ public class IndexTests
 
         return consumerCompilation
             .WithAnalyzers([new IdMismatchAnalyzer()])
-            .GetAnalyzerDiagnosticsAsync()
-            .GetAwaiter()
-            .GetResult();
+            .GetAnalyzerDiagnosticsAsync();
     }
 }
