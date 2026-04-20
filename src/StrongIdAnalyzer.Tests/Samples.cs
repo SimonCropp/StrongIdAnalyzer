@@ -348,3 +348,92 @@ public static class RecordUsage
 }
 
 #endregion
+
+namespace TaggedCollectionSamples
+{
+
+#region TaggedCollectionLinqLambda
+
+public class CustomerList
+{
+    // [Id] on a single-T collection describes its elements. The tag flows into any
+    // site that extracts an element: lambda parameters, foreach variables, .First()
+    // results, and through chains of LINQ-shape element-preserving calls.
+    [Id("Customer")]
+    public IEnumerable<Guid> Ids { get; set; } = [];
+}
+
+public class OrderWriter
+{
+    public void Consume([Id("Order")] Guid value) { }
+
+    public void Go(CustomerList list) =>
+        // SIA001 on the argument: `id` inherits "Customer" from list.Ids, which is
+        // then passed into a parameter tagged "Order".
+        // ReSharper disable once ReturnValueOfPureMethodIsNotUsed
+        list.Ids.Select(id => { Consume(id); return id; }).ToList();
+}
+
+#endregion
+
+#region TaggedCollectionForEach
+
+public class CustomerScan
+{
+    [Id("Customer")]
+    public IEnumerable<Guid> Ids { get; set; } = [];
+
+    public void ConsumeOrder([Id("Order")] Guid value) { }
+
+    public void Go()
+    {
+        foreach (var id in Ids)
+        {
+            // SIA001: `id` carries the Customer tag inherited from the collection.
+            ConsumeOrder(id);
+        }
+    }
+}
+
+#endregion
+
+#region TaggedCollectionUserExtension
+
+public static class Paged
+{
+    // An extension with shape `IEnumerable<T> → IEnumerable<T>` is treated as
+    // element-preserving, so element tags flow through it just like through
+    // `Where`, `Take`, and `OrderBy`.
+    public static IEnumerable<T> TakePage<T>(this IEnumerable<T> source, int page, int size) =>
+        source.Skip(page * size).Take(size);
+}
+
+public class PagedReader
+{
+    [Id("Customer")]
+    public IEnumerable<Guid> Ids { get; set; } = [];
+
+    [Id("Order")]
+    public Guid LatestId { get; set; }
+
+    // SIA001 on the assignment: .First() returns a Customer-tagged Guid after
+    // passing through the user-defined element-preserving extension.
+    public void Copy() => LatestId = Ids.TakePage(0, 10).First();
+}
+
+#endregion
+
+#region UnsupportedMultiTCollection
+
+public class CustomerOrderMap
+{
+    // [Id] on a Dictionary/KeyValuePair/tuple/grouping carries no element tag —
+    // the analyzer can't tell whether the tag applies to K, V, or both. Flows
+    // through these containers stay "unknown" and produce no diagnostics.
+    [Id("Customer")]
+    public Dictionary<Guid, string> OrdersByCustomer { get; set; } = [];
+}
+
+#endregion
+
+}

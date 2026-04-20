@@ -1,5 +1,3 @@
-namespace StrongIdAnalyzer;
-
 // Host-level syntax helpers: finding the property/field/parameter that owns an Id-family
 // attribute, inspecting existing attributes on it, and producing human-readable labels
 // for fix titles. Shared by AddIdCodeFixProvider and IdAttributeFactory.

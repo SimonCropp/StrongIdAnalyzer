@@ -1,5 +1,3 @@
-namespace StrongIdAnalyzer;
-
 // Parsing and matching of the `strongidanalyzer.suppressed_namespaces` .editorconfig
 // option. Patterns are parsed once into segment arrays so per-symbol matching avoids
 // ToDisplayString and string concatenation.
@@ -14,7 +12,10 @@ static class NamespaceSuppression
     // when a tagged id flows into BCL / framework APIs (e.g. logging, serialization,
     // dependency injection, Entity Framework). Users can override via .editorconfig.
     public static readonly ImmutableArray<NamespacePattern> Default =
-        [new(["System"], true), new(["Microsoft"], true)];
+        [
+            new(["System"], true),
+            new(["Microsoft"], true)
+        ];
 
     public static ImmutableArray<NamespacePattern> Read(AnalyzerConfigOptionsProvider options)
     {
@@ -119,10 +120,4 @@ static class NamespaceSuppression
 
         return false;
     }
-}
-
-readonly struct NamespacePattern(ImmutableArray<string> segments, bool isWildcard)
-{
-    public ImmutableArray<string> Segments { get; } = segments;
-    public bool IsWildcard { get; } = isWildcard;
 }

@@ -1,5 +1,3 @@
-namespace StrongIdAnalyzer;
-
 // Compilation-wide type traversal. Used to resolve ancestor tag widening — we need
 // every type in the source assembly *and* every referenced assembly that matches a
 // given simple name, then walk its base chain / interface list.
