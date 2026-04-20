@@ -9,8 +9,8 @@ build_script:
 - pwsh: ./dotnet-install.ps1 -JSonFile global.json -Architecture x64 -InstallDir 'C:\Program Files\dotnet'
 - dotnet build src --configuration Release
 - dotnet build IntegrationTests --configuration Release
-- src\StrongIdAnalyzer.Tests\bin\Release\net10.0\StrongIdAnalyzer.Tests.exe --report-trx --results-directory TestResults --coverage --coverage-output-format cobertura --coverage-output TestResults\unit.cobertura.xml
-- IntegrationTests\IntegrationTests\bin\Release\net10.0\IntegrationTests.exe --report-trx --results-directory TestResults --coverage --coverage-output-format cobertura --coverage-output TestResults\integration.cobertura.xml
+- src\StrongIdAnalyzer.Tests\bin\Release\net10.0\StrongIdAnalyzer.Tests.exe --report-trx --results-directory TestResults --coverage --coverage-output-format cobertura --coverage-output unit.cobertura.xml
+- IntegrationTests\IntegrationTests\bin\Release\net10.0\IntegrationTests.exe --report-trx --results-directory TestResults --coverage --coverage-output-format cobertura --coverage-output integration.cobertura.xml
 on_finish:
 - ps: |
     Get-ChildItem TestResults\*.trx -ErrorAction SilentlyContinue | % {
