@@ -776,6 +776,77 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA002_PrefersGenericForm_WhenDiagnosticTreeIsStale()
+    {
+        // Simulates an out-of-process analyzer host (Rider): the diagnostic's
+        // Location.SourceTree is re-parsed on the fix side, so its identity no
+        // longer matches any tree in context.Document.Project.Solution. The
+        // codefix must still resolve the host to the live tree by file path
+        // and emit the generic form.
+        var source =
+            """
+            public class Election
+            {
+                public System.Guid Id { get; set; }
+
+                public static System.Guid Election2022 = System.Guid.NewGuid();
+            }
+
+            public class Holder
+            {
+                public void Use(Election e) => e.Id = Election.Election2022;
+            }
+            """;
+
+        var workspace = new AdhocWorkspace();
+        var projectInfo = ProjectInfo.Create(
+            ProjectId.CreateNewId(),
+            VersionStamp.Default,
+            name: "Tests",
+            assemblyName: "Tests",
+            language: LanguageNames.CSharp,
+            compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
+            metadataReferences: TrustedReferences.All);
+        var idAttrId = DocumentId.CreateNewId(projectInfo.Id);
+        var documentId = DocumentId.CreateNewId(projectInfo.Id);
+        var solution = workspace.CurrentSolution
+            .AddProject(projectInfo)
+            .AddDocument(idAttrId, "IdAttribute.cs", idAttributeSource, filePath: "IdAttribute.cs")
+            .AddDocument(documentId, "Test.cs", source, filePath: "Test.cs");
+
+        var compilation = (await solution.GetProject(projectInfo.Id)!.GetCompilationAsync())!;
+        var diagnostics = await compilation
+            .WithAnalyzers([new IdMismatchAnalyzer()])
+            .GetAnalyzerDiagnosticsAsync();
+        var diagnostic = diagnostics.Single(_ => _.Id == "SIA002");
+
+        // Fork: replace the document text with equivalent content. Roslyn produces
+        // a new SyntaxTree identity; the diagnostic's location still points at the
+        // old tree, which is no longer in the project's compilation.
+        var refreshedSolution = solution.WithDocumentText(
+            documentId,
+            Microsoft.CodeAnalysis.Text.SourceText.From(source));
+        var refreshedDocument = refreshedSolution.GetDocument(documentId)!;
+
+        var staleTree = diagnostic.AdditionalLocations[0].SourceTree!;
+        var refreshedCompilation = (await refreshedDocument.Project.GetCompilationAsync())!;
+        await Assert.That(refreshedCompilation.SyntaxTrees.Contains(staleTree)).IsFalse();
+        await Assert.That(staleTree.FilePath).IsEqualTo("Test.cs");
+
+        var actions = ImmutableArray.CreateBuilder<CodeAction>();
+        var context = new CodeFixContext(
+            refreshedDocument,
+            diagnostic,
+            (action, _) => actions.Add(action),
+            Cancel.None);
+        await new AddIdCodeFixProvider().RegisterCodeFixesAsync(context);
+
+        var titles = actions.Select(_ => _.Title).ToArray();
+        await Assert.That(titles.Any(_ => _.Contains("[Id<Election>]"))).IsTrue();
+        await Assert.That(titles.Any(_ => _.Contains("[Id(\"Election\")]"))).IsFalse();
+    }
+
+    [Test]
     public async Task SIA002_FallsBackToStringForm_WhenTagDoesNotMatchVisibleType()
     {
         var source =
