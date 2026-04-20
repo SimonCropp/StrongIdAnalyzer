@@ -822,8 +822,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var leftSymbol = GetSymbol(operation.LeftOperand);
-        var rightSymbol = GetSymbol(operation.RightOperand);
+        var leftSymbol = operation.LeftOperand.GetReferencedSymbol();
+        var rightSymbol = operation.RightOperand.GetReferencedSymbol();
         var leftInfo = GetAccessInfo(operation.LeftOperand, config);
         var rightInfo = GetAccessInfo(operation.RightOperand, config);
 
@@ -908,7 +908,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         var targetInfo = GetIdWithInheritance(parameter, config);
-        var sourceSymbol = GetSymbol(argument.Value);
+        var sourceSymbol = argument.Value.GetReferencedSymbol();
         var sourceInfo = GetAccessInfo(argument.Value, config);
         Report(
             context,
@@ -923,7 +923,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static void AnalyzeSimpleAssignment(OperationAnalysisContext context, Config config)
     {
         var assignment = (ISimpleAssignmentOperation)context.Operation;
-        var targetSymbol = GetSymbol(assignment.Target);
+        var targetSymbol = assignment.Target.GetReferencedSymbol();
         if (targetSymbol is null)
         {
             return;
@@ -933,7 +933,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // receiver context just like a read would, so assignments use the same multi-tag
         // view on both sides.
         var targetInfo = GetAccessInfo(assignment.Target, config);
-        var sourceSymbol = GetSymbol(assignment.Value);
+        var sourceSymbol = assignment.Value.GetReferencedSymbol();
         var sourceInfo = GetAccessInfo(assignment.Value, config);
         Report(
             context,
@@ -948,7 +948,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static void AnalyzePropertyInitializer(OperationAnalysisContext context, Config config)
     {
         var init = (IPropertyInitializerOperation)context.Operation;
-        var sourceSymbol = GetSymbol(init.Value);
+        var sourceSymbol = init.Value.GetReferencedSymbol();
         var sourceInfo = GetAccessInfo(init.Value, config);
         foreach (var property in init.InitializedProperties)
         {
@@ -967,7 +967,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static void AnalyzeFieldInitializer(OperationAnalysisContext context, Config config)
     {
         var init = (IFieldInitializerOperation)context.Operation;
-        var sourceSymbol = GetSymbol(init.Value);
+        var sourceSymbol = init.Value.GetReferencedSymbol();
         var sourceInfo = GetAccessInfo(init.Value, config);
         foreach (var field in init.InitializedFields)
         {
@@ -983,18 +983,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    static ISymbol? GetSymbol(IOperation operation)
-    {
-        operation = Unwrap(operation);
-        return operation switch
-        {
-            IPropertyReferenceOperation prop => prop.Property,
-            IFieldReferenceOperation field => field.Field,
-            IParameterReferenceOperation param => param.Parameter,
-            IInvocationOperation invocation => invocation.TargetMethod,
-            _ => null
-        };
-    }
 
     // Expression-level resolution. Differs from symbol-only resolution in that a member
     // named `Id` walks the receiver's static-type chain (up to the declaring type) and
@@ -1010,7 +998,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // this path via GetReceiverElementTags so they still see the tag.
     static IdInfo GetAccessInfo(IOperation operation, Config config)
     {
-        operation = Unwrap(operation);
+        operation = operation.Unwrap();
         switch (operation)
         {
             case IPropertyReferenceOperation prop:
@@ -1062,7 +1050,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return info;
         }
 
-        if (TryGetEnumerableElementType(type) is not null)
+        if (type.TryGetEnumerableElementType() is not null)
         {
             return IdInfo.Unknown;
         }
@@ -1162,7 +1150,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        var element = TryGetEnumerableElementType(receiver.Type);
+        var element = receiver.Type.TryGetEnumerableElementType();
         if (element is null ||
             !SymbolEqualityComparer.Default.Equals(element, param.Parameter.Type))
         {
@@ -1189,7 +1177,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         info = IdInfo.Unknown;
 
-        if (!IsLinqMethod(invocation.TargetMethod) ||
+        if (!invocation.TargetMethod.IsLinqMethod() ||
             !IsElementReturningLinq(invocation.TargetMethod.Name))
         {
             return false;
@@ -1201,7 +1189,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        var element = TryGetEnumerableElementType(receiver.Type);
+        var element = receiver.Type.TryGetEnumerableElementType();
         if (element is null ||
             !SymbolEqualityComparer.Default.Equals(element, invocation.Type))
         {
@@ -1233,7 +1221,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // with chain length.
         while (true)
         {
-            receiver = Unwrap(receiver);
+            receiver = receiver.Unwrap();
 
             if (receiver is IInvocationOperation inv)
             {
@@ -1257,14 +1245,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 }
             }
 
-            var symbol = GetSymbol(receiver);
+            var symbol = receiver.GetReferencedSymbol();
             if (symbol is null)
             {
                 return IdInfo.Unknown;
             }
 
-            var symbolType = GetSymbolType(symbol);
-            if (TryGetEnumerableElementType(symbolType) is null)
+            var symbolType = symbol.GetDeclaredType();
+            if (symbolType.TryGetEnumerableElementType() is null)
             {
                 return IdInfo.Unknown;
             }
@@ -1340,11 +1328,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return IdInfo.Unknown;
         }
 
-        selector = Unwrap(selector);
+        selector = selector.Unwrap();
 
         if (selector is IDelegateCreationOperation creation)
         {
-            var target = Unwrap(creation.Target);
+            var target = creation.Target.Unwrap();
 
             if (target is IMethodReferenceOperation methodRef)
             {
@@ -1402,15 +1390,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static IOperation? GetSingleReturnExpression(IAnonymousFunctionOperation lambda)
     {
         var block = lambda.Body;
-        if (block is null ||
-            block.Operations.Length != 1)
+        if (block.Operations.Length != 1)
         {
             return null;
         }
 
         if (block.Operations[0] is IReturnOperation { ReturnedValue: { } value })
         {
-            return Unwrap(value);
+            return value.Unwrap();
         }
 
         return null;
@@ -1443,7 +1430,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // construction, which would defeat the check.
     static bool IsElementPreserving(IMethodSymbol method)
     {
-        if (IsLinqMethod(method) && IsElementPreservingLinq(method.Name))
+        if (method.IsLinqMethod() && IsElementPreservingLinq(method.Name))
         {
             return true;
         }
@@ -1459,15 +1446,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        var inputElement = TryGetEnumerableElementType(definition.Parameters[0].Type);
-        var outputElement = TryGetEnumerableElementType(definition.ReturnType);
+        var inputElement = definition.Parameters[0].Type.TryGetEnumerableElementType();
+        var outputElement = definition.ReturnType.TryGetEnumerableElementType();
         return inputElement is not null &&
                outputElement is not null &&
                SymbolEqualityComparer.Default.Equals(inputElement, outputElement);
     }
 
     static bool IsSelectCall(IMethodSymbol method) =>
-        IsLinqMethod(method) &&
+        method.IsLinqMethod() &&
         method.Name is "Select" or "SelectMany";
 
     // An extension method whose receiver carries a discoverable element type.
@@ -1475,7 +1462,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // IEnumerable<T> src, Func<T,bool> f)` flow tags without hardcoding the method name.
     static bool IsEnumerableShapeExtension(IMethodSymbol method) =>
         GetExtensionReceiverType(method) is { } receiverType &&
-        TryGetEnumerableElementType(receiverType) is not null;
+        receiverType.TryGetEnumerableElementType() is not null;
 
     // For a reduced extension-method call (`x.Ext(...)`), `method.Parameters` excludes
     // the receiver — the "this" parameter only appears on the unreduced symbol, which
@@ -1497,63 +1484,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return full.Parameters[0].Type;
     }
 
-    static ITypeSymbol? GetSymbolType(ISymbol symbol) =>
-        symbol switch
-        {
-            IPropertySymbol p => p.Type,
-            IFieldSymbol f => f.Type,
-            IParameterSymbol pa => pa.Type,
-            ILocalSymbol l => l.Type,
-            IMethodSymbol m => m.ReturnType,
-            _ => null
-        };
-
-    // Arrays are IEnumerable<T>. Otherwise a type must implement exactly one
-    // IEnumerable<T> construction for us to be able to pick a single element type.
-    // Dictionary<K,V> implements IEnumerable<KeyValuePair<K,V>> (unique element type,
-    // but composite — callers further gate on primitive-ish element types by requiring
-    // the lambda's param type to match).
-    static ITypeSymbol? TryGetEnumerableElementType(ITypeSymbol? type)
-    {
-        if (type is null)
-        {
-            return null;
-        }
-
-        if (type is IArrayTypeSymbol array)
-        {
-            return array.ElementType;
-        }
-
-        if (type is not INamedTypeSymbol named)
-        {
-            return null;
-        }
-
-        if (named.IsGenericType &&
-            named.ConstructedFrom.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
-        {
-            return named.TypeArguments[0];
-        }
-
-        ITypeSymbol? found = null;
-        foreach (var iface in named.AllInterfaces)
-        {
-            if (iface.IsGenericType &&
-                iface.ConstructedFrom.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
-            {
-                if (found is not null &&
-                    !SymbolEqualityComparer.Default.Equals(found, iface.TypeArguments[0]))
-                {
-                    return null;
-                }
-
-                found = iface.TypeArguments[0];
-            }
-        }
-
-        return found;
-    }
 
     static IOperation? FindEnclosingAnonymousFunction(IOperation operation)
     {
@@ -1614,24 +1544,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         return null;
-    }
-
-    static bool IsLinqMethod(IMethodSymbol method)
-    {
-        var containing = method.ContainingType;
-        if (containing is null)
-        {
-            return false;
-        }
-
-        var name = containing.Name;
-        if (name != "Enumerable" && name != "Queryable")
-        {
-            return false;
-        }
-
-        return containing.ContainingNamespace is { Name: "Linq" } ns &&
-               ns.ContainingNamespace is { Name: "System" };
     }
 
     static bool IsElementReturningLinq(string methodName) =>
@@ -2094,24 +2006,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // Peel off conversions and `await` so the resolver sees the value-producing operation
     // underneath. An `await task` result carries the tag of the method that produced the
     // task, so unwrapping lets `[return: Id]` on an async method flow through the await.
-    static IOperation Unwrap(IOperation operation)
-    {
-        while (true)
-        {
-            switch (operation)
-            {
-                case IConversionOperation conversion:
-                    operation = conversion.Operand;
-                    continue;
-                case IAwaitOperation await:
-                    operation = await.Operation;
-                    continue;
-                default:
-                    return operation;
-            }
-        }
-    }
-
     static IdInfo GetIdFromAttributes(ImmutableArray<AttributeData> attributes)
     {
         // Id and UnionId on the same declaration are rare but legal (different attribute

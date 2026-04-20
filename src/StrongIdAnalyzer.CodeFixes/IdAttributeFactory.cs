@@ -1,5 +1,3 @@
-namespace StrongIdAnalyzer;
-
 // Syntax builders for `[Id("...")]` and `[UnionId("...", ...)]`. Kept separate from
 // the code-fix orchestration so the provider only deals with when to apply an edit,
 // not how to shape the attribute node.
