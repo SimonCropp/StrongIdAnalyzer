@@ -127,9 +127,13 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
         var hasExplicit = AttributeHost.HasIdFamilyAttribute(host);
         var hostDescription = AttributeHost.Describe(host);
+        var preferGeneric = await PreferGenericAsync(context, diagnostic, host).ConfigureAwait(false);
+        var rendered = preferGeneric && SyntaxFacts.IsValidIdentifier(value)
+            ? $"[Id<{value}>]"
+            : $"[Id(\"{value}\")]";
         var actionTitle = hasExplicit
-            ? $"Change attribute on {hostDescription} to [Id(\"{value}\")]"
-            : $"Add [Id(\"{value}\")] to {hostDescription}";
+            ? $"Change attribute on {hostDescription} to {rendered}"
+            : $"Add {rendered} to {hostDescription}";
 
         // Equivalence keys include the slot so target-side and source-side fixes with
         // the same literal tag don't collide in Fix All / multi-diagnostic scenarios.
@@ -140,6 +144,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
                     context.Document.Project.Solution,
                     declarationLocation,
                     value,
+                    preferGeneric,
                     cancel),
                 equivalenceKey: $"ChangeId:{slot}:{value}"),
             diagnostic);
@@ -163,6 +168,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         Solution solution,
         Location declarationLocation,
         string value,
+        bool preferGeneric,
         Cancel cancel)
     {
         var document = solution.GetDocument(declarationLocation.SourceTree);
@@ -186,7 +192,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return solution;
         }
 
-        var newHost = IdAttributeFactory.ReplaceOrAddIdAttribute(host, value);
+        var newHost = IdAttributeFactory.ReplaceOrAddIdAttribute(host, value, preferGeneric);
         if (newHost is null)
         {
             return solution;
@@ -239,6 +245,48 @@ public class AddIdCodeFixProvider : CodeFixProvider
             .ConfigureAwait(false);
     }
 
+    // Decide whether the fix output should use the generic attribute form `[Id<X>]`.
+    // Triggered when *any* Id-family attribute on either the host being fixed or the
+    // other side of the mismatch already uses generic form — preserves the author's
+    // chosen style instead of silently converting `[Id<Department>]` into `[Id("Department")]`.
+    static async Task<bool> PreferGenericAsync(
+        CodeFixContext context,
+        Diagnostic diagnostic,
+        SyntaxNode host)
+    {
+        if (HasGenericIdAttribute(host))
+        {
+            return true;
+        }
+
+        foreach (var location in diagnostic.AdditionalLocations)
+        {
+            if (!location.IsInSource || location.SourceTree is null)
+            {
+                continue;
+            }
+
+            var tree = location.SourceTree;
+            var root = await tree
+                .GetRootAsync(context.CancellationToken)
+                .ConfigureAwait(false);
+            var node = root.FindNode(location.SourceSpan);
+            var otherHost = AttributeHost.Find(node);
+            if (otherHost is not null && HasGenericIdAttribute(otherHost))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    static bool HasGenericIdAttribute(SyntaxNode host)
+    {
+        var attribute = AttributeHost.FindIdFamilyAttribute(host);
+        return attribute is not null && IdAttributeFactory.IsGenericAttribute(attribute);
+    }
+
     static async Task RegisterAddFix(CodeFixContext context, Diagnostic diagnostic)
     {
         if (diagnostic.AdditionalLocations.Count == 0)
@@ -276,20 +324,26 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
         var values = value.Split('|');
         var hostDescription = AttributeHost.Describe(host);
+        var preferGeneric = await PreferGenericAsync(context, diagnostic, host).ConfigureAwait(false);
 
         // When the source has [UnionId(a, b, ...)], offer a matching [UnionId] fix first
         // plus one [Id(x)] fix per tag — picking which option to accept is a human
         // judgement call (same reasoning as the StringSyntax pipe split).
         if (values.Length > 1)
         {
-            var unionArgs = string.Join(", ", values.Select(_ => $"\"{_}\""));
+            var useGenericUnion = preferGeneric && values.All(SyntaxFacts.IsValidIdentifier);
+            var unionArgs = useGenericUnion
+                ? string.Join(", ", values)
+                : string.Join(", ", values.Select(_ => $"\"{_}\""));
+            var unionRendered = useGenericUnion ? $"[UnionId<{unionArgs}>]" : $"[UnionId({unionArgs})]";
             context.RegisterCodeFix(
                 CodeAction.Create(
-                    $"Add [UnionId({unionArgs})] to {hostDescription}",
+                    $"Add {unionRendered} to {hostDescription}",
                     cancel => AddUnionAttributeAsync(
                         context.Document.Project.Solution,
                         declarationLocation,
                         values,
+                        preferGeneric,
                         cancel),
                     equivalenceKey: $"AddUnionId:{value}"),
                 diagnostic);
@@ -297,13 +351,17 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
         foreach (var singleValue in values)
         {
+            var rendered = preferGeneric && SyntaxFacts.IsValidIdentifier(singleValue)
+                ? $"[Id<{singleValue}>]"
+                : $"[Id(\"{singleValue}\")]";
             context.RegisterCodeFix(
                 CodeAction.Create(
-                    $"Add [Id(\"{singleValue}\")] to {hostDescription}",
+                    $"Add {rendered} to {hostDescription}",
                     cancel => AddAttributeAsync(
                         context.Document.Project.Solution,
                         declarationLocation,
                         singleValue,
+                        preferGeneric,
                         cancel),
                     equivalenceKey: $"AddId:{singleValue}"),
                 diagnostic);
@@ -334,14 +392,16 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return;
         }
 
+        var preferGeneric = IdAttributeFactory.IsGenericAttribute(attribute) && SyntaxFacts.IsValidIdentifier(value);
+        var rendered = preferGeneric ? $"[Id<{value}>]" : $"[Id(\"{value}\")]";
         var title = AttributeHost.FindOwner(attribute) is { } owner
-            ? $"Replace [UnionId] on {AttributeHost.Describe(owner)} with [Id(\"{value}\")]"
-            : $"Replace [UnionId] with [Id(\"{value}\")]";
+            ? $"Replace [UnionId] on {AttributeHost.Describe(owner)} with {rendered}"
+            : $"Replace [UnionId] with {rendered}";
 
         context.RegisterCodeFix(
             CodeAction.Create(
                 title,
-                cancel => ReplaceUnionWithIdAsync(context.Document, location, value, cancel),
+                cancel => ReplaceUnionWithIdAsync(context.Document, location, value, preferGeneric, cancel),
                 equivalenceKey: $"ReplaceUnionWithId:{value}"),
             diagnostic);
     }
@@ -381,6 +441,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         Solution solution,
         Location declarationLocation,
         string value,
+        bool preferGeneric,
         Cancel cancel)
     {
         var document = solution.GetDocument(declarationLocation.SourceTree);
@@ -404,7 +465,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return solution;
         }
 
-        var newTargetNode = IdAttributeFactory.AddIdAttribute(targetNode, value);
+        var newTargetNode = IdAttributeFactory.AddIdAttribute(targetNode, value, preferGeneric);
         if (newTargetNode is null)
         {
             return solution;
@@ -430,6 +491,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         Solution solution,
         Location declarationLocation,
         string[] values,
+        bool preferGeneric,
         Cancel cancel)
     {
         var document = solution.GetDocument(declarationLocation.SourceTree);
@@ -453,7 +515,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return solution;
         }
 
-        var newTargetNode = IdAttributeFactory.AddUnionIdAttribute(targetNode, values);
+        var newTargetNode = IdAttributeFactory.AddUnionIdAttribute(targetNode, values, preferGeneric);
         if (newTargetNode is null)
         {
             return solution;
@@ -473,6 +535,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         Document document,
         Location location,
         string value,
+        bool preferGeneric,
         Cancel cancel)
     {
         var root = await document
@@ -493,7 +556,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         // Replace the exact attribute at the diagnostic location rather than "first
         // Id-family attribute on the owner" — a host can legitimately carry multiple
         // attributes and only the one being diagnosed should be rewritten.
-        var newAttribute = IdAttributeFactory.BuildReplacement(value, oldAttribute);
+        var newAttribute = IdAttributeFactory.BuildReplacement(value, oldAttribute, preferGeneric);
         return document.WithSyntaxRoot(root.ReplaceNode(oldAttribute, newAttribute));
     }
 
