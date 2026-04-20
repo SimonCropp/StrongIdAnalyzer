@@ -9,7 +9,8 @@ using Microsoft.CodeAnalysis.Diagnostics;
 [TestFixture]
 public class CodeFixConsumeTests
 {
-    const string IdAttributeSource = """
+    const string IdAttributeSource =
+        """
         namespace StrongIdAnalyzer;
 
         using System;
@@ -32,7 +33,8 @@ public class CodeFixConsumeTests
     {
         var (analyzer, codeFix) = LoadAnalyzerAndCodeFixFromPackage();
 
-        var source = """
+        var source =
+            """
             using StrongIdAnalyzer;
 
             public class Target

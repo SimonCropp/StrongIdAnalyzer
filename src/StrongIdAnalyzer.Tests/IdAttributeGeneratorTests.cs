@@ -19,7 +19,8 @@ public class IdAttributeGeneratorTests
     [Test]
     public void ConsumerCodeUsingIdAttribute_Compiles()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public static void Consume([Id("Order")] System.Guid value) { }

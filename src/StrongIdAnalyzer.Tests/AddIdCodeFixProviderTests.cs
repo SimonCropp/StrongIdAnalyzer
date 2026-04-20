@@ -196,7 +196,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task MultiDeclaratorField_NoFixRegistered()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid a, b;
@@ -215,7 +216,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA006_RewritesSingletonUnionAsId()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [UnionId("Customer")]
@@ -235,7 +237,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA001_ReplacesExplicitAttributeOnTargetParameter()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public static void Consume([Id("Bid")] System.Guid value) { }
@@ -261,7 +264,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA001_AddsAttributeToConventionallyNamedParameter()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public static void Consume(System.Guid bidId) { }
@@ -284,7 +288,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA001_RenamesConventionallyNamedParameter()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public static void Consume(System.Guid bidId) { }
@@ -308,7 +313,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA001_RenamesConventionallyNamedProperty()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public System.Guid BidId { get; set; }
@@ -332,7 +338,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA001_RenamesConventionallyNamedField()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public System.Guid BidId;
@@ -356,7 +363,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA001_NoRenameWhenExplicitAttributePresent()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public static void Consume([Id("Bid")] System.Guid bidId) { }
@@ -394,7 +402,8 @@ public class AddIdCodeFixProviderTests
         // bid.Id inherits Id from BaseEntity. The fix should propose renaming the
         // target parameter using the receiver static type (TreasuryBid), not the
         // declaring type (BaseEntity).
-        var source = """
+        var source =
+            """
             public class BaseEntity
             {
                 public System.Guid Id { get; set; }
@@ -422,7 +431,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA001_InheritedId_ReceiverTypeDrivesChangeAttribute()
     {
-        var source = """
+        var source =
+            """
             public class BaseEntity
             {
                 public System.Guid Id { get; set; }
@@ -453,7 +463,8 @@ public class AddIdCodeFixProviderTests
         // source-side option (override the convention with an explicit attribute on
         // the source declaration), not only the target-side option that would
         // demote the target's tag.
-        var source = """
+        var source =
+            """
             public record ProgramBillOutcomeInput(System.Guid VariationId);
 
             public class Input
@@ -474,7 +485,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA001_AppliesFixOnSourceSide_Parameter()
     {
-        var source = """
+        var source =
+            """
             public record ProgramBillOutcomeInput(System.Guid VariationId);
 
             public class Input
@@ -499,7 +511,8 @@ public class AddIdCodeFixProviderTests
     {
         // Titles should identify the kind and name of the declaration being acted on,
         // so the IDE popup tells the user which side of the call is affected.
-        var mismatchSource = """
+        var mismatchSource =
+            """
             public class Target
             {
                 public static void Consume(System.Guid orderId) { }
@@ -524,7 +537,8 @@ public class AddIdCodeFixProviderTests
             mismatchTitles.Any(_ => _ == "Rename parameter 'orderId' to 'treasuryBidId'"),
             $"missing rename title, got: {string.Join(" | ", mismatchTitles)}");
 
-        var changeSource = """
+        var changeSource =
+            """
             public class Target
             {
                 public static void Consume([Id("Order")] System.Guid value) { }
@@ -544,7 +558,8 @@ public class AddIdCodeFixProviderTests
             changeTitles.Any(_ => _ == "Change attribute on parameter 'value' to [Id(\"TreasuryBid\")]"),
             $"missing change title, got: {string.Join(" | ", changeTitles)}");
 
-        var redundantSource = """
+        var redundantSource =
+            """
             public class OrderRedundant
             {
                 [Id("OrderRedundant")]
@@ -557,7 +572,8 @@ public class AddIdCodeFixProviderTests
             redundantTitles.Any(_ => _ == "Remove redundant [Id] from property 'Id'"),
             $"missing redundant title, got: {string.Join(" | ", redundantTitles)}");
 
-        var unionSource = """
+        var unionSource =
+            """
             public class Holder
             {
                 [UnionId("Order")]
@@ -575,7 +591,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA005_RemovesRedundantAttribute_WhenOnlyAttribute()
     {
-        var source = """
+        var source =
+            """
             public class Order
             {
                 [Id("Order")]
@@ -595,7 +612,8 @@ public class AddIdCodeFixProviderTests
     {
         // When the redundant [Id] sits beside another attribute in the same list, only it
         // is removed.
-        var source = """
+        var source =
+            """
             using System;
 
             public class Order
@@ -616,7 +634,8 @@ public class AddIdCodeFixProviderTests
     public async Task SIA003_UnionSource_OffersUnionAndPerValueFixes()
     {
         // Names avoid the Id/XxxId convention so the target genuinely reads as untagged.
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public System.Guid Subject { get; set; }
@@ -668,7 +687,8 @@ public class AddIdCodeFixProviderTests
         // Companion to SIA003_UnionSource_OffersUnionAndPerValueFixes, which only
         // verifies the titles are registered. This actually applies the union fix and
         // checks the resulting [UnionId<...>] attribute is emitted in generic form.
-        var source = """
+        var source =
+            """
             public class Customer;
             public class Order;
 
@@ -696,7 +716,8 @@ public class AddIdCodeFixProviderTests
     {
         // When one of the union values isn't a valid C# identifier the codefix should
         // fall back to the string-arg form `[UnionId("a", "b")]` rather than generics.
-        var source = """
+        var source =
+            """
             public class Order;
 
             public class Target
@@ -724,7 +745,8 @@ public class AddIdCodeFixProviderTests
     {
         // When the target already uses [Id<Bid>], the fix to change the attribute should
         // produce [Id<TreasuryBid>] not [Id("TreasuryBid")].
-        var source = """
+        var source =
+            """
             public class TreasuryBid;
             public class Bid;
 
@@ -754,7 +776,8 @@ public class AddIdCodeFixProviderTests
         // The tag "Election" is inferred from convention on Election.Id. The codefix
         // should suggest [Id<Election>] (not [Id("Election")]) because the Election
         // type is visible at the fix site.
-        var source = """
+        var source =
+            """
             public class Election
             {
                 public System.Guid Id { get; set; }
@@ -777,7 +800,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA002_FallsBackToStringForm_WhenTagDoesNotMatchVisibleType()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid Value { get; set; }
@@ -799,7 +823,8 @@ public class AddIdCodeFixProviderTests
     {
         // Both sides explicit, both generic: change-attribute titles on either side
         // should render in generic form.
-        var source = """
+        var source =
+            """
             public class TreasuryBid;
             public class Bid;
 

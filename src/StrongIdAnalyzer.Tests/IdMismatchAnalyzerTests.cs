@@ -4,7 +4,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task IdMismatch_ArgumentToParameter()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -77,7 +78,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task GenericIdAttribute_Matching_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class Customer;
             public class Target
             {
@@ -100,7 +102,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task GenericIdAttribute_Mismatch_ReportsSIA001()
     {
-        var source = """
+        var source =
+            """
             public class Customer;
             public class Order;
             public class Target
@@ -130,7 +133,8 @@ public class IdMismatchAnalyzerTests
     {
         // Source uses the generic form, target uses the string form — they must resolve
         // to the same tag and not produce a mismatch.
-        var source = """
+        var source =
+            """
             public class Customer;
             public class Target
             {
@@ -153,7 +157,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task GenericUnionIdAttribute_SourceInOptions_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class Customer;
             public class Order;
             public class Target
@@ -177,7 +182,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task GenericUnionIdAttribute_SourceNotInOptions_ReportsSIA001()
     {
-        var source = """
+        var source =
+            """
             public class Customer;
             public class Order;
             public class Product;
@@ -203,7 +209,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task GenericUnionIdAttribute_FiveArgs_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class A;
             public class B;
             public class C;
@@ -230,7 +237,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task GenericUnionIdAttribute_EquivalentToStringForm()
     {
-        var source = """
+        var source =
+            """
             public class Customer;
             public class Order;
             public class Target
@@ -254,7 +262,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task DerivedTagFlowsToBaseTarget_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public abstract class ProgramBillBase;
             public class ProgramBill : ProgramBillBase;
             public class Target
@@ -333,7 +342,8 @@ public class IdMismatchAnalyzerTests
     {
         // Tag names that don't correspond to any type in the compilation should behave
         // as before — no widening, exact match only.
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public void Consume([Id("LegacyThingA")] System.Guid value) { }
@@ -386,7 +396,8 @@ public class IdMismatchAnalyzerTests
     {
         // Equality is symmetric — widening both sides lets a derived id compare to a
         // base id without firing SIA001.
-        var source = """
+        var source =
+            """
             public abstract class ProgramBillBase {}
             public class ProgramBill : ProgramBillBase {}
             public class Holder
@@ -700,7 +711,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task MatchingIds_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -722,7 +734,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task LocalVariableSource_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -746,7 +759,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task NoIdAttributeAnywhere_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public void Consume(System.Guid value) { }
@@ -770,7 +784,8 @@ public class IdMismatchAnalyzerTests
     {
         // Unlike StringSyntax which special-cases the first character, Id values are
         // user-defined tags and are compared ordinally. "Order" vs "order" is a mismatch.
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -794,7 +809,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task FieldSource_Mismatch()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [Id("Customer")]
@@ -816,7 +832,8 @@ public class IdMismatchAnalyzerTests
     public async Task GuidStringInt_AllWorkWithAnyTag()
     {
         // The analyzer ignores the primitive type — it only compares the Id tag string.
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public int CustomerId { get; set; }
@@ -836,7 +853,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task EqualityCheck_MismatchedIds_Fires()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid OrderId { get; set; }
@@ -856,7 +874,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task InequalityCheck_MismatchedIds_Fires()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid OrderId { get; set; }
@@ -876,7 +895,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task EqualityCheck_MatchingIds_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [Id("Order")]
@@ -897,7 +917,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task EqualityCheck_OneSideMissing_FiresSIA002()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid OrderId { get; set; }
@@ -919,7 +940,8 @@ public class IdMismatchAnalyzerTests
     public async Task EqualityCheck_OneSideMissing_RightToLeft_FiresSIA002()
     {
         // Same as above but the tagged side is on the right — fixer should target the left.
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid Other { get; set; }
@@ -940,7 +962,8 @@ public class IdMismatchAnalyzerTests
     public async Task EqualityCheck_AgainstEmpty_NoDiagnostic()
     {
         // Comparing a tagged id to Guid.Empty or a literal is routine and must not fire.
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid OrderId { get; set; }
@@ -960,7 +983,8 @@ public class IdMismatchAnalyzerTests
         // Passing a tagged Guid to Dictionary<Guid, T>.this[Guid] previously fired SIA003
         // because the indexer's parameter has no [Id]. Library-declared targets are now
         // suppressed.
-        var source = """
+        var source =
+            """
             using System.Collections.Generic;
 
             public class Holder
@@ -983,7 +1007,8 @@ public class IdMismatchAnalyzerTests
     {
         // Guid.Equals(Guid) and object.Equals(object) are library boundary methods —
         // they don't carry [Id] semantics, so passing a tagged value must not fire SIA003.
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [Id("Order")]
@@ -1007,7 +1032,8 @@ public class IdMismatchAnalyzerTests
         // Base has [Id("Order")]; derived inherits without redeclaring. Accessing
         // derived.Id resolves to the base property symbol, so this works naturally
         // (no hierarchy walk required). Pinned to guard against regressions.
-        var source = """
+        var source =
+            """
             public class Base
             {
                 [Id("Order")]
@@ -1038,7 +1064,8 @@ public class IdMismatchAnalyzerTests
     {
         // Derived overrides without repeating [Id]. The analyzer walks OverriddenProperty
         // so passing derived.Id where [Id("Customer")] is expected still fires SIA001.
-        var source = """
+        var source =
+            """
             public class Base
             {
                 [Id("Order")]
@@ -1070,7 +1097,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task ImplicitInterfaceProperty_InheritsTagFromInterface()
     {
-        var source = """
+        var source =
+            """
             public interface IEntity
             {
                 [Id("Order")]
@@ -1104,7 +1132,8 @@ public class IdMismatchAnalyzerTests
     {
         // Access via the interface type since explicit impls are not accessible on the
         // concrete type. The explicit-impl path of the hierarchy walk is exercised.
-        var source = """
+        var source =
+            """
             public interface IEntity
             {
                 [Id("Order")]
@@ -1141,7 +1170,8 @@ public class IdMismatchAnalyzerTests
         // derived static type fires SIA001 — the derived's tag comes from the naming
         // convention ("Derived") and conflicts with the target's "Customer", not the
         // base's "Order".
-        var source = """
+        var source =
+            """
             public class Base
             {
                 [Id("Order")]
@@ -1179,7 +1209,8 @@ public class IdMismatchAnalyzerTests
         // Abstract base has an explicit non-convention tag on the parameter so the rename
         // can't be satisfied by the naming convention. Override drops the attribute; call
         // through the derived receiver still sees SIA001 via the inheritance walk.
-        var source = """
+        var source =
+            """
             public abstract class Base
             {
                 public abstract void Process([Id("Urgent")] System.Guid value);
@@ -1209,7 +1240,8 @@ public class IdMismatchAnalyzerTests
     {
         // Logger-style helper: tagged id passed into an `object` parameter. The [Id] tag
         // is erased through `object`, so firing SIA003 here would be constant noise.
-        var source = """
+        var source =
+            """
             public class Logger
             {
                 public void Log(string message, object value) { }
@@ -1232,7 +1264,8 @@ public class IdMismatchAnalyzerTests
     public async Task GenericTypeParameter_DoesNotFireSIA003()
     {
         // Generic pass-through methods (identity, container helpers) can't carry tags.
-        var source = """
+        var source =
+            """
             public class Helper
             {
                 public T Identity<T>(T value) => value;
@@ -1256,7 +1289,8 @@ public class IdMismatchAnalyzerTests
     {
         // User-declared class in a `System.*` namespace lives in source, so the metadata
         // suppression doesn't cover it — only the namespace rule does.
-        var source = """
+        var source =
+            """
             namespace System.Fake
             {
                 public class Target
@@ -1281,7 +1315,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task SuppressedNamespace_DefaultMicrosoft_NoSIA003()
     {
-        var source = """
+        var source =
+            """
             namespace Microsoft.Fake
             {
                 public class Target
@@ -1306,7 +1341,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task UserNamespace_NotSuppressed_StillFires()
     {
-        var source = """
+        var source =
+            """
             namespace MyCompany.Logging
             {
                 public class Target
@@ -1334,7 +1370,8 @@ public class IdMismatchAnalyzerTests
     {
         // With the option set, MyCompany.* should be suppressed while System.* should NOT
         // (user value fully replaces the defaults).
-        var source = """
+        var source =
+            """
             namespace MyCompany.Logging
             {
                 public class Target
@@ -1379,7 +1416,8 @@ public class IdMismatchAnalyzerTests
     public async Task SuppressedNamespace_EmptyOverride_DisablesAllSuppression()
     {
         // Empty value = no suppression. A user-declared class in System.Fake now fires.
-        var source = """
+        var source =
+            """
             namespace System.Fake
             {
                 public class Target
@@ -1412,7 +1450,8 @@ public class IdMismatchAnalyzerTests
     {
         // Order.Id has no [Id] but the naming convention tags it "Order"; passing into an
         // [Id("Customer")] parameter fires SIA001 with "Order" vs "Customer".
-        var source = """
+        var source =
+            """
             public class Order
             {
                 public System.Guid Id { get; set; }
@@ -1442,7 +1481,8 @@ public class IdMismatchAnalyzerTests
     public async Task Convention_XxxIdProperty_InferredAsPrefix()
     {
         // CustomerId -> convention "Customer"; passing into [Id("Order")] fires SIA001.
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid CustomerId { get; set; }
@@ -1464,7 +1504,8 @@ public class IdMismatchAnalyzerTests
     {
         // Customer.Id (convention "Customer") and Order.CustomerId (convention "Customer")
         // reference the same conceptual Id — the analyzer must accept matching flow.
-        var source = """
+        var source =
+            """
             public class Customer
             {
                 public System.Guid Id { get; set; }
@@ -1491,7 +1532,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task Convention_FieldConvention_Applies()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid OrderId;
@@ -1513,7 +1555,8 @@ public class IdMismatchAnalyzerTests
     {
         // "Value" isn't an Id-convention name, so no inferred tag — passing to an [Id]
         // parameter fires SIA002 (not SIA001).
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid Value { get; set; }
@@ -1534,7 +1577,8 @@ public class IdMismatchAnalyzerTests
     public async Task Convention_ExplicitAttributeOverridesConvention()
     {
         // CustomerId would be "Customer" by convention, but explicit [Id("Special")] wins.
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [Id("Special")]
@@ -1560,7 +1604,8 @@ public class IdMismatchAnalyzerTests
     {
         // Two Order classes in separate namespaces both map to conventional name "Order".
         // SIA004 fires on each declaration.
-        var source = """
+        var source =
+            """
             namespace One
             {
                 public class Order
@@ -1588,7 +1633,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task SIA004_NestedUnderDifferentParents_Fires()
     {
-        var source = """
+        var source =
+            """
             public class A
             {
                 public class Foo
@@ -1617,7 +1663,8 @@ public class IdMismatchAnalyzerTests
     {
         // Adding an explicit [Id("...")] (with a different value) on one declaration takes
         // it out of the ambiguity set — SIA004 no longer fires on either side.
-        var source = """
+        var source =
+            """
             namespace One
             {
                 public class Order
@@ -1646,7 +1693,8 @@ public class IdMismatchAnalyzerTests
     {
         // `XxxId` convention does not feed the ambiguity map: two types each having a
         // `CustomerId` property are expected and desirable.
-        var source = """
+        var source =
+            """
             public class Order
             {
                 public System.Guid CustomerId { get; set; }
@@ -1666,7 +1714,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task SIA005_RedundantAttributeOnId_Fires()
     {
-        var source = """
+        var source =
+            """
             public class Order
             {
                 [Id("Order")]
@@ -1684,7 +1733,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task SIA005_RedundantAttributeOnXxxId_Fires()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [Id("Customer")]
@@ -1704,7 +1754,8 @@ public class IdMismatchAnalyzerTests
     {
         // child1.Id carries the set {"Child1", "Base"} — both parameters are satisfied.
         // (The parameter attributes are dropped because convention infers them.)
-        var source = """
+        var source =
+            """
             public class Base
             {
                 public System.Guid Id { get; set; }
@@ -1737,7 +1788,8 @@ public class IdMismatchAnalyzerTests
     {
         // child2.Id is {"Child2", "Base"} — satisfies the Base parameter but NOT the
         // Child1 parameter; SIA001 fires only on the first argument.
-        var source = """
+        var source =
+            """
             public class Base
             {
                 public System.Guid Id { get; set; }
@@ -1772,7 +1824,8 @@ public class IdMismatchAnalyzerTests
     {
         // When the static receiver type is Base, the access carries only "Base" — the
         // derived-type tags aren't inferred because the caller didn't express them.
-        var source = """
+        var source =
+            """
             public class Base
             {
                 public System.Guid Id { get; set; }
@@ -1801,7 +1854,8 @@ public class IdMismatchAnalyzerTests
         // Override chain walks Child1.Id -> Base.Id and unions both tags, so child1.Id
         // carries {"Child1","Base"} and satisfies parameters tagged either way while
         // child2.Id correctly fails the "Child1" parameter.
-        var source = """
+        var source =
+            """
             public abstract class Base
             {
                 [Id("Base")]
@@ -1850,7 +1904,8 @@ public class IdMismatchAnalyzerTests
     {
         // Interface Base + class impls with explicit [Id] at every level. Implicit
         // interface implementation is walked, so child1.Id carries {"Child1","Base"}.
-        var source = """
+        var source =
+            """
             public interface Base
             {
                 [Id("Base")]
@@ -1899,7 +1954,8 @@ public class IdMismatchAnalyzerTests
     {
         // Interface Base with an abstract Id, children implement without explicit [Id].
         // Both convention tags (Child1/Child2 + Base) come from the interface walk.
-        var source = """
+        var source =
+            """
             public interface Base
             {
                 System.Guid Id { get; set; }
@@ -1947,7 +2003,8 @@ public class IdMismatchAnalyzerTests
         // static type ("TreasuryBid") before the declaring type ("BaseEntity") so the
         // diagnostic message — and the FirstValue used by the code fix — prefers the
         // more specific name the user sees locally.
-        var source = """
+        var source =
+            """
             public class BaseEntity
             {
                 public System.Guid Id { get; set; }
@@ -1977,7 +2034,8 @@ public class IdMismatchAnalyzerTests
     {
         // leaf.Id walks Leaf → Mid → Root. The resulting tag list must be
         // "Leaf/Mid/Root" (most-derived first) so code fixes pick the receiver type.
-        var source = """
+        var source =
+            """
             public class Root { public System.Guid Id { get; set; } }
             public class Mid : Root;
             public class Leaf : Mid;
@@ -2002,7 +2060,8 @@ public class IdMismatchAnalyzerTests
     public async Task Convention_InheritedId_DeepChain_IncludesAllAncestors()
     {
         // leaf.Id walks Leaf → Mid → Root and carries all three tags.
-        var source = """
+        var source =
+            """
             public class Root { public System.Guid Id { get; set; } }
             public class Mid : Root;
             public class Leaf : Mid;
@@ -2032,7 +2091,8 @@ public class IdMismatchAnalyzerTests
     {
         // Parameter `orderId` (camelCase) -> "Order" tag; passing into a "Customer"-tagged
         // target fires SIA001 with "Order" vs "Customer".
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid CustomerId { get; set; }
@@ -2057,7 +2117,8 @@ public class IdMismatchAnalyzerTests
     {
         // A parameter named just `id` has no containing-type equivalent and must NOT
         // receive an inferred tag — otherwise generic helpers would be over-tagged.
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid CustomerId { get; set; }
@@ -2077,7 +2138,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task SIA005_RedundantAttributeOnParameter_Fires()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public static void Process([Id("Order")] System.Guid orderId) { }
@@ -2094,7 +2156,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task SIA005_DifferentExplicitValue_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class Order
             {
                 [Id("Special")]
@@ -2111,7 +2174,8 @@ public class IdMismatchAnalyzerTests
     public async Task Union_SourceUnion_TargetSingleInOverlap_NoDiagnostic()
     {
         // [UnionId("Customer","Product")] source overlaps with [Id("Customer")] target.
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [UnionId("Customer", "Product")]
@@ -2131,7 +2195,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task Union_SourceUnion_TargetSingleDisjoint_FiresSIA001()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [UnionId("Customer", "Product")]
@@ -2156,7 +2221,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task Union_TargetUnion_SourceSingleInOverlap_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [Id("Customer")]
@@ -2176,7 +2242,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task Union_UnionAndUnionOverlap_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [UnionId("Customer", "Product")]
@@ -2196,7 +2263,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task Union_UnionAndUnionDisjoint_FiresSIA001()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [UnionId("Customer", "Product")]
@@ -2220,7 +2288,8 @@ public class IdMismatchAnalyzerTests
         // A property named `CustomerId` with explicit [UnionId("Order")] — convention
         // would give "Customer" and the explicit union adds "Order". Passing it to an
         // [Id("Order")] parameter must succeed because "Order" is in the set.
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [UnionId("Order")]
@@ -2241,7 +2310,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task SIA006_SingletonUnion_Fires()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [UnionId("Customer")]
@@ -2259,7 +2329,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task SIA006_SingletonUnion_OnParameter_Fires()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public static void Consume([UnionId("Customer")] System.Guid value) { }
@@ -2275,7 +2346,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task SIA006_MultiOptionUnion_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [UnionId("Customer", "Product")]
@@ -2291,7 +2363,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task AnonymousType_PropertyConvention_IsSkipped()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 [Id("ProgramBillBase")]
@@ -2425,7 +2498,8 @@ public class IdMismatchAnalyzerTests
         // param in Select has no attribute but must inherit "Customer" so the mismatched
         // argument to ConsumeOrder fires SIA001. Names avoid the naming convention so
         // the test isolates the new LINQ inference path.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2452,7 +2526,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task LinqLambda_ParameterMatchesElementTag_NoDiagnostic()
     {
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2482,7 +2557,8 @@ public class IdMismatchAnalyzerTests
         // inherits "Product" from `o.Products`, and needle carries "Product"
         // explicitly, so the equality compiles clean. Parameter name deliberately
         // avoids the `XxxId` convention to keep SIA005 out of the picture.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2508,7 +2584,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task LinqLambda_ExpressionTreePredicate_MismatchedTagFires()
     {
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2535,7 +2612,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task LinqFirst_ReturnsElementTag()
     {
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2561,7 +2639,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task LinqChain_WhereThenFirst_PreservesElementTag()
     {
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2589,7 +2668,8 @@ public class IdMismatchAnalyzerTests
     {
         // `.Select(x => x)` is an identity projection — the result element tag should
         // stay "Customer" so the mismatch against the Order target fires.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2617,7 +2697,8 @@ public class IdMismatchAnalyzerTests
     {
         // `.Select(MethodGroup)` where the method carries [return: Id("Order")] — the
         // chain's element tag should become "Order" regardless of the receiver's tag.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2651,7 +2732,8 @@ public class IdMismatchAnalyzerTests
         // so the element tag should drop at the Select boundary. Lookup accepts a
         // Customer-tagged parameter so no SIA003 leaks from the selector; the
         // assignment of a string to a string target has no tag comparison to do.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2679,7 +2761,8 @@ public class IdMismatchAnalyzerTests
     {
         // Loop var has no attribute possibility in C#; the collection's element tag has
         // to flow through the foreach binding for `id` to carry "Customer".
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
 
@@ -2712,7 +2795,8 @@ public class IdMismatchAnalyzerTests
         // Cross-check: the outer loop binds `order` (not a primitive, so no tagging),
         // and the inner loop binds `pid` to the "Product" tag from `order.Products`.
         // The equality comparison to the Customer-tagged needle should fire SIA001.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
 
@@ -2750,7 +2834,8 @@ public class IdMismatchAnalyzerTests
         // Third-party LINQ-shape extension: `TakePage` takes IEnumerable<T> and returns
         // IEnumerable<T> with the same T. Shape-based matching means the Customer tag
         // survives the call, so `.First()` afterwards still fires SIA001 against Order.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2785,7 +2870,8 @@ public class IdMismatchAnalyzerTests
         // Custom extension shaped like `ForEach(IEnumerable<T>, Action<T>)` — the
         // lambda param `id` should inherit "Customer" from the receiver and then
         // mismatch against the Order-tagged consumer.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
 
@@ -2820,7 +2906,8 @@ public class IdMismatchAnalyzerTests
         // Explicit non-support note: multi-T containers carry no element tag. Even if
         // `[Id("Customer")]` sits on a Dictionary<Guid,string>, the foreach over its
         // KeyValuePair element type doesn't propagate — kv.Key stays Unknown.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
 
@@ -2849,7 +2936,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task LinqLambda_ArrayReceiver_InheritsElementTag()
     {
-        var source = """
+        var source =
+            """
             using System;
             using System.Linq;
 
@@ -2877,7 +2965,8 @@ public class IdMismatchAnalyzerTests
         // a tagged invocation, and that tag should become the new element tag flowing
         // out of the Select. No identity, no method group — the "tagged body" arm of
         // GetSelectElementTags.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -2912,7 +3001,8 @@ public class IdMismatchAnalyzerTests
         // into a user-owned untagged IEnumerable parameter must not fire SIA003.
         // The tag on a collection-typed member is an element tag, not a scalar tag,
         // and the receiver slot of a LINQ-shape extension is itself a collection.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
 
@@ -2937,7 +3027,8 @@ public class IdMismatchAnalyzerTests
     {
         // Direct `arr[i]` — exercises IArrayElementReferenceOperation through
         // GetAccessInfo, which defers to GetReceiverElementTags on the array ref.
-        var source = """
+        var source =
+            """
             using System;
 
             public class Holder
@@ -3038,7 +3129,8 @@ public class IdMismatchAnalyzerTests
         // `Paged.TakePage(values, 0, 10)` — unreduced form, method.ReducedFrom is null,
         // Parameters[0] already includes the receiver slot. Hits the `?? method` arm of
         // GetExtensionReceiverType.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -3073,7 +3165,8 @@ public class IdMismatchAnalyzerTests
         // `[UnionId("A","B")] IEnumerable<Guid>` — the element carries both tags, so
         // passing an element into a parameter tagged "A" alone matches, while "C"
         // mismatches.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -3112,7 +3205,8 @@ public class IdMismatchAnalyzerTests
         // just because of its name, since the analyzer can't prove the name refers to
         // the element vs. the container. Without that guard, passing `ids.First()` to
         // an Order-tagged parameter would produce a spurious SIA001.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -3135,7 +3229,8 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task ForEach_OverArray_InheritsElementTag()
     {
-        var source = """
+        var source =
+            """
             using System;
 
             public class Holder
@@ -3167,7 +3262,8 @@ public class IdMismatchAnalyzerTests
         // Interface declares the [Id] on an IEnumerable<Guid>. Implementation doesn't
         // repeat the attribute. A LINQ lambda bound via the impl's static type should
         // still see "Customer" on the element.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -3204,7 +3300,8 @@ public class IdMismatchAnalyzerTests
         // Abstract base declares [Id] on a virtual collection property; derived class
         // overrides without re-declaring the attribute. foreach over the derived view
         // should still see the base's tag on the element.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
 
@@ -3245,7 +3342,8 @@ public class IdMismatchAnalyzerTests
         // [return: Id] on an interface method returning IEnumerable<T>. The
         // implementation has no attribute; element-flow through `.First()` on the
         // impl's result should still pick up the interface's tag.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -3282,7 +3380,8 @@ public class IdMismatchAnalyzerTests
         // [Id] written on a record primary-ctor parameter whose type is a collection.
         // The compiler attaches the attribute to the parameter (default target); the
         // synthesized property needs the bridging logic to surface it for element flow.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
@@ -3311,7 +3410,8 @@ public class IdMismatchAnalyzerTests
         // Element tag drops at the Select boundary; the `.First()` result is an
         // untagged string, so no spurious SIA fires when it flows into an untagged
         // user-owned string target.
-        var source = """
+        var source =
+            """
             using System;
             using System.Collections.Generic;
             using System.Linq;
