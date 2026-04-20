@@ -26,6 +26,24 @@ public class AddIdCodeFixProviderTests
             AllowMultiple = false,
             Inherited = false)]
         sealed class UnionIdAttribute(params string[] types) : Attribute;
+
+        [AttributeUsage(
+            AttributeTargets.Property |
+            AttributeTargets.Field |
+            AttributeTargets.Parameter |
+            AttributeTargets.ReturnValue,
+            AllowMultiple = false,
+            Inherited = false)]
+        sealed class IdAttribute<T> : Attribute;
+
+        [AttributeUsage(
+            AttributeTargets.Property |
+            AttributeTargets.Field |
+            AttributeTargets.Parameter |
+            AttributeTargets.ReturnValue,
+            AllowMultiple = false,
+            Inherited = false)]
+        sealed class UnionIdAttribute<T1, T2> : Attribute;
         """;
 
     [Test]
@@ -616,6 +634,67 @@ public class AddIdCodeFixProviderTests
         IsTrue(
             titles.Any(_ => _ == "Add [Id(\"Order\")] to property 'Subject'"),
             $"missing Order title, got: {string.Join(" | ", titles)}");
+    }
+
+    [Test]
+    public async Task SIA001_GenericExistingAttribute_PreservesGenericForm()
+    {
+        // When the target already uses [Id<Bid>], the fix to change the attribute should
+        // produce [Id<TreasuryBid>] not [Id("TreasuryBid")].
+        var source = """
+            public class TreasuryBid;
+            public class Bid;
+
+            public class Target
+            {
+                public static void Consume([Id<Bid>] System.Guid value) { }
+            }
+
+            public class Holder
+            {
+                [Id<TreasuryBid>]
+                public System.Guid Id { get; set; }
+
+                public void Use() => Target.Consume(Id);
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute on parameter 'value'");
+
+        Contains(fixedSource, "[Id<TreasuryBid>] System.Guid value");
+        DoesNotContain(fixedSource, "[Id(\"TreasuryBid\")]");
+    }
+
+    [Test]
+    public async Task SIA001_GenericSourceAttribute_RenderedTitleUsesGenericForm()
+    {
+        // Both sides explicit, both generic: change-attribute titles on either side
+        // should render in generic form.
+        var source = """
+            public class TreasuryBid;
+            public class Bid;
+
+            public class Target
+            {
+                public static void Consume([Id<Bid>] System.Guid value) { }
+            }
+
+            public class Holder
+            {
+                [Id<TreasuryBid>]
+                public System.Guid Id { get; set; }
+
+                public void Use() => Target.Consume(Id);
+            }
+            """;
+
+        var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
+        IsTrue(
+            titles.Any(_ => _ == "Change attribute on parameter 'value' to [Id<TreasuryBid>]"),
+            $"missing generic target title, got: {string.Join(" | ", titles)}");
+        IsTrue(
+            titles.Any(_ => _ == "Change attribute on property 'Id' to [Id<Bid>]"),
+            $"missing generic source title, got: {string.Join(" | ", titles)}");
     }
 
     static void Contains(string actual, string expected) =>
