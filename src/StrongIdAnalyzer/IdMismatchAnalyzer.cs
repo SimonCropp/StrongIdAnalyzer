@@ -96,6 +96,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             start.RegisterOperationAction(
                 _ => AnalyzeBinaryOperator(_, config),
                 OperationKind.Binary);
+            start.RegisterOperationAction(
+                _ => AnalyzeLoop(_, config),
+                OperationKind.Loop);
 
             // Track convention-derived Id names across the whole compilation so we can
             // report ambiguity (SIA004) and redundant [Id] attributes (SIA005) at end.
@@ -590,6 +593,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Null entries mean "this assembly has no index, fall back to the walk".
         public ConcurrentDictionary<IAssemblySymbol, Dictionary<ISymbol, ImmutableArray<string>>?> IndexCache { get; } =
             new(SymbolEqualityComparer.Default);
+
+        // Foreach loop variable → element tags, populated by the loop analysis action and
+        // consulted in GetAccessInfo for ILocalReferenceOperation. Separate from the
+        // normal symbol resolution path because locals don't support attributes in C#,
+        // so the tag is inferred from the collection being iterated.
+        public ConcurrentDictionary<ILocalSymbol, ImmutableArray<string>> LocalBindings { get; } =
+            new(SymbolEqualityComparer.Default);
     }
 
     // Matches by comparing the attribute class's short metadata name and walking its
@@ -990,18 +1000,609 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // named `Id` walks the receiver's static-type chain (up to the declaring type) and
     // adds the convention tag for each level — so `child1.Id` carries both "Child1" and
     // "Base" and can flow into parameters tagged either way.
+    //
+    // An `[Id]` on a collection-typed member (e.g. `[Id("Customer")] IEnumerable<Guid>`)
+    // describes its elements, not the collection-as-a-scalar. For scalar-compare
+    // contexts (argument/assignment/equality of a whole collection), the scalar tag is
+    // suppressed — otherwise passing the collection into a LINQ-shape extension's
+    // receiver slot would fire SIA003 against the untagged passthrough parameter.
+    // Element-tag consumers (foreach, .First(), lambda binding, chain walks) bypass
+    // this path via GetReceiverElementTags so they still see the tag.
     static IdInfo GetAccessInfo(IOperation operation, Config config)
     {
         operation = Unwrap(operation);
-        return operation switch
+        switch (operation)
         {
-            IPropertyReferenceOperation prop => GetMemberAccessInfo(prop.Property, prop.Instance?.Type, config),
-            IFieldReferenceOperation field => GetMemberAccessInfo(field.Field, field.Instance?.Type, config),
-            IParameterReferenceOperation param => GetIdWithInheritance(param.Parameter, config),
-            IInvocationOperation invocation => GetReturnInfo(invocation.TargetMethod, config),
-            _ => IdInfo.Unknown
-        };
+            case IPropertyReferenceOperation prop:
+                return SuppressCollectionTag(
+                    prop.Property.Type,
+                    GetMemberAccessInfo(prop.Property, prop.Instance?.Type, config));
+            case IFieldReferenceOperation field:
+                return SuppressCollectionTag(
+                    field.Field.Type,
+                    GetMemberAccessInfo(field.Field, field.Instance?.Type, config));
+            case IParameterReferenceOperation param:
+                if (TryResolveLambdaParameterFromLinq(param, config, out var lambdaInfo))
+                {
+                    return lambdaInfo;
+                }
+
+                return SuppressCollectionTag(
+                    param.Parameter.Type,
+                    GetIdWithInheritance(param.Parameter, config));
+            case ILocalReferenceOperation local:
+                if (config.LocalBindings.TryGetValue(local.Local, out var boundTags))
+                {
+                    return IdInfo.Present(boundTags);
+                }
+
+                return IdInfo.Unknown;
+            case IInvocationOperation invocation:
+                if (TryResolveLinqElementReturn(invocation, config, out var linqInfo))
+                {
+                    return linqInfo;
+                }
+
+                return SuppressCollectionTag(
+                    invocation.Type,
+                    GetReturnInfo(invocation.TargetMethod, config));
+            case IArrayElementReferenceOperation arrayElement:
+                return GetReceiverElementTags(arrayElement.ArrayReference, config);
+            default:
+                return IdInfo.Unknown;
+        }
     }
+
+    // If the expression's static type is a single-T collection, any tag we read is
+    // semantically an element tag — not applicable in scalar contexts.
+    static IdInfo SuppressCollectionTag(ITypeSymbol? type, IdInfo info)
+    {
+        if (info.State != IdState.Present)
+        {
+            return info;
+        }
+
+        if (TryGetEnumerableElementType(type) is not null)
+        {
+            return IdInfo.Unknown;
+        }
+
+        return info;
+    }
+
+    // `foreach (var x in collection)` binds the loop variable `x` to the collection's
+    // element tag. Locals don't support attributes in C#, so this lookup is the only
+    // way tag flows through a foreach. Nested foreach over a tagged source works too
+    // because the receiver resolution recurses through element-preserving calls.
+    static void AnalyzeLoop(OperationAnalysisContext context, Config config)
+    {
+        if (context.Operation is not IForEachLoopOperation forEach)
+        {
+            return;
+        }
+
+        var tags = GetReceiverElementTags(forEach.Collection, config);
+        if (tags.State != IdState.Present)
+        {
+            return;
+        }
+
+        var loopVar = ExtractLoopLocal(forEach.LoopControlVariable);
+        if (loopVar is null)
+        {
+            return;
+        }
+
+        config.LocalBindings.TryAdd(loopVar, tags.Tags);
+    }
+
+    static ILocalSymbol? ExtractLoopLocal(IOperation? controlVariable) =>
+        controlVariable switch
+        {
+            IVariableDeclaratorOperation decl => decl.Symbol,
+            ILocalReferenceOperation localRef => localRef.Local,
+            _ => null
+        };
+
+    // If `param` is a single-parameter LINQ-style lambda (e.g. `Where`, `Select`, `Any`
+    // body, or any extension method on IEnumerable<T> accepting a Func<T,...>), and the
+    // enclosing invocation's receiver is a collection carrying an element tag, bind the
+    // lambda parameter to that element tag. This is what lets
+    // `ids.Any(id => id == customerId)` resolve `id` without requiring an attribute on
+    // the lambda parameter — attributes aren't even legal inside expression trees
+    // (CS8972), so inference is the only way `IQueryable` predicates work.
+    //
+    // The gate is shape-based rather than name-based: any extension whose first
+    // parameter is an IEnumerable<T> / array participates, so third-party helpers like
+    // MoreLINQ.ForEach or custom paging extensions flow tags the same way built-in LINQ
+    // does. Element-returning calls (First/Single/etc.) are kept on a closed allowlist
+    // because their semantic is specific; see TryResolveLinqElementReturn.
+    static bool TryResolveLambdaParameterFromLinq(
+        IParameterReferenceOperation param,
+        Config config,
+        out IdInfo info)
+    {
+        info = IdInfo.Unknown;
+
+        if (param.Parameter.ContainingSymbol is not IMethodSymbol { MethodKind: MethodKind.LambdaMethod } lambdaMethod)
+        {
+            return false;
+        }
+
+        // Only bind the lambda's first parameter — TSource in every IEnumerable<T>
+        // extension shape. Index overloads (Select/Where with int) take the TSource as
+        // parameter 0 too, so this covers them. Multi-source shapes like Zip /
+        // SelectMany with an intermediate collection are not handled in this pass.
+        if (param.Parameter.Ordinal != 0 ||
+            lambdaMethod.Parameters.Length is 0 or > 2)
+        {
+            return false;
+        }
+
+        var anonymous = FindEnclosingAnonymousFunction(param);
+        if (anonymous is null)
+        {
+            return false;
+        }
+
+        var invocation = FindEnclosingLinqInvocation(anonymous);
+        if (invocation is null)
+        {
+            return false;
+        }
+
+        if (!IsEnumerableShapeExtension(invocation.TargetMethod))
+        {
+            return false;
+        }
+
+        var receiver = GetLinqReceiver(invocation);
+        if (receiver is null)
+        {
+            return false;
+        }
+
+        var element = TryGetEnumerableElementType(receiver.Type);
+        if (element is null ||
+            !SymbolEqualityComparer.Default.Equals(element, param.Parameter.Type))
+        {
+            return false;
+        }
+
+        var elementTags = GetReceiverElementTags(receiver, config);
+        if (elementTags.State != IdState.Present)
+        {
+            return false;
+        }
+
+        info = elementTags;
+        return true;
+    }
+
+    // For element-returning LINQ (`.First()`, `.Single()`, `.ElementAt()` etc.) surface
+    // the receiver's element tag as the invocation's result tag — so `customerIds.First()`
+    // is treated as a single Customer id.
+    static bool TryResolveLinqElementReturn(
+        IInvocationOperation invocation,
+        Config config,
+        out IdInfo info)
+    {
+        info = IdInfo.Unknown;
+
+        if (!IsLinqMethod(invocation.TargetMethod) ||
+            !IsElementReturningLinq(invocation.TargetMethod.Name))
+        {
+            return false;
+        }
+
+        var receiver = GetLinqReceiver(invocation);
+        if (receiver is null)
+        {
+            return false;
+        }
+
+        var element = TryGetEnumerableElementType(receiver.Type);
+        if (element is null ||
+            !SymbolEqualityComparer.Default.Equals(element, invocation.Type))
+        {
+            return false;
+        }
+
+        var tags = GetReceiverElementTags(receiver, config);
+        if (tags.State != IdState.Present)
+        {
+            return false;
+        }
+
+        info = tags;
+        return true;
+    }
+
+    // Walk element-preserving calls backwards until we hit an expression whose symbol
+    // (property/field/parameter/return) carries explicit [Id] tags on a collection-typed
+    // declaration. Convention tagging is not applied here — the receiver has to be
+    // explicitly tagged for element flow, otherwise generic collections without [Id]
+    // would spuriously propagate.
+    //
+    // Select/SelectMany get their own handling (GetSelectElementTags) because the result
+    // element type can differ from the source — the selector decides the new tag.
+    static IdInfo GetReceiverElementTags(IOperation receiver, Config config)
+    {
+        receiver = Unwrap(receiver);
+
+        if (receiver is IInvocationOperation inv)
+        {
+            var targetMethod = inv.TargetMethod;
+
+            if (IsSelectCall(targetMethod))
+            {
+                return GetSelectElementTags(inv, config);
+            }
+
+            if (IsElementPreserving(targetMethod))
+            {
+                var next = GetLinqReceiver(inv);
+                if (next is null)
+                {
+                    return IdInfo.Unknown;
+                }
+
+                return GetReceiverElementTags(next, config);
+            }
+        }
+
+        var symbol = GetSymbol(receiver);
+        if (symbol is null)
+        {
+            return IdInfo.Unknown;
+        }
+
+        var symbolType = GetSymbolType(symbol);
+        if (TryGetEnumerableElementType(symbolType) is null)
+        {
+            return IdInfo.Unknown;
+        }
+
+        if (symbol is IMethodSymbol method)
+        {
+            return GetIdFromAttributes(method.GetReturnTypeAttributes());
+        }
+
+        return GetIdFromAttributes(symbol.GetAttributes());
+    }
+
+    // Select/SelectMany can preserve, transform, or drop the tag depending on the
+    // selector. Three shapes are recognised, all statically inspectable:
+    //   1. Identity lambda `x => x` — result element tag = receiver element tag.
+    //   2. Method group `.Select(SomeMethod)` — result tag = method's [return: Id].
+    //   3. Expression-bodied lambda whose body resolves to a known tag.
+    // Other selector shapes (multi-statement lambdas, untagged expressions) drop the tag.
+    static IdInfo GetSelectElementTags(IInvocationOperation invocation, Config config)
+    {
+        var selector = FindSelectorArgument(invocation);
+        if (selector is null)
+        {
+            return IdInfo.Unknown;
+        }
+
+        selector = Unwrap(selector);
+
+        if (selector is IDelegateCreationOperation creation)
+        {
+            var target = Unwrap(creation.Target);
+
+            if (target is IMethodReferenceOperation methodRef)
+            {
+                return GetReturnInfo(methodRef.Method, config);
+            }
+
+            if (target is IAnonymousFunctionOperation lambda)
+            {
+                var body = GetSingleReturnExpression(lambda);
+                if (body is null)
+                {
+                    return IdInfo.Unknown;
+                }
+
+                if (IsIdentityReference(body, lambda))
+                {
+                    var next = GetLinqReceiver(invocation);
+                    if (next is null)
+                    {
+                        return IdInfo.Unknown;
+                    }
+
+                    return GetReceiverElementTags(next, config);
+                }
+
+                return GetAccessInfo(body, config);
+            }
+        }
+
+        return IdInfo.Unknown;
+    }
+
+    // The selector sits after the source in Enumerable/Queryable.Select; for extension
+    // calls the source is Arguments[0] and the selector Arguments[1]. For instance-form
+    // Select (custom providers), Instance is the source and Arguments[0] is the selector.
+    static IOperation? FindSelectorArgument(IInvocationOperation invocation)
+    {
+        if (invocation.Instance is not null)
+        {
+            return invocation.Arguments.Length > 0 ? invocation.Arguments[0].Value : null;
+        }
+
+        if (invocation.TargetMethod.IsExtensionMethod &&
+            invocation.Arguments.Length > 1)
+        {
+            return invocation.Arguments[1].Value;
+        }
+
+        return null;
+    }
+
+    // Lambda bodies surface as a synthesised block with a single return — both for
+    // expression-bodied and brace-bodied single-return lambdas. Anything with more than
+    // one statement we treat as opaque (the last statement isn't reliably the result).
+    static IOperation? GetSingleReturnExpression(IAnonymousFunctionOperation lambda)
+    {
+        var block = lambda.Body;
+        if (block is null ||
+            block.Operations.Length != 1)
+        {
+            return null;
+        }
+
+        if (block.Operations[0] is IReturnOperation { ReturnedValue: { } value })
+        {
+            return Unwrap(value);
+        }
+
+        return null;
+    }
+
+    // Identity projection: the body references the lambda's single input parameter
+    // unchanged. This is what makes `.Select(x => x)` a no-op for tag tracking.
+    static bool IsIdentityReference(IOperation body, IAnonymousFunctionOperation lambda)
+    {
+        if (body is not IParameterReferenceOperation paramRef)
+        {
+            return false;
+        }
+
+        var parameters = lambda.Symbol.Parameters;
+        return parameters.Length > 0 &&
+               SymbolEqualityComparer.Default.Equals(paramRef.Parameter, parameters[0]);
+    }
+
+    // Element preservation is accepted via two channels: the named-LINQ list (closed,
+    // covers every System.Linq.Enumerable/Queryable method whose signature matches
+    // IEnumerable<T> → IEnumerable<T>), and a shape-based rule that lets third-party
+    // extensions with the same signature participate — MoreLINQ, EF `.Include`,
+    // custom paging helpers, etc. The shape rule requires the method to be an extension
+    // on IEnumerable<T> whose return is also IEnumerable<T> with the same element T.
+    //
+    // Comparison runs on OriginalDefinition so that generic methods declared as
+    // `T Foo<T>(IEnumerable<T>) → IEnumerable<T>` match — without OriginalDefinition
+    // the input type parameter and return type parameter are distinct symbols after
+    // construction, which would defeat the check.
+    static bool IsElementPreserving(IMethodSymbol method)
+    {
+        if (IsLinqMethod(method) && IsElementPreservingLinq(method.Name))
+        {
+            return true;
+        }
+
+        if (!method.IsExtensionMethod)
+        {
+            return false;
+        }
+
+        var definition = (method.ReducedFrom ?? method).OriginalDefinition;
+        if (definition.Parameters.Length == 0)
+        {
+            return false;
+        }
+
+        var inputElement = TryGetEnumerableElementType(definition.Parameters[0].Type);
+        var outputElement = TryGetEnumerableElementType(definition.ReturnType);
+        return inputElement is not null &&
+               outputElement is not null &&
+               SymbolEqualityComparer.Default.Equals(inputElement, outputElement);
+    }
+
+    static bool IsSelectCall(IMethodSymbol method) =>
+        IsLinqMethod(method) &&
+        method.Name is "Select" or "SelectMany";
+
+    // An extension method whose receiver carries a discoverable element type.
+    // This is the gate for LINQ-shaped recognition — it lets `static T[] Custom<T>(this
+    // IEnumerable<T> src, Func<T,bool> f)` flow tags without hardcoding the method name.
+    static bool IsEnumerableShapeExtension(IMethodSymbol method) =>
+        GetExtensionReceiverType(method) is { } receiverType &&
+        TryGetEnumerableElementType(receiverType) is not null;
+
+    // For a reduced extension-method call (`x.Ext(...)`), `method.Parameters` excludes
+    // the receiver — the "this" parameter only appears on the unreduced symbol, which
+    // ReducedFrom surfaces. For calls written in static form (`Ext(x, ...)`) the method
+    // is already unreduced, so ReducedFrom is null and Parameters[0] is the receiver.
+    static ITypeSymbol? GetExtensionReceiverType(IMethodSymbol method)
+    {
+        if (!method.IsExtensionMethod)
+        {
+            return null;
+        }
+
+        var full = method.ReducedFrom ?? method;
+        if (full.Parameters.Length == 0)
+        {
+            return null;
+        }
+
+        return full.Parameters[0].Type;
+    }
+
+    static ITypeSymbol? GetSymbolType(ISymbol symbol) =>
+        symbol switch
+        {
+            IPropertySymbol p => p.Type,
+            IFieldSymbol f => f.Type,
+            IParameterSymbol pa => pa.Type,
+            ILocalSymbol l => l.Type,
+            IMethodSymbol m => m.ReturnType,
+            _ => null
+        };
+
+    // Arrays are IEnumerable<T>. Otherwise a type must implement exactly one
+    // IEnumerable<T> construction for us to be able to pick a single element type.
+    // Dictionary<K,V> implements IEnumerable<KeyValuePair<K,V>> (unique element type,
+    // but composite — callers further gate on primitive-ish element types by requiring
+    // the lambda's param type to match).
+    static ITypeSymbol? TryGetEnumerableElementType(ITypeSymbol? type)
+    {
+        if (type is null)
+        {
+            return null;
+        }
+
+        if (type is IArrayTypeSymbol array)
+        {
+            return array.ElementType;
+        }
+
+        if (type is not INamedTypeSymbol named)
+        {
+            return null;
+        }
+
+        if (named.IsGenericType &&
+            named.ConstructedFrom.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
+        {
+            return named.TypeArguments[0];
+        }
+
+        ITypeSymbol? found = null;
+        foreach (var iface in named.AllInterfaces)
+        {
+            if (iface.IsGenericType &&
+                iface.ConstructedFrom.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
+            {
+                if (found is not null &&
+                    !SymbolEqualityComparer.Default.Equals(found, iface.TypeArguments[0]))
+                {
+                    return null;
+                }
+
+                found = iface.TypeArguments[0];
+            }
+        }
+
+        return found;
+    }
+
+    static IOperation? FindEnclosingAnonymousFunction(IOperation operation)
+    {
+        var current = operation.Parent;
+        while (current is not null)
+        {
+            if (current is IAnonymousFunctionOperation)
+            {
+                return current;
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
+    }
+
+    static IInvocationOperation? FindEnclosingLinqInvocation(IOperation lambda)
+    {
+        var current = lambda.Parent;
+        while (current is not null)
+        {
+            if (current is IInvocationOperation invocation)
+            {
+                return invocation;
+            }
+
+            // Walk through delegate creation, conversion, argument wrappers that the
+            // compiler threads between the lambda and the invocation. An unrelated
+            // enclosing operation (e.g. a different invocation body) means the lambda
+            // isn't a direct argument of the LINQ call we care about.
+            if (current is IDelegateCreationOperation or IConversionOperation or IArgumentOperation)
+            {
+                current = current.Parent;
+                continue;
+            }
+
+            return null;
+        }
+
+        return null;
+    }
+
+    // Extension-method invocations of LINQ put the receiver in Arguments[0] and leave
+    // Instance null. Instance-method LINQ (rare but e.g. Queryable instance forms on
+    // custom providers) uses Instance. Handle both so both shapes propagate.
+    static IOperation? GetLinqReceiver(IInvocationOperation invocation)
+    {
+        if (invocation.Instance is not null)
+        {
+            return invocation.Instance;
+        }
+
+        if (invocation.TargetMethod.IsExtensionMethod &&
+            invocation.Arguments.Length > 0)
+        {
+            return invocation.Arguments[0].Value;
+        }
+
+        return null;
+    }
+
+    static bool IsLinqMethod(IMethodSymbol method)
+    {
+        var containing = method.ContainingType;
+        if (containing is null)
+        {
+            return false;
+        }
+
+        var name = containing.Name;
+        if (name != "Enumerable" && name != "Queryable")
+        {
+            return false;
+        }
+
+        return containing.ContainingNamespace is { Name: "Linq" } ns &&
+               ns.ContainingNamespace is { Name: "System" };
+    }
+
+    static bool IsElementReturningLinq(string methodName) =>
+        methodName is
+            "First" or "FirstOrDefault" or
+            "Single" or "SingleOrDefault" or
+            "Last" or "LastOrDefault" or
+            "ElementAt" or "ElementAtOrDefault" or
+            "Min" or "Max" or
+            "Aggregate";
+
+    static bool IsElementPreservingLinq(string methodName) =>
+        methodName is
+            "Where" or
+            "OrderBy" or "OrderByDescending" or
+            "ThenBy" or "ThenByDescending" or
+            "Reverse" or
+            "Take" or "TakeWhile" or "TakeLast" or
+            "Skip" or "SkipWhile" or "SkipLast" or
+            "Distinct" or "DistinctBy" or
+            "Concat" or "Union" or "UnionBy" or
+            "Intersect" or "IntersectBy" or
+            "Except" or "ExceptBy" or
+            "AsEnumerable" or "AsQueryable" or
+            "ToArray" or "ToList" or "ToHashSet" or
+            "Append" or "Prepend";
 
     // Resolve tags on a method's return value. `[return: Id("Order")]` / `[return: UnionId(...)]`
     // on the method itself, or on any method it overrides / interface member it implements.

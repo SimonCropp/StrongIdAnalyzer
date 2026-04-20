@@ -696,6 +696,142 @@ Consume(a == Guid.Empty ? b : a); // unknown — conditional result
 ```
 
 
+## Tagged collections
+
+An `[Id(...)]` or `[UnionId(...)]` on a collection-typed member describes the elements inside the collection, not the collection itself. The analyzer threads those element tags through LINQ queries, `foreach` loops, and user-defined extensions — so tag flow works without attributes on every lambda parameter (which are illegal inside `IQueryable` expression trees anyway, per CS8972).
+
+The collection must be a **single-T enumerable**: an array, or a type that implements exactly one `IEnumerable<T>` construction. That covers `T[]`, `IEnumerable<T>`, `IReadOnlyList<T>`, `List<T>`, `HashSet<T>`, `IQueryable<T>`, and the various immutable/concurrent flavours.
+
+<!-- snippet: TaggedCollectionLinqLambda -->
+<a id='snippet-TaggedCollectionLinqLambda'></a>
+```cs
+public class CustomerList
+{
+    // [Id] on a single-T collection describes its elements. The tag flows into any
+    // site that extracts an element: lambda parameters, foreach variables, .First()
+    // results, and through chains of LINQ-shape element-preserving calls.
+    [Id("Customer")]
+    public IEnumerable<Guid> Ids { get; set; } = [];
+}
+
+public class OrderWriter
+{
+    public void Consume([Id("Order")] Guid value) { }
+
+    public void Go(CustomerList list) =>
+        // SIA001 on the argument: `id` inherits "Customer" from list.Ids, which is
+        // then passed into a parameter tagged "Order".
+        list.Ids.Select(id => { Consume(id); return id; }).ToList();
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L355-L376' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionLinqLambda' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+Only **explicit** `[Id]` / `[UnionId]` attributes on a collection-typed declaration participate in element-tag flow. Naming-convention inference (`Id` / `XxxId`) is not applied to collection-typed members — the common case of a `List<Guid>` happening to be named `CustomerIds` would otherwise spuriously acquire a tag that no caller can change.
+
+
+### LINQ
+
+Tags flow through three categories of call, classified by signature rather than by name:
+
+ * **Element-returning** — `First`, `FirstOrDefault`, `Single`, `SingleOrDefault`, `Last`, `LastOrDefault`, `ElementAt`, `ElementAtOrDefault`, `Min`, `Max`, `Aggregate` on `System.Linq.Enumerable`/`Queryable` surface the receiver's element tag as the result's scalar tag.
+ * **Element-preserving** — `Where`, `OrderBy` / `OrderByDescending`, `ThenBy` / `ThenByDescending`, `Reverse`, `Take` / `TakeWhile` / `TakeLast`, `Skip` / `SkipWhile` / `SkipLast`, `Distinct` / `DistinctBy`, `Concat`, `Union` / `UnionBy`, `Intersect` / `IntersectBy`, `Except` / `ExceptBy`, `AsEnumerable`, `AsQueryable`, `ToArray`, `ToList`, `ToHashSet`, `Append`, `Prepend` pass the element tag through unchanged, so chains like `ids.Where(x => x != Guid.Empty).First()` work.
+ * **`Select` / `SelectMany`** transform the element tag according to the selector:
+   * Identity lambda `x => x` keeps the receiver's element tag.
+   * Method group `Select(Converter)` reads `[return: Id(...)]` on the target method.
+   * Expression-bodied lambda with a tagged body (`Select(x => GetTagged(x))`) adopts the body's resolved tag.
+   * Any other selector shape drops the tag.
+
+Lambda parameters in those calls inherit the receiver's element tag without an attribute, which is the mechanism that makes `IQueryable` predicates analyzable.
+
+
+### `foreach`
+
+The loop variable inherits the collection's element tag for the body of the loop. Nested `foreach` works the same way — the inner loop sees the inner collection's element tag.
+
+<!-- snippet: TaggedCollectionForEach -->
+<a id='snippet-TaggedCollectionForEach'></a>
+```cs
+public class CustomerScan
+{
+    [Id("Customer")]
+    public IEnumerable<Guid> Ids { get; set; } = [];
+
+    public void ConsumeOrder([Id("Order")] Guid value) { }
+
+    public void Go()
+    {
+        foreach (var id in Ids)
+        {
+            // SIA001: `id` carries the Customer tag inherited from the collection.
+            ConsumeOrder(id);
+        }
+    }
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L378-L397' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionForEach' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+
+### User-defined LINQ-shape extensions
+
+An extension method whose first parameter is `IEnumerable<T>` or `T[]`, and whose return is an `IEnumerable<T>` over the same `T`, is treated as element-preserving by shape. MoreLINQ helpers, EF Core `IQueryable` extensions like `.Include`, and project-local paging helpers all propagate element tags without being on an allowlist.
+
+<!-- snippet: TaggedCollectionUserExtension -->
+<a id='snippet-TaggedCollectionUserExtension'></a>
+```cs
+public static class Paged
+{
+    // An extension with shape `IEnumerable<T> → IEnumerable<T>` is treated as
+    // element-preserving, so element tags flow through it just like through
+    // `Where`, `Take`, and `OrderBy`.
+    public static IEnumerable<T> TakePage<T>(this IEnumerable<T> source, int page, int size) =>
+        source.Skip(page * size).Take(size);
+}
+
+public class PagedReader
+{
+    [Id("Customer")]
+    public IEnumerable<Guid> Ids { get; set; } = [];
+
+    [Id("Order")]
+    public Guid LatestId { get; set; }
+
+    // SIA001 on the assignment: .First() returns a Customer-tagged Guid after
+    // passing through the user-defined element-preserving extension.
+    public void Copy() => LatestId = Ids.TakePage(0, 10).First();
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L399-L423' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionUserExtension' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+Lambda-parameter binding applies to any extension method on `IEnumerable<T>` regardless of its return type — so `Action<T>` callbacks and void-returning helpers flow tags the same way.
+
+Element-returning inference (`.First()` and friends) stays closed to the `System.Linq.Enumerable`/`Queryable` allowlist — a third-party method named `First` could have different semantics, and the element-returning category depends on the semantics, not the signature.
+
+
+### What is not supported
+
+Multi-type-parameter containers — `Dictionary<K,V>`, `KeyValuePair<K,V>`, `ILookup<K,V>`, `IGrouping<K,T>`, `ValueTuple<…>` — are deliberately excluded in this release. A bare `[Id("Customer")]` attribute on a `Dictionary<Guid,Guid>` has no unambiguous target (key? value? both?), so the analyzer ignores the attribute on these shapes and produces no diagnostics for reads through them.
+
+<!-- snippet: UnsupportedMultiTCollection -->
+<a id='snippet-UnsupportedMultiTCollection'></a>
+```cs
+public class CustomerOrderMap
+{
+    // [Id] on a Dictionary/KeyValuePair/tuple/grouping carries no element tag —
+    // the analyzer can't tell whether the tag applies to K, V, or both. Flows
+    // through these containers stay "unknown" and produce no diagnostics.
+    [Id("Customer")]
+    public Dictionary<Guid, string> OrdersByCustomer { get; set; } = [];
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L425-L436' title='Snippet source file'>snippet source</a> | <a href='#snippet-UnsupportedMultiTCollection' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+Distinct attributes for the key and value positions, plus tuple-field-level tagging, are on the roadmap but will require a dedicated design pass.
+
+
 ## Record primary-constructor parameters
 
 When a record is declared with a primary constructor, `[Id(...)]` / `[UnionId(...)]` written on a parameter applies to both the parameter and the auto-generated property. The C# compiler leaves the attribute physically on the parameter (its default target), so reading `record.Member` would otherwise look unattributed. The analyzer bridges this gap: a property synthesized from a primary-constructor parameter inherits the parameter's Id-family attributes for analysis purposes.
