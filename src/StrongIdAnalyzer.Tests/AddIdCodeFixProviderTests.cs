@@ -103,7 +103,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id(\"Order\")] System.Guid input");
+        Contains(fixedSource, "[Id<Order>] System.Guid input");
     }
 
     [Test]
@@ -125,7 +125,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id(\"Order\")] System.Guid value");
+        Contains(fixedSource, "[Id<Order>] System.Guid value");
     }
 
     [Test]
@@ -147,7 +147,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id(\"Order\")]");
+        Contains(fixedSource, "[Id<Order>]");
         Contains(fixedSource, "public System.Guid Value { get; set; }");
     }
 
@@ -167,7 +167,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id(\"Order\")]");
+        Contains(fixedSource, "[Id<Order>]");
         Contains(fixedSource, "public System.Guid Other { get; set; }");
     }
 
@@ -222,7 +222,9 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source, "SIA006");
 
-        Contains(fixedSource, "[Id(\"Customer\")]");
+        // Customer is a real class in the test assembly (Samples.cs) and is therefore
+        // visible from the fix site, so the codefix prefers the generic form.
+        Contains(fixedSource, "[Id<Customer>]");
         IsTrue(!fixedSource.Contains("UnionId"),
             $"Expected UnionId to be replaced but got:\n{fixedSource}");
     }
@@ -438,7 +440,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute");
 
-        Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid value");
+        Contains(fixedSource, "[Id<TreasuryBid>] System.Guid value");
     }
 
     [Test]
@@ -510,6 +512,8 @@ public class AddIdCodeFixProviderTests
             """;
 
         var mismatchTitles = (await GetCodeActions(mismatchSource)).Select(_ => _.Title).ToArray();
+        // TreasuryBid is not a type in scope here (Bid is the only declared type), so the
+        // string form is used.
         IsTrue(
             mismatchTitles.Any(_ => _ == "Add [Id(\"TreasuryBid\")] to parameter 'orderId'"),
             $"missing add title, got: {string.Join(" | ", mismatchTitles)}");
@@ -559,8 +563,9 @@ public class AddIdCodeFixProviderTests
             """;
 
         var unionTitles = (await GetCodeActions(unionSource)).Select(_ => _.Title).ToArray();
+        // Order is a real type in the test assembly so the codefix prefers the generic form.
         IsTrue(
-            unionTitles.Any(_ => _ == "Replace [UnionId] on property 'OrderId' with [Id(\"Order\")]"),
+            unionTitles.Any(_ => _ == "Replace [UnionId] on property 'OrderId' with [Id<Order>]"),
             $"missing union title, got: {string.Join(" | ", unionTitles)}");
     }
 
@@ -625,14 +630,16 @@ public class AddIdCodeFixProviderTests
 
         var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
 
+        // Customer and Order are real types in the test assembly, so the codefix renders
+        // both the union and per-value Id fixes in generic form.
         IsTrue(
-            titles.Any(_ => _ == "Add [UnionId(\"Customer\", \"Order\")] to property 'Subject'"),
+            titles.Any(_ => _ == "Add [UnionId<Customer, Order>] to property 'Subject'"),
             $"missing union title, got: {string.Join(" | ", titles)}");
         IsTrue(
-            titles.Any(_ => _ == "Add [Id(\"Customer\")] to property 'Subject'"),
+            titles.Any(_ => _ == "Add [Id<Customer>] to property 'Subject'"),
             $"missing Customer title, got: {string.Join(" | ", titles)}");
         IsTrue(
-            titles.Any(_ => _ == "Add [Id(\"Order\")] to property 'Subject'"),
+            titles.Any(_ => _ == "Add [Id<Order>] to property 'Subject'"),
             $"missing Order title, got: {string.Join(" | ", titles)}");
     }
 
@@ -663,6 +670,52 @@ public class AddIdCodeFixProviderTests
 
         Contains(fixedSource, "[Id<TreasuryBid>] System.Guid value");
         DoesNotContain(fixedSource, "[Id(\"TreasuryBid\")]");
+    }
+
+    [Test]
+    public async Task SIA002_PrefersGenericForm_WhenTagMatchesVisibleType()
+    {
+        // The tag "Election" is inferred from convention on Election.Id. The codefix
+        // should suggest [Id<Election>] (not [Id("Election")]) because the Election
+        // type is visible at the fix site.
+        var source = """
+            public class Election
+            {
+                public System.Guid Id { get; set; }
+
+                public static System.Guid Election2022 = System.Guid.NewGuid();
+            }
+
+            public class Holder
+            {
+                public void Use(Election e) => e.Id = Election.Election2022;
+            }
+            """;
+
+        var fixedSource = await ApplyFix(source, "SIA002");
+
+        Contains(fixedSource, "[Id<Election>]");
+        DoesNotContain(fixedSource, "[Id(\"Election\")]");
+    }
+
+    [Test]
+    public async Task SIA002_FallsBackToStringForm_WhenTagDoesNotMatchVisibleType()
+    {
+        var source = """
+            public class Holder
+            {
+                public System.Guid Value { get; set; }
+
+                public static void Consume([Id("NotATypeInScope")] System.Guid value) { }
+
+                public void Use() => Consume(Value);
+            }
+            """;
+
+        var fixedSource = await ApplyFix(source, "SIA002");
+
+        Contains(fixedSource, "[Id(\"NotATypeInScope\")]");
+        DoesNotContain(fixedSource, "[Id<NotATypeInScope>]");
     }
 
     [Test]
