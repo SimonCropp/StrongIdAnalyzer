@@ -12,10 +12,12 @@ Diagnostic prefix `SIA` — SIA001 (mismatch, fix: change attr or rename target)
 
 - `dotnet build src --configuration Release` — builds analyzer + code fix and produces `nugets/StrongIdAnalyzer.<version>.nupkg`.
 - `dotnet build IntegrationTests --configuration Release` — consumes the just-built nupkg from `nugets/`.
-- `dotnet run --project src/StrongIdAnalyzer.Tests -c Release` — NUnit unit tests against the analyzer directly (fast). Tests run on Microsoft.Testing.Platform (MTP) — the project is `OutputType=Exe` with `EnableNUnitRunner=true`, so `dotnet test` is not used on .NET 10 SDK.
-- `dotnet run --project IntegrationTests/IntegrationTests -c Release` — end-to-end against the packaged analyzer.
-- Single test: append `-- --filter "Name~NameOfTest"` (MTP filter expression).
-- Code coverage: append `-- --coverage --coverage-output-format cobertura` (via `Microsoft.Testing.Extensions.CodeCoverage`). Output lands in `TestResults/`.
+- Tests use **TUnit** on top of Microsoft.Testing.Platform (MTP). Each test project is `OutputType=Exe`. The `dotnet test` MTP runner is opted in via `"test": { "runner": "Microsoft.Testing.Platform" }` in the repo-root `global.json` (and `IntegrationTests/global.json`).
+- `dotnet test --solution src/StrongIdAnalyzer.slnx -c Release` — unit tests against the analyzer (fast).
+- `dotnet test --solution IntegrationTests/IntegrationTests.slnx -c Release` — end-to-end against the packaged analyzer.
+- Alternatively, invoke the test executable directly: `src\StrongIdAnalyzer.Tests\bin\Release\net10.0\StrongIdAnalyzer.Tests.exe` — this is what `src/appveyor.yml` does so it can pass `--report-trx` and `--coverage` flags straight through.
+- Single test: `src\…\StrongIdAnalyzer.Tests.exe --filter-method "*NameOfTest*"` (or pass `-- --filter-method "…"` via `dotnet test`).
+- Code coverage: append `--coverage --coverage-output-format cobertura` when invoking the exe (the `Microsoft.Testing.Extensions.CodeCoverage` extension ships as part of TUnit). Output lands in `TestResults/`.
 
 ## Architecture
 
@@ -23,7 +25,7 @@ Three source projects, all in `src/`:
 
 - `StrongIdAnalyzer/` — `netstandard2.0`, `IsRoslynComponent=true`. Contains both the analyzer (`IdMismatchAnalyzer`) and the incremental source generator (`IdAttributeGenerator`). The generator emits `IdAttribute` and `UnionIdAttribute` as `internal sealed` types into every consumer compilation, so consumers take no runtime dependency. The analyzer resolves the generated attribute via `CompilationStartAction` — if the consumer hasn't run the generator, analysis is skipped.
 - `StrongIdAnalyzer.CodeFixes/` — code fixes for SIA002/SIA003/SIA005/SIA006. Built by a `BeforeTargets="Build"` MSBuild target in the analyzer csproj, then the produced DLL is packed into the same `analyzers/dotnet/cs` folder of the analyzer nupkg via the `PackAnalyzer` target. Do **not** ship the CodeFixes project as a separate package.
-- `StrongIdAnalyzer.Tests/` — NUnit tests using `Microsoft.CodeAnalysis.Testing`. `Samples.cs` contains mdsnippet-tagged snippets that the README pulls in — edits to those snippets flow to `readme.md` via mdsnippets.
+- `StrongIdAnalyzer.Tests/` — TUnit tests using `Microsoft.CodeAnalysis.Testing`. `Samples.cs` contains mdsnippet-tagged snippets that the README pulls in — edits to those snippets flow to `readme.md` via mdsnippets.
 
 `IntegrationTests/` is a separate solution with its own `nuget.config` pointing at `../nugets/` to consume the just-built package rather than project references.
 
