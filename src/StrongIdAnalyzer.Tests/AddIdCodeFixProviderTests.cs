@@ -776,6 +776,44 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA002_OnlyExplicitTags_WhenTaggedSideHasExplicitAttribute()
+    {
+        // ModifiedById has explicit [Id<User>] on the implementation, plus inherits
+        // an interface member named "ModifiedById" whose convention tag is "ModifiedBy".
+        // The fix should propose [Id<User>] only — convention-derived tags are
+        // inferences, not declarations, so suggesting them here would override the
+        // deliberate annotation already on BaseEntity.ModifiedById.
+        var source =
+            """
+            public class User { public System.Guid Id { get; set; } }
+
+            public interface IModified
+            {
+                System.Guid ModifiedById { get; set; }
+            }
+
+            public abstract class BaseEntity : IModified
+            {
+                [Id<User>]
+                public System.Guid ModifiedById { get; set; }
+            }
+
+            public class PoliticalParty : BaseEntity { }
+
+            public class Seeder
+            {
+                public static System.Guid System = System.Guid.NewGuid();
+
+                public PoliticalParty Make() => new() { ModifiedById = System };
+            }
+            """;
+
+        var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
+        await Assert.That(titles.Length).IsEqualTo(1);
+        await Assert.That(titles[0]).IsEqualTo("Add [Id<User>] to field 'System'");
+    }
+
+    [Test]
     public async Task SIA002_PrefersGenericForm_WhenDiagnosticTreeIsStale()
     {
         // Simulates an out-of-process analyzer host (Rider): the diagnostic's
