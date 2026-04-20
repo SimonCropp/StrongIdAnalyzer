@@ -5,15 +5,17 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
             }
 
             public class Holder
             {
                 [Id("Customer")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -34,11 +36,13 @@ public class IdMismatchAnalyzerTests
         // OrderId / CustomerId are auto-tagged by the naming convention.
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
 
                 public void Copy() => OrderId = CustomerId;
             }
@@ -55,14 +59,16 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
             }
 
             public class Holder
             {
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
 
                 public Target Create() => new Target { OrderId = CustomerId };
             }
@@ -79,15 +85,17 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Customer;
             public class Target
             {
-                public void Consume([Id<Customer>] System.Guid value) { }
+                public void Consume([Id<Customer>] Guid value) { }
             }
             public class Holder
             {
                 [Id<Customer>]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -103,16 +111,18 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Customer;
             public class Order;
             public class Target
             {
-                public void Consume([Id<Order>] System.Guid value) { }
+                public void Consume([Id<Order>] Guid value) { }
             }
             public class Holder
             {
                 [Id<Customer>]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -134,15 +144,17 @@ public class IdMismatchAnalyzerTests
         // to the same tag and not produce a mismatch.
         var source =
             """
+            using System;
+
             public class Customer;
             public class Target
             {
-                public void Consume([Id("Customer")] System.Guid value) { }
+                public void Consume([Id("Customer")] Guid value) { }
             }
             public class Holder
             {
                 [Id<Customer>]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -158,16 +170,18 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Customer;
             public class Order;
             public class Target
             {
-                public void Consume([UnionId<Customer, Order>] System.Guid value) { }
+                public void Consume([UnionId<Customer, Order>] Guid value) { }
             }
             public class Holder
             {
                 [Id<Customer>]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -183,17 +197,19 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Customer;
             public class Order;
             public class Product;
             public class Target
             {
-                public void Consume([UnionId<Customer, Order>] System.Guid value) { }
+                public void Consume([UnionId<Customer, Order>] Guid value) { }
             }
             public class Holder
             {
                 [Id<Product>]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -210,6 +226,8 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class A;
             public class B;
             public class C;
@@ -217,12 +235,12 @@ public class IdMismatchAnalyzerTests
             public class E;
             public class Target
             {
-                public void Consume([UnionId<A, B, C, D, E>] System.Guid value) { }
+                public void Consume([UnionId<A, B, C, D, E>] Guid value) { }
             }
             public class Holder
             {
                 [Id<E>]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -238,16 +256,18 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Customer;
             public class Order;
             public class Target
             {
-                public void Consume([UnionId("Customer", "Order")] System.Guid value) { }
+                public void Consume([UnionId("Customer", "Order")] Guid value) { }
             }
             public class Holder
             {
                 [UnionId<Customer, Order>]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -263,16 +283,18 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public abstract class ProgramBillBase;
             public class ProgramBill : ProgramBillBase;
             public class Target
             {
-                public void Consume([Id("ProgramBillBase")] System.Guid value) { }
+                public void Consume([Id("ProgramBillBase")] Guid value) { }
             }
             public class Holder
             {
                 [Id("ProgramBill")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -290,16 +312,18 @@ public class IdMismatchAnalyzerTests
         // into a derived-tagged target. Only the source side widens.
         var source =
             """
+            using System;
+
             public abstract class ProgramBillBase;
             public class ProgramBill : ProgramBillBase;
             public class Target
             {
-                public void Consume([Id("ProgramBill")] System.Guid value) { }
+                public void Consume([Id("ProgramBill")] Guid value) { }
             }
             public class Holder
             {
                 [Id("ProgramBillBase")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -316,16 +340,18 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public interface IBill;
             public class ProgramBill : IBill;
             public class Target
             {
-                public void Consume([Id("IBill")] System.Guid value) { }
+                public void Consume([Id("IBill")] Guid value) { }
             }
             public class Holder
             {
                 [Id("ProgramBill")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -343,14 +369,16 @@ public class IdMismatchAnalyzerTests
         // as before — no widening, exact match only.
         var source =
             """
+            using System;
+
             public class Target
             {
-                public void Consume([Id("LegacyThingA")] System.Guid value) { }
+                public void Consume([Id("LegacyThingA")] Guid value) { }
             }
             public class Holder
             {
                 [Id("LegacyThingB")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -369,17 +397,19 @@ public class IdMismatchAnalyzerTests
         // widens the source tag all the way up to the grandbase.
         var source =
             """
+            using System;
+
             public abstract class Root;
             public abstract class Middle : Root;
             public class Leaf : Middle;
             public class Target
             {
-                public void Consume([Id("Root")] System.Guid value) { }
+                public void Consume([Id("Root")] Guid value) { }
             }
             public class Holder
             {
                 [Id("Leaf")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -397,15 +427,17 @@ public class IdMismatchAnalyzerTests
         // base id without firing SIA001.
         var source =
             """
+            using System;
+
             public abstract class ProgramBillBase {}
             public class ProgramBill : ProgramBillBase {}
             public class Holder
             {
                 [Id("ProgramBill")]
-                public System.Guid Derived { get; set; }
+                public Guid Derived { get; set; }
 
                 [Id("ProgramBillBase")]
-                public System.Guid Base { get; set; }
+                public Guid Base { get; set; }
 
                 public bool Compare() => Derived == Base;
             }
@@ -421,11 +453,13 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid GetValue() => System.Guid.Empty;
+                public Guid GetValue() => Guid.Empty;
 
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(GetValue());
             }
@@ -441,12 +475,14 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [return: Id("Order")]
-                public System.Guid GetOrderId() => System.Guid.Empty;
+                public Guid GetOrderId() => Guid.Empty;
 
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(GetOrderId());
             }
@@ -462,12 +498,14 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [return: Id("Customer")]
-                public System.Guid GetCustomerId() => System.Guid.Empty;
+                public Guid GetCustomerId() => Guid.Empty;
 
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(GetCustomerId());
             }
@@ -487,12 +525,14 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [return: UnionId("Customer", "Order")]
-                public System.Guid GetId() => System.Guid.Empty;
+                public Guid GetId() => Guid.Empty;
 
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(GetId());
             }
@@ -508,12 +548,14 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [return: UnionId("Customer", "Supplier")]
-                public System.Guid GetId() => System.Guid.Empty;
+                public Guid GetId() => Guid.Empty;
 
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(GetId());
             }
@@ -530,14 +572,16 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             using System.Threading.Tasks;
 
             public class Holder
             {
                 [return: Id("Customer")]
-                public Task<System.Guid> LoadCustomerIdAsync() => Task.FromResult(System.Guid.Empty);
+                public Task<Guid> LoadCustomerIdAsync() => Task.FromResult(Guid.Empty);
 
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public async Task Use() => Consume(await LoadCustomerIdAsync());
             }
@@ -554,20 +598,22 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public abstract class Base
             {
                 [return: Id("Customer")]
-                public abstract System.Guid GetId();
+                public abstract Guid GetId();
             }
 
             public class Derived : Base
             {
-                public override System.Guid GetId() => System.Guid.Empty;
+                public override Guid GetId() => Guid.Empty;
             }
 
             public class Holder
             {
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use(Derived derived) => Consume(derived.GetId());
             }
@@ -584,20 +630,22 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public interface IGetter
             {
                 [return: Id("Customer")]
-                System.Guid GetId();
+                Guid GetId();
             }
 
             public class Impl : IGetter
             {
-                public System.Guid GetId() => System.Guid.Empty;
+                public Guid GetId() => Guid.Empty;
             }
 
             public class Holder
             {
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use(Impl impl) => Consume(impl.GetId());
             }
@@ -614,14 +662,16 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
             }
 
             public class Holder
             {
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -639,14 +689,16 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Source
             {
-                public System.Guid Raw { get; set; }
+                public Guid Raw { get; set; }
             }
 
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(Source src) => OrderId = src.Raw;
             }
@@ -663,14 +715,16 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
             }
 
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(Target target) => target.Value = OrderId;
             }
@@ -688,14 +742,16 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public void Consume(System.Guid value) { }
+                public void Consume(Guid value) { }
             }
 
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(Target target) => target.Consume(OrderId);
             }
@@ -712,14 +768,16 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
             }
 
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(Target target) => target.Consume(OrderId);
             }
@@ -735,16 +793,18 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
             }
 
             public class Caller
             {
                 public void Use(Target target)
                 {
-                    System.Guid local = System.Guid.NewGuid();
+                    Guid local = Guid.NewGuid();
                     target.Consume(local);
                 }
             }
@@ -760,14 +820,16 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public void Consume(System.Guid value) { }
+                public void Consume(Guid value) { }
             }
 
             public class Holder
             {
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -785,15 +847,17 @@ public class IdMismatchAnalyzerTests
         // user-defined tags and are compared ordinally. "Order" vs "order" is a mismatch.
         var source =
             """
+            using System;
+
             public class Target
             {
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
             }
 
             public class Holder
             {
                 [Id("order")]
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(Target target) => target.Consume(OrderId);
             }
@@ -810,12 +874,14 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [Id("Customer")]
-                public System.Guid CustomerField;
+                public Guid CustomerField;
 
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(CustomerField);
             }
@@ -854,11 +920,13 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
 
                 public bool Check() => OrderId == CustomerId;
             }
@@ -875,11 +943,13 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
 
                 public bool Check() => OrderId != CustomerId;
             }
@@ -896,13 +966,15 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [Id("Order")]
-                public System.Guid A { get; set; }
+                public Guid A { get; set; }
 
                 [Id("Order")]
-                public System.Guid B { get; set; }
+                public Guid B { get; set; }
 
                 public bool Check() => A == B;
             }
@@ -918,11 +990,13 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
-                public System.Guid Other { get; set; }
+                public Guid Other { get; set; }
 
                 public bool Check() => OrderId == Other;
             }
@@ -941,11 +1015,13 @@ public class IdMismatchAnalyzerTests
         // Same as above but the tagged side is on the right — fixer should target the left.
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid Other { get; set; }
+                public Guid Other { get; set; }
 
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public bool Check() => Other == OrderId;
             }
@@ -963,11 +1039,13 @@ public class IdMismatchAnalyzerTests
         // Comparing a tagged id to Guid.Empty or a literal is routine and must not fire.
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
-                public bool IsSet() => OrderId != System.Guid.Empty;
+                public bool IsSet() => OrderId != Guid.Empty;
             }
             """;
 
@@ -984,13 +1062,15 @@ public class IdMismatchAnalyzerTests
         // suppressed.
         var source =
             """
+            using System;
+
             using System.Collections.Generic;
 
             public class Holder
             {
-                Dictionary<System.Guid, string> map = new();
+                Dictionary<Guid, string> map = new();
 
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public string Lookup() => map[OrderId];
             }
@@ -1008,13 +1088,15 @@ public class IdMismatchAnalyzerTests
         // they don't carry [Id] semantics, so passing a tagged value must not fire SIA003.
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [Id("Order")]
-                public System.Guid A { get; set; }
+                public Guid A { get; set; }
 
                 [Id("Order")]
-                public System.Guid B { get; set; }
+                public Guid B { get; set; }
 
                 public bool Check() => A.Equals(B);
             }
@@ -1033,17 +1115,19 @@ public class IdMismatchAnalyzerTests
         // (no hierarchy walk required). Pinned to guard against regressions.
         var source =
             """
+            using System;
+
             public class Base
             {
                 [Id("Order")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Derived : Base { }
 
             public class Target
             {
-                public void Consume([Id("Customer")] System.Guid value) { }
+                public void Consume([Id("Customer")] Guid value) { }
             }
 
             public class Consumer
@@ -1065,20 +1149,22 @@ public class IdMismatchAnalyzerTests
         // so passing derived.Id where [Id("Customer")] is expected still fires SIA001.
         var source =
             """
+            using System;
+
             public class Base
             {
                 [Id("Order")]
-                public virtual System.Guid Id { get; set; }
+                public virtual Guid Id { get; set; }
             }
 
             public class Derived : Base
             {
-                public override System.Guid Id { get; set; }
+                public override Guid Id { get; set; }
             }
 
             public class Target
             {
-                public void Consume([Id("Customer")] System.Guid value) { }
+                public void Consume([Id("Customer")] Guid value) { }
             }
 
             public class Consumer
@@ -1098,20 +1184,22 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public interface IEntity
             {
                 [Id("Order")]
-                System.Guid Id { get; }
+                Guid Id { get; }
             }
 
             public class Order : IEntity
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Target
             {
-                public void Consume([Id("Customer")] System.Guid value) { }
+                public void Consume([Id("Customer")] Guid value) { }
             }
 
             public class Consumer
@@ -1133,20 +1221,22 @@ public class IdMismatchAnalyzerTests
         // concrete type. The explicit-impl path of the hierarchy walk is exercised.
         var source =
             """
+            using System;
+
             public interface IEntity
             {
                 [Id("Order")]
-                System.Guid Id { get; }
+                Guid Id { get; }
             }
 
             public class Order : IEntity
             {
-                System.Guid IEntity.Id => System.Guid.Empty;
+                Guid IEntity.Id => Guid.Empty;
             }
 
             public class Target
             {
-                public void Consume([Id("Customer")] System.Guid value) { }
+                public void Consume([Id("Customer")] Guid value) { }
             }
 
             public class Consumer
@@ -1171,20 +1261,22 @@ public class IdMismatchAnalyzerTests
         // base's "Order".
         var source =
             """
+            using System;
+
             public class Base
             {
                 [Id("Order")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Derived : Base
             {
-                public new System.Guid Id { get; set; }
+                public new Guid Id { get; set; }
             }
 
             public class Target
             {
-                public void Consume([Id("Customer")] System.Guid value) { }
+                public void Consume([Id("Customer")] Guid value) { }
             }
 
             public class Consumer
@@ -1210,19 +1302,21 @@ public class IdMismatchAnalyzerTests
         // through the derived receiver still sees SIA001 via the inheritance walk.
         var source =
             """
+            using System;
+
             public abstract class Base
             {
-                public abstract void Process([Id("Urgent")] System.Guid value);
+                public abstract void Process([Id("Urgent")] Guid value);
             }
 
             public class Impl : Base
             {
-                public override void Process(System.Guid value) { }
+                public override void Process(Guid value) { }
             }
 
             public class Consumer
             {
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
 
                 public void Use(Impl impl) => impl.Process(CustomerId);
             }
@@ -1241,6 +1335,8 @@ public class IdMismatchAnalyzerTests
         // is erased through `object`, so firing SIA003 here would be constant noise.
         var source =
             """
+            using System;
+
             public class Logger
             {
                 public void Log(string message, object value) { }
@@ -1248,7 +1344,7 @@ public class IdMismatchAnalyzerTests
 
             public class Consumer
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(Logger logger) => logger.Log("processing {0}", OrderId);
             }
@@ -1265,6 +1361,8 @@ public class IdMismatchAnalyzerTests
         // Generic pass-through methods (identity, container helpers) can't carry tags.
         var source =
             """
+            using System;
+
             public class Helper
             {
                 public T Identity<T>(T value) => value;
@@ -1272,9 +1370,9 @@ public class IdMismatchAnalyzerTests
 
             public class Consumer
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
-                public System.Guid Use(Helper h) => h.Identity(OrderId);
+                public Guid Use(Helper h) => h.Identity(OrderId);
             }
             """;
 
@@ -1290,17 +1388,19 @@ public class IdMismatchAnalyzerTests
         // suppression doesn't cover it — only the namespace rule does.
         var source =
             """
+            using System;
+
             namespace System.Fake
             {
                 public class Target
                 {
-                    public void Consume(System.Guid value) { }
+                    public void Consume(Guid value) { }
                 }
             }
 
             public class Consumer
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(System.Fake.Target target) => target.Consume(OrderId);
             }
@@ -1316,17 +1416,19 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             namespace Microsoft.Fake
             {
                 public class Target
                 {
-                    public void Consume(System.Guid value) { }
+                    public void Consume(Guid value) { }
                 }
             }
 
             public class Consumer
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(Microsoft.Fake.Target target) => target.Consume(OrderId);
             }
@@ -1342,17 +1444,19 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             namespace MyCompany.Logging
             {
                 public class Target
                 {
-                    public void Consume(System.Guid value) { }
+                    public void Consume(Guid value) { }
                 }
             }
 
             public class Consumer
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(MyCompany.Logging.Target target) => target.Consume(OrderId);
             }
@@ -1371,11 +1475,13 @@ public class IdMismatchAnalyzerTests
         // (user value fully replaces the defaults).
         var source =
             """
+            using System;
+
             namespace MyCompany.Logging
             {
                 public class Target
                 {
-                    public void Consume(System.Guid value) { }
+                    public void Consume(Guid value) { }
                 }
             }
 
@@ -1383,13 +1489,13 @@ public class IdMismatchAnalyzerTests
             {
                 public class Target2
                 {
-                    public void Consume(System.Guid value) { }
+                    public void Consume(Guid value) { }
                 }
             }
 
             public class Consumer
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(MyCompany.Logging.Target m, System.Fake.Target2 s)
                 {
@@ -1417,17 +1523,19 @@ public class IdMismatchAnalyzerTests
         // Empty value = no suppression. A user-declared class in System.Fake now fires.
         var source =
             """
+            using System;
+
             namespace System.Fake
             {
                 public class Target
                 {
-                    public void Consume(System.Guid value) { }
+                    public void Consume(Guid value) { }
                 }
             }
 
             public class Consumer
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(System.Fake.Target target) => target.Consume(OrderId);
             }
@@ -1451,14 +1559,16 @@ public class IdMismatchAnalyzerTests
         // [Id("Customer")] parameter fires SIA001 with "Order" vs "Customer".
         var source =
             """
+            using System;
+
             public class Order
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Target
             {
-                public void Consume([Id("Customer")] System.Guid value) { }
+                public void Consume([Id("Customer")] Guid value) { }
             }
 
             public class Consumer
@@ -1482,11 +1592,13 @@ public class IdMismatchAnalyzerTests
         // CustomerId -> convention "Customer"; passing into [Id("Order")] fires SIA001.
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
 
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(CustomerId);
             }
@@ -1505,19 +1617,21 @@ public class IdMismatchAnalyzerTests
         // reference the same conceptual Id — the analyzer must accept matching flow.
         var source =
             """
+            using System;
+
             public class Customer
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Order
             {
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
             }
 
             public class Lookup
             {
-                public Customer? Find([Id("Customer")] System.Guid id) => null;
+                public Customer? Find([Id("Customer")] Guid id) => null;
 
                 public Customer? For(Order order) => Find(order.CustomerId);
             }
@@ -1533,11 +1647,13 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid OrderId;
+                public Guid OrderId;
 
-                public void Consume([Id("Customer")] System.Guid value) { }
+                public void Consume([Id("Customer")] Guid value) { }
 
                 public void Use() => Consume(OrderId);
             }
@@ -1556,11 +1672,13 @@ public class IdMismatchAnalyzerTests
         // parameter fires SIA002 (not SIA001).
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(Value);
             }
@@ -1578,12 +1696,14 @@ public class IdMismatchAnalyzerTests
         // CustomerId would be "Customer" by convention, but explicit [Id("Special")] wins.
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [Id("Special")]
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
 
-                public void Consume([Id("Customer")] System.Guid value) { }
+                public void Consume([Id("Customer")] Guid value) { }
 
                 public void Use() => Consume(CustomerId);
             }
@@ -1605,11 +1725,13 @@ public class IdMismatchAnalyzerTests
         // SIA004 fires on each declaration.
         var source =
             """
+            using System;
+
             namespace One
             {
                 public class Order
                 {
-                    public System.Guid Id { get; set; }
+                    public Guid Id { get; set; }
                 }
             }
 
@@ -1617,7 +1739,7 @@ public class IdMismatchAnalyzerTests
             {
                 public class Order
                 {
-                    public System.Guid Id { get; set; }
+                    public Guid Id { get; set; }
                 }
             }
             """;
@@ -1634,11 +1756,13 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class A
             {
                 public class Foo
                 {
-                    public System.Guid Id { get; set; }
+                    public Guid Id { get; set; }
                 }
             }
 
@@ -1646,7 +1770,7 @@ public class IdMismatchAnalyzerTests
             {
                 public class Foo
                 {
-                    public System.Guid Id { get; set; }
+                    public Guid Id { get; set; }
                 }
             }
             """;
@@ -1664,12 +1788,14 @@ public class IdMismatchAnalyzerTests
         // it out of the ambiguity set — SIA004 no longer fires on either side.
         var source =
             """
+            using System;
+
             namespace One
             {
                 public class Order
                 {
                     [Id("OneOrder")]
-                    public System.Guid Id { get; set; }
+                    public Guid Id { get; set; }
                 }
             }
 
@@ -1677,7 +1803,7 @@ public class IdMismatchAnalyzerTests
             {
                 public class Order
                 {
-                    public System.Guid Id { get; set; }
+                    public Guid Id { get; set; }
                 }
             }
             """;
@@ -1694,14 +1820,16 @@ public class IdMismatchAnalyzerTests
         // `CustomerId` property are expected and desirable.
         var source =
             """
+            using System;
+
             public class Order
             {
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
             }
 
             public class Invoice
             {
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
             }
             """;
 
@@ -1715,10 +1843,12 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Order
             {
                 [Id("Order")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
             """;
 
@@ -1734,10 +1864,12 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [Id("Customer")]
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
             }
             """;
 
@@ -1755,16 +1887,18 @@ public class IdMismatchAnalyzerTests
         // (The parameter attributes are dropped because convention infers them.)
         var source =
             """
+            using System;
+
             public class Base
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Child1 : Base;
 
             public class Holder
             {
-                public static void Foo(System.Guid child1Id, System.Guid baseId) { }
+                public static void Foo(Guid child1Id, Guid baseId) { }
 
                 public void Use()
                 {
@@ -1786,9 +1920,11 @@ public class IdMismatchAnalyzerTests
         // Child1 parameter; SIA001 fires only on the first argument.
         var source =
             """
+            using System;
+
             public class Base
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Child1 : Base;
@@ -1796,7 +1932,7 @@ public class IdMismatchAnalyzerTests
 
             public class Holder
             {
-                public static void Foo(System.Guid child1Id, System.Guid baseId) { }
+                public static void Foo(Guid child1Id, Guid baseId) { }
 
                 public void Use()
                 {
@@ -1822,16 +1958,18 @@ public class IdMismatchAnalyzerTests
         // derived-type tags aren't inferred because the caller didn't express them.
         var source =
             """
+            using System;
+
             public class Base
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Child1 : Base;
 
             public class Holder
             {
-                public static void TakeChild1(System.Guid child1Id) { }
+                public static void TakeChild1(Guid child1Id) { }
 
                 public void Use(Base b) => TakeChild1(b.Id);
             }
@@ -1852,27 +1990,29 @@ public class IdMismatchAnalyzerTests
         // child2.Id correctly fails the "Child1" parameter.
         var source =
             """
+            using System;
+
             public abstract class Base
             {
                 [Id("Base")]
-                public abstract System.Guid Id { get; set; }
+                public abstract Guid Id { get; set; }
             }
 
             public class Child1 : Base
             {
                 [Id("Child1")]
-                public override System.Guid Id { get; set; }
+                public override Guid Id { get; set; }
             }
 
             public class Child2 : Base
             {
                 [Id("Child2")]
-                public override System.Guid Id { get; set; }
+                public override Guid Id { get; set; }
             }
 
             public class Holder
             {
-                public static void Foo(System.Guid child1Id, System.Guid baseId) { }
+                public static void Foo(Guid child1Id, Guid baseId) { }
 
                 public void Use()
                 {
@@ -1902,27 +2042,29 @@ public class IdMismatchAnalyzerTests
         // interface implementation is walked, so child1.Id carries {"Child1","Base"}.
         var source =
             """
+            using System;
+
             public interface Base
             {
                 [Id("Base")]
-                System.Guid Id { get; set; }
+                Guid Id { get; set; }
             }
 
             public class Child1 : Base
             {
                 [Id("Child1")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Child2 : Base
             {
                 [Id("Child2")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Holder
             {
-                public static void Foo(System.Guid child1Id, System.Guid baseId) { }
+                public static void Foo(Guid child1Id, Guid baseId) { }
 
                 public void Use()
                 {
@@ -1952,24 +2094,26 @@ public class IdMismatchAnalyzerTests
         // Both convention tags (Child1/Child2 + Base) come from the interface walk.
         var source =
             """
+            using System;
+
             public interface Base
             {
-                System.Guid Id { get; set; }
+                Guid Id { get; set; }
             }
 
             public class Child1 : Base
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Child2 : Base
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class Holder
             {
-                public static void Foo(System.Guid child1Id, System.Guid baseId) { }
+                public static void Foo(Guid child1Id, Guid baseId) { }
 
                 public void Use()
                 {
@@ -2001,16 +2145,18 @@ public class IdMismatchAnalyzerTests
         // more specific name the user sees locally.
         var source =
             """
+            using System;
+
             public class BaseEntity
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class TreasuryBid : BaseEntity;
 
             public class Holder
             {
-                public static void BuildTreasureMeasures([Id("Order")] System.Guid value) { }
+                public static void BuildTreasureMeasures([Id("Order")] Guid value) { }
 
                 public void Use(TreasuryBid bid) => BuildTreasureMeasures(bid.Id);
             }
@@ -2030,13 +2176,15 @@ public class IdMismatchAnalyzerTests
         // "Leaf/Mid/Root" (most-derived first) so code fixes pick the receiver type.
         var source =
             """
-            public class Root { public System.Guid Id { get; set; } }
+            using System;
+
+            public class Root { public Guid Id { get; set; } }
             public class Mid : Root;
             public class Leaf : Mid;
 
             public class Holder
             {
-                public static void TakeOther([Id("Other")] System.Guid value) { }
+                public static void TakeOther([Id("Other")] Guid value) { }
 
                 public void Use(Leaf leaf) => TakeOther(leaf.Id);
             }
@@ -2054,15 +2202,17 @@ public class IdMismatchAnalyzerTests
         // leaf.Id walks Leaf → Mid → Root and carries all three tags.
         var source =
             """
-            public class Root { public System.Guid Id { get; set; } }
+            using System;
+
+            public class Root { public Guid Id { get; set; } }
             public class Mid : Root;
             public class Leaf : Mid;
 
             public class Holder
             {
-                public static void TakeRoot(System.Guid rootId) { }
-                public static void TakeMid(System.Guid midId) { }
-                public static void TakeLeaf(System.Guid leafId) { }
+                public static void TakeRoot(Guid rootId) { }
+                public static void TakeMid(Guid midId) { }
+                public static void TakeLeaf(Guid leafId) { }
 
                 public void Use(Leaf leaf)
                 {
@@ -2085,11 +2235,13 @@ public class IdMismatchAnalyzerTests
         // target fires SIA001 with "Order" vs "Customer".
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
 
-                public static void ProcessOrder(System.Guid orderId) { }
+                public static void ProcessOrder(Guid orderId) { }
 
                 public void Trigger() => ProcessOrder(CustomerId);
             }
@@ -2111,11 +2263,13 @@ public class IdMismatchAnalyzerTests
         // receive an inferred tag — otherwise generic helpers would be over-tagged.
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
 
-                public static void Lookup(System.Guid id) { }
+                public static void Lookup(Guid id) { }
 
                 public void Trigger() => Lookup(CustomerId);
             }
@@ -2132,9 +2286,11 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public static void Process([Id("Order")] System.Guid orderId) { }
+                public static void Process([Id("Order")] Guid orderId) { }
             }
             """;
 
@@ -2150,10 +2306,12 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Order
             {
                 [Id("Special")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
             """;
 
@@ -2168,12 +2326,14 @@ public class IdMismatchAnalyzerTests
         // [UnionId("Customer","Product")] source overlaps with [Id("Customer")] target.
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [UnionId("Customer", "Product")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
-                public static void Consume([Id("Customer")] System.Guid value) { }
+                public static void Consume([Id("Customer")] Guid value) { }
 
                 public void Use() => Consume(Value);
             }
@@ -2189,12 +2349,14 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [UnionId("Customer", "Product")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
-                public static void Consume([Id("Order")] System.Guid value) { }
+                public static void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(Value);
             }
@@ -2215,12 +2377,14 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [Id("Customer")]
-                public System.Guid CustomerValue { get; set; }
+                public Guid CustomerValue { get; set; }
 
-                public static void Consume([UnionId("Customer", "Product")] System.Guid value) { }
+                public static void Consume([UnionId("Customer", "Product")] Guid value) { }
 
                 public void Use() => Consume(CustomerValue);
             }
@@ -2236,12 +2400,14 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [UnionId("Customer", "Product")]
-                public System.Guid SourceValue { get; set; }
+                public Guid SourceValue { get; set; }
 
-                public static void Consume([UnionId("Product", "Order")] System.Guid value) { }
+                public static void Consume([UnionId("Product", "Order")] Guid value) { }
 
                 public void Use() => Consume(SourceValue);
             }
@@ -2257,12 +2423,14 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [UnionId("Customer", "Product")]
-                public System.Guid SourceValue { get; set; }
+                public Guid SourceValue { get; set; }
 
-                public static void Consume([UnionId("Order", "Supplier")] System.Guid value) { }
+                public static void Consume([UnionId("Order", "Supplier")] Guid value) { }
 
                 public void Use() => Consume(SourceValue);
             }
@@ -2282,12 +2450,14 @@ public class IdMismatchAnalyzerTests
         // [Id("Order")] parameter must succeed because "Order" is in the set.
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [UnionId("Order")]
-                public System.Guid CustomerId { get; set; }
+                public Guid CustomerId { get; set; }
 
-                public static void Consume([Id("Order")] System.Guid value) { }
+                public static void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(CustomerId);
             }
@@ -2304,10 +2474,12 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [UnionId("Customer")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
             }
             """;
 
@@ -2323,9 +2495,11 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public static void Consume([UnionId("Customer")] System.Guid value) { }
+                public static void Consume([UnionId("Customer")] Guid value) { }
             }
             """;
 
@@ -2340,10 +2514,12 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [UnionId("Customer", "Product")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
             }
             """;
 
@@ -2357,10 +2533,12 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [Id("ProgramBillBase")]
-                public System.Guid ProgramBillId { get; set; }
+                public Guid ProgramBillId { get; set; }
 
                 public object Shape() => new { BillId = ProgramBillId };
             }
@@ -2376,11 +2554,13 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
-            public record Holder([Id("Order")] System.Guid Value);
+            using System;
+
+            public record Holder([Id("Order")] Guid Value);
 
             public class Consumer
             {
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use(Holder holder) => Consume(holder.Value);
             }
@@ -2396,11 +2576,13 @@ public class IdMismatchAnalyzerTests
     {
         var source =
             """
-            public record Holder([Id("Customer")] System.Guid Value);
+            using System;
+
+            public record Holder([Id("Customer")] Guid Value);
 
             public class Consumer
             {
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
 
                 public void Use(Holder holder) => Consume(holder.Value);
             }
@@ -2428,18 +2610,22 @@ public class IdMismatchAnalyzerTests
         // attribute-read path.
         var messagesSource =
             """
+            using System;
+
             public class Message
             {
                 [UnionId("Customer", "Order")]
-                public System.Guid Subject { get; set; }
+                public Guid Subject { get; set; }
             }
             """;
 
         var consumerSource =
             """
+            using System;
+
             public class Receiver
             {
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Copy(Message message) => Value = message.Subject;
             }
@@ -2461,18 +2647,22 @@ public class IdMismatchAnalyzerTests
         // not just source declarations.
         var messagesSource =
             """
+            using System;
+
             public abstract class ProgramBillBase {}
             public class ProgramBill : ProgramBillBase {}
 
-            public record GenerateSnapshot([Id("ProgramBillBase")] System.Guid BillId);
+            public record GenerateSnapshot([Id("ProgramBillBase")] Guid BillId);
             """;
 
         var consumerSource =
             """
+            using System;
+
             public class Handler
             {
                 [Id("ProgramBill")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public GenerateSnapshot Build() => new(Value);
             }
@@ -3090,8 +3280,8 @@ public class IdMismatchAnalyzerTests
     [Arguments("ToArray()")]
     [Arguments("ToHashSet()")]
     [Arguments("AsEnumerable()")]
-    [Arguments("Append(System.Guid.Empty)")]
-    [Arguments("Prepend(System.Guid.Empty)")]
+    [Arguments("Append(Guid.Empty)")]
+    [Arguments("Prepend(Guid.Empty)")]
     public async Task LinqElementPreserving_ChainPropagatesElementTag(string call)
     {
         var source = $$"""
