@@ -12,9 +12,10 @@ Diagnostic prefix `SIA` — SIA001 (mismatch, fix: change attr or rename target)
 
 - `dotnet build src --configuration Release` — builds analyzer + code fix and produces `nugets/StrongIdAnalyzer.<version>.nupkg`.
 - `dotnet build IntegrationTests --configuration Release` — consumes the just-built nupkg from `nugets/`.
-- `dotnet test src` — NUnit unit tests against the analyzer directly (fast).
-- `dotnet test IntegrationTests` — end-to-end against the packaged analyzer.
-- Single test: `dotnet test src --filter FullyQualifiedName~IdMismatchAnalyzerTests.NameOfTest`.
+- `dotnet run --project src/StrongIdAnalyzer.Tests -c Release` — NUnit unit tests against the analyzer directly (fast). Tests run on Microsoft.Testing.Platform (MTP) — the project is `OutputType=Exe` with `EnableNUnitRunner=true`, so `dotnet test` is not used on .NET 10 SDK.
+- `dotnet run --project IntegrationTests/IntegrationTests -c Release` — end-to-end against the packaged analyzer.
+- Single test: append `-- --filter-method *NameOfTest*` (MTP NUnit filter syntax).
+- Code coverage: append `-- --coverage --coverage-output-format cobertura` (via `Microsoft.Testing.Extensions.CodeCoverage`). Output lands in `TestResults/`.
 
 ## Architecture
 

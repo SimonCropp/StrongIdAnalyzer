@@ -10,3 +10,4 @@ nugets/
 *~*
 nul
 /src/Benchmarks/BenchmarkDotNet.Artifacts
+/TestResults
