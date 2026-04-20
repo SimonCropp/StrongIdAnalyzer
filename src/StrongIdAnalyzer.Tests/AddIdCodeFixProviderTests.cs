@@ -644,6 +644,63 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA003_UnionSource_AppliesUnionFix_GenericForm()
+    {
+        // Companion to SIA003_UnionSource_OffersUnionAndPerValueFixes, which only
+        // verifies the titles are registered. This actually applies the union fix and
+        // checks the resulting [UnionId<...>] attribute is emitted in generic form.
+        var source = """
+            public class Customer;
+            public class Order;
+
+            public class Target
+            {
+                public System.Guid Subject { get; set; }
+            }
+
+            public class Holder
+            {
+                [UnionId("Customer", "Order")]
+                public System.Guid Subject { get; set; }
+
+                public Target Create() => new Target { Subject = Subject };
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Add [UnionId<Customer, Order>]");
+
+        Contains(fixedSource, "[UnionId<Customer, Order>]");
+    }
+
+    [Test]
+    public async Task SIA003_UnionSource_AppliesUnionFix_StringForm()
+    {
+        // When one of the union values isn't a valid C# identifier the codefix should
+        // fall back to the string-arg form `[UnionId("a", "b")]` rather than generics.
+        var source = """
+            public class Order;
+
+            public class Target
+            {
+                public System.Guid Subject { get; set; }
+            }
+
+            public class Holder
+            {
+                [UnionId("custom-tag", "Order")]
+                public System.Guid Subject { get; set; }
+
+                public Target Create() => new Target { Subject = Subject };
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Add [UnionId(");
+
+        Contains(fixedSource, "[UnionId(\"custom-tag\", \"Order\")]");
+        DoesNotContain(fixedSource, "[UnionId<");
+    }
+
+    [Test]
     public async Task SIA001_GenericExistingAttribute_PreservesGenericForm()
     {
         // When the target already uses [Id<Bid>], the fix to change the attribute should

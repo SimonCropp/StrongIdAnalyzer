@@ -9,7 +9,7 @@ public class IdAttributeGeneratorTests
         AreEqual(0, runResult.Diagnostics.Length);
 
         var generated = runResult.GeneratedTrees
-            .Single(tree => tree.FilePath.EndsWith("IdAttribute.g.cs"));
+            .Single(_ => _.FilePath.EndsWith("IdAttribute.g.cs"));
         var text = generated.ToString();
 
         IsTrue(text.Contains("sealed class IdAttribute"));
