@@ -111,6 +111,7 @@ public static class FixedUsage
 {
     public static decimal Run(TypedOrderService service, TypedOrder order) =>
         // Compile-time SIA001: passing a [Id("Customer")] Guid to an [Id("Order")] parameter.
+        // disabled so the sample code will build
 #pragma warning disable SIA001
         service.GetOrderAmount(order.CustomerId);
 #pragma warning restore SIA001
