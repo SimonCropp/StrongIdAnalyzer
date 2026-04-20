@@ -3,7 +3,6 @@
 // in-memory assembly, references it from a consumer compilation, and checks the
 // analyzer's output. This is the only test shape that exercises TryGetFromIndex —
 // LoadIndex early-outs for symbols defined in the source assembly.
-[TestFixture]
 public class IndexTests
 {
     const string indexAttributeDeclaration =
@@ -58,16 +57,13 @@ public class IndexTests
             """;
 
         var withoutIndex = await GetCrossAssemblyDiagnostics(library, index: null, consumer);
-        Assert.That(withoutIndex, Is.Empty,
-            "source is NotPresent and target is Present, but SIA002 is suppressed when " +
-            "the source lives in referenced metadata (can't be fixed).");
+        await Assert.That(withoutIndex).IsEmpty();
 
         var withIndexOrder = await GetCrossAssemblyDiagnostics(
             library,
             index: "P:Vault.Token=Order",
             consumer);
-        Assert.That(withIndexOrder.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]),
-            "index gives Vault.Token the Order tag; target is Customer → SIA001 (index was read).");
+        await Assert.That(withIndexOrder.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
     }
 
     // An index entry can flip the result from "no diagnostic" to "SIA001" by giving
@@ -110,8 +106,9 @@ public class IndexTests
             index: "P:Vault.Token=Order",
             consumer);
 
-        Assert.That(diagnostics.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]));
-        Assert.That(diagnostics[0].GetMessage(), Does.Contain("Order").And.Contain("Customer"));
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+        await Assert.That(diagnostics[0].GetMessage()).Contains("Order");
+        await Assert.That(diagnostics[0].GetMessage()).Contains("Customer");
     }
 
     // Comma-separated tag values decode to a multi-tag set — the analyzer treats it
@@ -160,8 +157,8 @@ public class IndexTests
             index: "P:Vault.Token=Customer,Order",
             consumer);
 
-        Assert.That(diagnostics.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]));
-        Assert.That(diagnostics[0].GetMessage(), Does.Contain("Invoice"));
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+        await Assert.That(diagnostics[0].GetMessage()).Contains("Invoice");
     }
 
     // Parameter entries use a custom "M:MethodDocId::paramName" form — Roslyn has
@@ -202,15 +199,13 @@ public class IndexTests
             """;
 
         var withoutIndex = await GetCrossAssemblyDiagnostics(library, index: null, consumer);
-        Assert.That(withoutIndex, Is.Empty,
-            "no index + no [Id] on parameter → target Unknown, no diagnostic fires");
+        await Assert.That(withoutIndex).IsEmpty();
 
         var withIndex = await GetCrossAssemblyDiagnostics(
             library,
             index: "M:Methods.Take(System.Guid)::id=Order",
             consumer);
-        Assert.That(withIndex.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]),
-            "index gives parameter the Order tag; source is Customer → SIA001");
+        await Assert.That(withIndex.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
     }
 
     // The analyzer silently ignores entries whose DocIds don't resolve (typo,
@@ -254,8 +249,7 @@ public class IndexTests
             index: "P:DoesNotExist.Missing=Whatever;P:Vault.Token=Customer",
             consumer);
 
-        Assert.That(diagnostics, Is.Empty,
-            "the garbage entry is skipped; the Vault.Token entry still loads and matches target");
+        await Assert.That(diagnostics).IsEmpty();
     }
 
     // A referenced assembly with NO index attribute falls back to the existing walk —
@@ -301,8 +295,7 @@ public class IndexTests
 
         var diagnostics = await GetCrossAssemblyDiagnostics(library, index: null, consumer);
 
-        Assert.That(diagnostics.Select(_ => _.Id), Is.EquivalentTo(["SIA001"]),
-            "walk finds Customer tag on ICustomer.Id via AllInterfaces; target is Order → SIA001");
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
     }
 
     // Compiles `library` into an in-memory dll (optionally adding

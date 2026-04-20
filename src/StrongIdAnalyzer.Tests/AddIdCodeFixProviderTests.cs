@@ -1,4 +1,3 @@
-[TestFixture]
 public class AddIdCodeFixProviderTests
 {
     const string idAttributeSource =
@@ -62,8 +61,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id(\"Order\")]");
-        Contains(fixedSource, "public System.Guid Value { get; set; }");
+        await Contains(fixedSource, "[Id(\"Order\")]");
+        await Contains(fixedSource, "public System.Guid Value { get; set; }");
     }
 
     [Test]
@@ -83,8 +82,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id(\"Order\")]");
-        Contains(fixedSource, "public System.Guid Field;");
+        await Contains(fixedSource, "[Id(\"Order\")]");
+        await Contains(fixedSource, "public System.Guid Field;");
     }
 
     [Test]
@@ -102,7 +101,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id<Order>] System.Guid input");
+        await Contains(fixedSource, "[Id<Order>] System.Guid input");
     }
 
     [Test]
@@ -125,7 +124,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id<Order>] System.Guid value");
+        await Contains(fixedSource, "[Id<Order>] System.Guid value");
     }
 
     [Test]
@@ -148,8 +147,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id<Order>]");
-        Contains(fixedSource, "public System.Guid Value { get; set; }");
+        await Contains(fixedSource, "[Id<Order>]");
+        await Contains(fixedSource, "public System.Guid Value { get; set; }");
     }
 
     [Test]
@@ -169,8 +168,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id<Order>]");
-        Contains(fixedSource, "public System.Guid Other { get; set; }");
+        await Contains(fixedSource, "[Id<Order>]");
+        await Contains(fixedSource, "public System.Guid Other { get; set; }");
     }
 
     [Test]
@@ -190,7 +189,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        Contains(fixedSource, "[Id(\"custom-tag\")]");
+        await Contains(fixedSource, "[Id(\"custom-tag\")]");
     }
 
     [Test]
@@ -210,7 +209,7 @@ public class AddIdCodeFixProviderTests
 
         var actions = await GetCodeActions(source);
 
-        AreEqual(0, actions.Length);
+        await Assert.That(actions.Length).IsEqualTo(0);
     }
 
     [Test]
@@ -229,9 +228,8 @@ public class AddIdCodeFixProviderTests
 
         // Customer is a real class in the test assembly (Samples.cs) and is therefore
         // visible from the fix site, so the codefix prefers the generic form.
-        Contains(fixedSource, "[Id<Customer>]");
-        IsTrue(!fixedSource.Contains("UnionId"),
-            $"Expected UnionId to be replaced but got:\n{fixedSource}");
+        await Contains(fixedSource, "[Id<Customer>]");
+        await Assert.That(!fixedSource.Contains("UnionId")).IsTrue();
     }
 
     [Test]
@@ -257,8 +255,8 @@ public class AddIdCodeFixProviderTests
         // fix now (see SIA001_OffersFixOnSourceSide_WhenTargetHasExplicitAttribute).
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute on parameter 'value'");
 
-        Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid value");
-        DoesNotContain(fixedSource, "[Id(\"Bid\")]");
+        await Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid value");
+        await DoesNotContain(fixedSource, "[Id(\"Bid\")]");
     }
 
     [Test]
@@ -282,7 +280,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Add");
 
-        Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid bidId");
+        await Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid bidId");
     }
 
     [Test]
@@ -306,8 +304,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
-        Contains(fixedSource, "System.Guid treasuryBidId");
-        DoesNotContain(fixedSource, "bidId");
+        await Contains(fixedSource, "System.Guid treasuryBidId");
+        await DoesNotContain(fixedSource, "bidId");
     }
 
     [Test]
@@ -331,8 +329,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
-        Contains(fixedSource, "public System.Guid TreasuryBidId");
-        Contains(fixedSource, "target.TreasuryBidId = Id");
+        await Contains(fixedSource, "public System.Guid TreasuryBidId");
+        await Contains(fixedSource, "target.TreasuryBidId = Id");
     }
 
     [Test]
@@ -356,8 +354,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
-        Contains(fixedSource, "public System.Guid TreasuryBidId;");
-        Contains(fixedSource, "target.TreasuryBidId = Id");
+        await Contains(fixedSource, "public System.Guid TreasuryBidId;");
+        await Contains(fixedSource, "target.TreasuryBidId = Id");
     }
 
     [Test]
@@ -392,8 +390,8 @@ public class AddIdCodeFixProviderTests
         var built = actions.ToImmutable();
         // Both sides have explicit attributes, so only "Change attribute" fixes are
         // offered (no rename variants) — one per side.
-        AreEqual(2, built.Length);
-        IsTrue(built.All(_ => _.Title.StartsWith("Change attribute", StringComparison.Ordinal)));
+        await Assert.That(built.Length).IsEqualTo(2);
+        await Assert.That(built.All(_ => _.Title.StartsWith("Change attribute", StringComparison.Ordinal))).IsTrue();
     }
 
     [Test]
@@ -424,8 +422,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
-        Contains(fixedSource, "System.Guid treasuryBidId");
-        DoesNotContain(fixedSource, "orderId");
+        await Contains(fixedSource, "System.Guid treasuryBidId");
+        await DoesNotContain(fixedSource, "orderId");
     }
 
     [Test]
@@ -453,7 +451,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute");
 
-        Contains(fixedSource, "[Id<TreasuryBid>] System.Guid value");
+        await Contains(fixedSource, "[Id<TreasuryBid>] System.Guid value");
     }
 
     [Test]
@@ -477,9 +475,7 @@ public class AddIdCodeFixProviderTests
             """;
 
         var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
-        IsTrue(
-            titles.Any(_ => _ == "Add [Id(\"VariationBase\")] to parameter 'VariationId'"),
-            $"missing source-side add title, got: {string.Join(" | ", titles)}");
+        await Assert.That(titles.Any(_ => _ == "Add [Id(\"VariationBase\")] to parameter 'VariationId'")).IsTrue();
     }
 
     [Test]
@@ -503,7 +499,7 @@ public class AddIdCodeFixProviderTests
             "SIA001",
             "Add [Id(\"VariationBase\")] to parameter 'VariationId'");
 
-        Contains(fixedSource, "[Id(\"VariationBase\")] System.Guid VariationId");
+        await Contains(fixedSource, "[Id(\"VariationBase\")] System.Guid VariationId");
     }
 
     [Test]
@@ -530,12 +526,8 @@ public class AddIdCodeFixProviderTests
         var mismatchTitles = (await GetCodeActions(mismatchSource)).Select(_ => _.Title).ToArray();
         // TreasuryBid is not a type in scope here (Bid is the only declared type), so the
         // string form is used.
-        IsTrue(
-            mismatchTitles.Any(_ => _ == "Add [Id(\"TreasuryBid\")] to parameter 'orderId'"),
-            $"missing add title, got: {string.Join(" | ", mismatchTitles)}");
-        IsTrue(
-            mismatchTitles.Any(_ => _ == "Rename parameter 'orderId' to 'treasuryBidId'"),
-            $"missing rename title, got: {string.Join(" | ", mismatchTitles)}");
+        await Assert.That(mismatchTitles.Any(_ => _ == "Add [Id(\"TreasuryBid\")] to parameter 'orderId'")).IsTrue();
+        await Assert.That(mismatchTitles.Any(_ => _ == "Rename parameter 'orderId' to 'treasuryBidId'")).IsTrue();
 
         var changeSource =
             """
@@ -554,9 +546,7 @@ public class AddIdCodeFixProviderTests
             """;
 
         var changeTitles = (await GetCodeActions(changeSource)).Select(_ => _.Title).ToArray();
-        IsTrue(
-            changeTitles.Any(_ => _ == "Change attribute on parameter 'value' to [Id(\"TreasuryBid\")]"),
-            $"missing change title, got: {string.Join(" | ", changeTitles)}");
+        await Assert.That(changeTitles.Any(_ => _ == "Change attribute on parameter 'value' to [Id(\"TreasuryBid\")]")).IsTrue();
 
         var redundantSource =
             """
@@ -568,9 +558,7 @@ public class AddIdCodeFixProviderTests
             """;
 
         var redundantTitles = (await GetCodeActions(redundantSource)).Select(_ => _.Title).ToArray();
-        IsTrue(
-            redundantTitles.Any(_ => _ == "Remove redundant [Id] from property 'Id'"),
-            $"missing redundant title, got: {string.Join(" | ", redundantTitles)}");
+        await Assert.That(redundantTitles.Any(_ => _ == "Remove redundant [Id] from property 'Id'")).IsTrue();
 
         var unionSource =
             """
@@ -583,9 +571,7 @@ public class AddIdCodeFixProviderTests
 
         var unionTitles = (await GetCodeActions(unionSource)).Select(_ => _.Title).ToArray();
         // Order is a real type in the test assembly so the codefix prefers the generic form.
-        IsTrue(
-            unionTitles.Any(_ => _ == "Replace [UnionId] on property 'OrderId' with [Id<Order>]"),
-            $"missing union title, got: {string.Join(" | ", unionTitles)}");
+        await Assert.That(unionTitles.Any(_ => _ == "Replace [UnionId] on property 'OrderId' with [Id<Order>]")).IsTrue();
     }
 
     [Test]
@@ -602,9 +588,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source, "SIA005");
 
-        IsTrue(!fixedSource.Contains("[Id("),
-            $"Expected attribute to be removed but got:\n{fixedSource}");
-        Contains(fixedSource, "public System.Guid Id { get; set; }");
+        await Assert.That(!fixedSource.Contains("[Id(")).IsTrue();
+        await Contains(fixedSource, "public System.Guid Id { get; set; }");
     }
 
     [Test]
@@ -625,9 +610,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source, "SIA005");
 
-        IsTrue(!fixedSource.Contains("Id(\"Order\")"),
-            $"Expected [Id(\"Order\")] to be removed but got:\n{fixedSource}");
-        Contains(fixedSource, "Obsolete");
+        await Assert.That(!fixedSource.Contains("Id(\"Order\")")).IsTrue();
+        await Contains(fixedSource, "Obsolete");
     }
 
     [Test]
@@ -654,32 +638,26 @@ public class AddIdCodeFixProviderTests
 
         // Customer and Order are real types in the test assembly, so the codefix renders
         // both the union and per-value Id fixes in generic form.
-        IsTrue(
-            titles.Any(_ => _ == "Add [UnionId<Customer, Order>] to property 'Subject'"),
-            $"missing union title, got: {string.Join(" | ", titles)}");
-        IsTrue(
-            titles.Any(_ => _ == "Add [Id<Customer>] to property 'Subject'"),
-            $"missing Customer title, got: {string.Join(" | ", titles)}");
-        IsTrue(
-            titles.Any(_ => _ == "Add [Id<Order>] to property 'Subject'"),
-            $"missing Order title, got: {string.Join(" | ", titles)}");
+        await Assert.That(titles.Any(_ => _ == "Add [UnionId<Customer, Order>] to property 'Subject'")).IsTrue();
+        await Assert.That(titles.Any(_ => _ == "Add [Id<Customer>] to property 'Subject'")).IsTrue();
+        await Assert.That(titles.Any(_ => _ == "Add [Id<Order>] to property 'Subject'")).IsTrue();
     }
 
     [Test]
-    public void Provider_Exposes_AllFixableDiagnosticIds()
+    public async Task Provider_Exposes_AllFixableDiagnosticIds()
     {
         var ids = new AddIdCodeFixProvider().FixableDiagnosticIds.OrderBy(_ => _).ToArray();
         var expected = new[] { "SIA001", "SIA002", "SIA003", "SIA005", "SIA006" };
-        AreEqual(expected.Length, ids.Length);
+        await Assert.That(ids.Length).IsEqualTo(expected.Length);
         for (var i = 0; i < expected.Length; i++)
         {
-            AreEqual(expected[i], ids[i]);
+            await Assert.That(ids[i]).IsEqualTo(expected[i]);
         }
     }
 
     [Test]
-    public void Provider_FixAll_UsesBatchFixer() =>
-        AreSame(WellKnownFixAllProviders.BatchFixer, new AddIdCodeFixProvider().GetFixAllProvider());
+    public async Task Provider_FixAll_UsesBatchFixer() =>
+        await Assert.That(new AddIdCodeFixProvider().GetFixAllProvider()).IsSameReferenceAs(WellKnownFixAllProviders.BatchFixer);
 
     [Test]
     public async Task SIA003_UnionSource_AppliesUnionFix_GenericForm()
@@ -708,7 +686,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Add [UnionId<Customer, Order>]");
 
-        Contains(fixedSource, "[UnionId<Customer, Order>]");
+        await Contains(fixedSource, "[UnionId<Customer, Order>]");
     }
 
     [Test]
@@ -736,8 +714,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Add [UnionId(");
 
-        Contains(fixedSource, "[UnionId(\"custom-tag\", \"Order\")]");
-        DoesNotContain(fixedSource, "[UnionId<");
+        await Contains(fixedSource, "[UnionId(\"custom-tag\", \"Order\")]");
+        await DoesNotContain(fixedSource, "[UnionId<");
     }
 
     [Test]
@@ -766,8 +744,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute on parameter 'value'");
 
-        Contains(fixedSource, "[Id<TreasuryBid>] System.Guid value");
-        DoesNotContain(fixedSource, "[Id(\"TreasuryBid\")]");
+        await Contains(fixedSource, "[Id<TreasuryBid>] System.Guid value");
+        await DoesNotContain(fixedSource, "[Id(\"TreasuryBid\")]");
     }
 
     [Test]
@@ -793,8 +771,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source, "SIA002");
 
-        Contains(fixedSource, "[Id<Election>]");
-        DoesNotContain(fixedSource, "[Id(\"Election\")]");
+        await Contains(fixedSource, "[Id<Election>]");
+        await DoesNotContain(fixedSource, "[Id(\"Election\")]");
     }
 
     [Test]
@@ -814,8 +792,8 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source, "SIA002");
 
-        Contains(fixedSource, "[Id(\"NotATypeInScope\")]");
-        DoesNotContain(fixedSource, "[Id<NotATypeInScope>]");
+        await Contains(fixedSource, "[Id(\"NotATypeInScope\")]");
+        await DoesNotContain(fixedSource, "[Id<NotATypeInScope>]");
     }
 
     [Test]
@@ -843,23 +821,15 @@ public class AddIdCodeFixProviderTests
             """;
 
         var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
-        IsTrue(
-            titles.Any(_ => _ == "Change attribute on parameter 'value' to [Id<TreasuryBid>]"),
-            $"missing generic target title, got: {string.Join(" | ", titles)}");
-        IsTrue(
-            titles.Any(_ => _ == "Change attribute on property 'Id' to [Id<Bid>]"),
-            $"missing generic source title, got: {string.Join(" | ", titles)}");
+        await Assert.That(titles.Any(_ => _ == "Change attribute on parameter 'value' to [Id<TreasuryBid>]")).IsTrue();
+        await Assert.That(titles.Any(_ => _ == "Change attribute on property 'Id' to [Id<Bid>]")).IsTrue();
     }
 
-    static void Contains(string actual, string expected) =>
-        IsTrue(
-            actual.Contains(expected),
-            $"Expected fixed source to contain:\n{expected}\n\nActual:\n{actual}");
+    static async Task Contains(string actual, string expected) =>
+        await Assert.That(actual).Contains(expected);
 
-    static void DoesNotContain(string actual, string unexpected) =>
-        IsTrue(
-            !actual.Contains(unexpected),
-            $"Expected fixed source NOT to contain:\n{unexpected}\n\nActual:\n{actual}");
+    static async Task DoesNotContain(string actual, string unexpected) =>
+        await Assert.That(actual).DoesNotContain(unexpected);
 
     static Task<string> ApplyFix(string source) =>
         ApplyFix(source, id: null);

@@ -6,7 +6,6 @@ using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
 
-[TestFixture]
 public class CodeFixConsumeTests
 {
     const string IdAttributeSource =
@@ -31,7 +30,7 @@ public class CodeFixConsumeTests
     [Test]
     public async Task PackagedCodeFixProvider_AddsIdAttribute_ForSIA002()
     {
-        var (analyzer, codeFix) = LoadAnalyzerAndCodeFixFromPackage();
+        var (analyzer, codeFix) = await LoadAnalyzerAndCodeFixFromPackage();
 
         var source =
             """
@@ -52,7 +51,7 @@ public class CodeFixConsumeTests
 
         var (document, diagnostic) = await CompileAndAnalyze(source, analyzer);
 
-        AreEqual("SIA002", diagnostic.Id);
+        await Assert.That(diagnostic.Id).IsEqualTo("SIA002");
 
         var actions = ImmutableArray.CreateBuilder<CodeAction>();
         var context = new CodeFixContext(
@@ -69,29 +68,27 @@ public class CodeFixConsumeTests
         var newDoc = apply.ChangedSolution.GetDocument(document.Id)!;
         var fixedText = (await newDoc.GetTextAsync()).ToString();
 
-        IsTrue(
-            fixedText.Contains("[Id(\"Order\")]"),
-            $"Expected fix to add [Id(\"Order\")] but got:\n{fixedText}");
+        await Assert.That(fixedText.Contains("[Id(\"Order\")]")).IsTrue();
     }
 
-    static (DiagnosticAnalyzer Analyzer, CodeFixProvider CodeFix) LoadAnalyzerAndCodeFixFromPackage()
+    static async Task<(DiagnosticAnalyzer Analyzer, CodeFixProvider CodeFix)> LoadAnalyzerAndCodeFixFromPackage()
     {
-        var analyzersDir = FindAnalyzersDirectory();
+        var analyzersDir = await FindAnalyzersDirectory();
 
         var analyzerPath = Path.Combine(analyzersDir, "StrongIdAnalyzer.dll");
         var codeFixPath = Path.Combine(analyzersDir, "StrongIdAnalyzer.CodeFixes.dll");
 
-        IsTrue(File.Exists(analyzerPath), $"Analyzer DLL missing: {analyzerPath}");
-        IsTrue(File.Exists(codeFixPath), $"CodeFix DLL missing: {codeFixPath}");
+        await Assert.That(File.Exists(analyzerPath)).IsTrue();
+        await Assert.That(File.Exists(codeFixPath)).IsTrue();
 
-        var analyzerAsm = Assembly.LoadFrom(analyzerPath);
-        var codeFixAsm = Assembly.LoadFrom(codeFixPath);
+        var analyzerAsm = System.Reflection.Assembly.LoadFrom(analyzerPath);
+        var codeFixAsm = System.Reflection.Assembly.LoadFrom(codeFixPath);
 
         var analyzerType = analyzerAsm.GetType("StrongIdAnalyzer.IdMismatchAnalyzer");
         var codeFixType = codeFixAsm.GetType("StrongIdAnalyzer.AddIdCodeFixProvider");
 
-        IsNotNull(analyzerType);
-        IsNotNull(codeFixType);
+        await Assert.That(analyzerType).IsNotNull();
+        await Assert.That(codeFixType).IsNotNull();
 
         var analyzer = (DiagnosticAnalyzer)Activator.CreateInstance(analyzerType!)!;
         var codeFix = (CodeFixProvider)Activator.CreateInstance(codeFixType!)!;
@@ -99,7 +96,7 @@ public class CodeFixConsumeTests
         return (analyzer, codeFix);
     }
 
-    static string FindAnalyzersDirectory()
+    static async Task<string> FindAnalyzersDirectory()
     {
         var root = Environment.GetEnvironmentVariable("NUGET_PACKAGES")
             ?? Path.Combine(
@@ -110,13 +107,13 @@ public class CodeFixConsumeTests
         // AnalyzerPackageVersion is injected by the csproj via AssemblyMetadata, pinned to
         // $(Version). Scanning the package folder by name isn't enough — stale versions from
         // earlier local builds could sort above the current one lexically.
-        var version = Assembly.GetExecutingAssembly()
+        var version = System.Reflection.Assembly.GetExecutingAssembly()
             .GetCustomAttributes<AssemblyMetadataAttribute>()
             .Single(_ => _.Key == "AnalyzerPackageVersion")
             .Value!;
 
         var versionDir = Path.Combine(root, "strongidanalyzer", version);
-        IsTrue(Directory.Exists(versionDir), $"Expected package directory missing: {versionDir}");
+        await Assert.That(Directory.Exists(versionDir)).IsTrue();
 
         return Path.Combine(versionDir, "analyzers", "dotnet", "cs");
     }
