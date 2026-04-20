@@ -36,7 +36,7 @@ public class IndexTests
                 [AttributeUsage(
                     AttributeTargets.Property | AttributeTargets.Field |
                     AttributeTargets.Parameter | AttributeTargets.ReturnValue,
-                    AllowMultiple = false, Inherited = false)]
+                    Inherited = false)]
                 internal sealed class IdAttribute(string type) : Attribute;
             }
             public class Vault
@@ -84,7 +84,7 @@ public class IndexTests
                 [AttributeUsage(
                     AttributeTargets.Property | AttributeTargets.Field |
                     AttributeTargets.Parameter | AttributeTargets.ReturnValue,
-                    AllowMultiple = false, Inherited = false)]
+                    Inherited = false)]
                 internal sealed class IdAttribute(string type) : Attribute;
             }
             public class Vault
@@ -127,7 +127,7 @@ public class IndexTests
                 [AttributeUsage(
                     AttributeTargets.Property | AttributeTargets.Field |
                     AttributeTargets.Parameter | AttributeTargets.ReturnValue,
-                    AllowMultiple = false, Inherited = false)]
+                    Inherited = false)]
                 internal sealed class IdAttribute(string type) : Attribute;
             }
             public class Vault
@@ -178,7 +178,7 @@ public class IndexTests
                 [AttributeUsage(
                     AttributeTargets.Property | AttributeTargets.Field |
                     AttributeTargets.Parameter | AttributeTargets.ReturnValue,
-                    AllowMultiple = false, Inherited = false)]
+                    Inherited = false)]
                 internal sealed class IdAttribute(string type) : Attribute;
             }
             public class Vault
@@ -227,7 +227,7 @@ public class IndexTests
                 [AttributeUsage(
                     AttributeTargets.Property | AttributeTargets.Field |
                     AttributeTargets.Parameter | AttributeTargets.ReturnValue,
-                    AllowMultiple = false, Inherited = false)]
+                    Inherited = false)]
                 internal sealed class IdAttribute(string type) : Attribute;
             }
             public class Vault
@@ -274,7 +274,7 @@ public class IndexTests
                 [AttributeUsage(
                     AttributeTargets.Property | AttributeTargets.Field |
                     AttributeTargets.Parameter | AttributeTargets.ReturnValue,
-                    AllowMultiple = false, Inherited = false)]
+                    Inherited = false)]
                 internal sealed class IdAttribute(string type) : Attribute;
             }
             public interface ICustomer

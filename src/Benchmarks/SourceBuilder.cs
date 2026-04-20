@@ -11,7 +11,8 @@ namespace StrongIdAnalyzer.Benchmarks;
 // let us skip.
 static class SourceBuilder
 {
-    public const string LibrarySource = """
+    public const string LibrarySource =
+        """
         using System;
 
         namespace StrongIdAnalyzer
@@ -21,7 +22,6 @@ static class SourceBuilder
                 AttributeTargets.Field |
                 AttributeTargets.Parameter |
                 AttributeTargets.ReturnValue,
-                AllowMultiple = false,
                 Inherited = false)]
             internal sealed class IdAttribute(string type) : Attribute
             {

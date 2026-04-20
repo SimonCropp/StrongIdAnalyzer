@@ -78,7 +78,7 @@ public class IdMismatchAnalyzerTests
     public async Task GenericIdAttribute_Matching_NoDiagnostic()
     {
         var source = """
-            public class Customer {}
+            public class Customer;
             public class Target
             {
                 public void Consume([Id<Customer>] System.Guid value) { }
@@ -101,8 +101,8 @@ public class IdMismatchAnalyzerTests
     public async Task GenericIdAttribute_Mismatch_ReportsSIA001()
     {
         var source = """
-            public class Customer {}
-            public class Order {}
+            public class Customer;
+            public class Order;
             public class Target
             {
                 public void Consume([Id<Order>] System.Guid value) { }
@@ -131,7 +131,7 @@ public class IdMismatchAnalyzerTests
         // Source uses the generic form, target uses the string form — they must resolve
         // to the same tag and not produce a mismatch.
         var source = """
-            public class Customer {}
+            public class Customer;
             public class Target
             {
                 public void Consume([Id("Customer")] System.Guid value) { }
@@ -154,8 +154,8 @@ public class IdMismatchAnalyzerTests
     public async Task GenericUnionIdAttribute_SourceInOptions_NoDiagnostic()
     {
         var source = """
-            public class Customer {}
-            public class Order {}
+            public class Customer;
+            public class Order;
             public class Target
             {
                 public void Consume([UnionId<Customer, Order>] System.Guid value) { }
@@ -178,9 +178,9 @@ public class IdMismatchAnalyzerTests
     public async Task GenericUnionIdAttribute_SourceNotInOptions_ReportsSIA001()
     {
         var source = """
-            public class Customer {}
-            public class Order {}
-            public class Product {}
+            public class Customer;
+            public class Order;
+            public class Product;
             public class Target
             {
                 public void Consume([UnionId<Customer, Order>] System.Guid value) { }
@@ -204,11 +204,11 @@ public class IdMismatchAnalyzerTests
     public async Task GenericUnionIdAttribute_FiveArgs_NoDiagnostic()
     {
         var source = """
-            public class A {}
-            public class B {}
-            public class C {}
-            public class D {}
-            public class E {}
+            public class A;
+            public class B;
+            public class C;
+            public class D;
+            public class E;
             public class Target
             {
                 public void Consume([UnionId<A, B, C, D, E>] System.Guid value) { }
@@ -231,8 +231,8 @@ public class IdMismatchAnalyzerTests
     public async Task GenericUnionIdAttribute_EquivalentToStringForm()
     {
         var source = """
-            public class Customer {}
-            public class Order {}
+            public class Customer;
+            public class Order;
             public class Target
             {
                 public void Consume([UnionId("Customer", "Order")] System.Guid value) { }
@@ -255,8 +255,8 @@ public class IdMismatchAnalyzerTests
     public async Task DerivedTagFlowsToBaseTarget_NoDiagnostic()
     {
         var source = """
-            public abstract class ProgramBillBase {}
-            public class ProgramBill : ProgramBillBase {}
+            public abstract class ProgramBillBase;
+            public class ProgramBill : ProgramBillBase;
             public class Target
             {
                 public void Consume([Id("ProgramBillBase")] System.Guid value) { }
@@ -280,9 +280,10 @@ public class IdMismatchAnalyzerTests
     {
         // Opposite direction of covariance: a base-tagged value must NOT silently flow
         // into a derived-tagged target. Only the source side widens.
-        var source = """
-            public abstract class ProgramBillBase {}
-            public class ProgramBill : ProgramBillBase {}
+        var source =
+            """
+            public abstract class ProgramBillBase;
+            public class ProgramBill : ProgramBillBase;
             public class Target
             {
                 public void Consume([Id("ProgramBill")] System.Guid value) { }
@@ -305,9 +306,10 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task InterfaceTagFlowsFromImplementingTag_NoDiagnostic()
     {
-        var source = """
-            public interface IBill {}
-            public class ProgramBill : IBill {}
+        var source =
+            """
+            public interface IBill;
+            public class ProgramBill : IBill;
             public class Target
             {
                 public void Consume([Id("IBill")] System.Guid value) { }
@@ -356,10 +358,11 @@ public class IdMismatchAnalyzerTests
     {
         // Confirms the base walk traverses more than one level — a three-deep chain still
         // widens the source tag all the way up to the grandbase.
-        var source = """
-            public abstract class Root {}
-            public abstract class Middle : Root {}
-            public class Leaf : Middle {}
+        var source =
+            """
+            public abstract class Root;
+            public abstract class Middle : Root;
+            public class Leaf : Middle;
             public class Target
             {
                 public void Consume([Id("Root")] System.Guid value) { }

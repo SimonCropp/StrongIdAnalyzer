@@ -14,7 +14,6 @@ public class AddIdCodeFixProviderTests
             AttributeTargets.Field |
             AttributeTargets.Parameter |
             AttributeTargets.ReturnValue,
-            AllowMultiple = false,
             Inherited = false)]
         sealed class IdAttribute(string type) : Attribute;
 
@@ -23,7 +22,6 @@ public class AddIdCodeFixProviderTests
             AttributeTargets.Field |
             AttributeTargets.Parameter |
             AttributeTargets.ReturnValue,
-            AllowMultiple = false,
             Inherited = false)]
         sealed class UnionIdAttribute(params string[] types) : Attribute;
 
@@ -32,7 +30,6 @@ public class AddIdCodeFixProviderTests
             AttributeTargets.Field |
             AttributeTargets.Parameter |
             AttributeTargets.ReturnValue,
-            AllowMultiple = false,
             Inherited = false)]
         sealed class IdAttribute<T> : Attribute;
 
@@ -41,7 +38,6 @@ public class AddIdCodeFixProviderTests
             AttributeTargets.Field |
             AttributeTargets.Parameter |
             AttributeTargets.ReturnValue,
-            AllowMultiple = false,
             Inherited = false)]
         sealed class UnionIdAttribute<T1, T2> : Attribute;
         """;
@@ -49,7 +45,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA002_AddsAttributeToSourceProperty()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public void Consume([Id("Order")] System.Guid value) { }
@@ -72,7 +69,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA002_AddsAttributeToSourceField()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid Field;
@@ -92,7 +90,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA002_AddsAttributeToSourceParameter()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public static void Consume([Id("Order")] System.Guid value) { }
@@ -109,7 +108,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA003_AddsAttributeToTargetParameter()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public static void Consume(System.Guid value) { }
@@ -131,7 +131,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA003_AddsAttributeToTargetProperty()
     {
-        var source = """
+        var source =
+            """
             public class Target
             {
                 public System.Guid Value { get; set; }
@@ -154,7 +155,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA002_BinaryEquality_AddsAttributeToUntaggedSide()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid OrderId { get; set; }
@@ -174,7 +176,8 @@ public class AddIdCodeFixProviderTests
     [Test]
     public async Task SIA002_CustomIdValue()
     {
-        var source = """
+        var source =
+            """
             public class Holder
             {
                 public System.Guid Value { get; set; }

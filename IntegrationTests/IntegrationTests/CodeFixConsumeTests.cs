@@ -19,7 +19,6 @@ public class CodeFixConsumeTests
             AttributeTargets.Field |
             AttributeTargets.Parameter |
             AttributeTargets.ReturnValue,
-            AllowMultiple = false,
             Inherited = false)]
         internal sealed class IdAttribute(string type) : Attribute;
         """;
