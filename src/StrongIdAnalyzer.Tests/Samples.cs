@@ -9,8 +9,12 @@
 #pragma warning disable CS0414
 #pragma warning disable CA1822
 #pragma warning disable CA1002
-
 #pragma warning disable SIA001
+#pragma warning disable SIA002
+#pragma warning disable SIA003
+#pragma warning disable SIA004
+#pragma warning disable SIA005
+
 #region BuggyExample
 
 public class Customer
@@ -44,7 +48,6 @@ public static class BuggyUsage
 }
 
 #endregion
-#pragma warning restore SIA001
 
 #region SilentMismatch
 
@@ -111,10 +114,7 @@ public static class FixedUsage
 {
     public static decimal Run(TypedOrderService service, TypedOrder order) =>
         // Compile-time SIA001: passing a [Id("Customer")] Guid to an [Id("Order")] parameter.
-        // disabled so the sample code will build
-#pragma warning disable SIA001
         service.GetOrderAmount(order.CustomerId);
-#pragma warning restore SIA001
 }
 
 #endregion
@@ -130,9 +130,7 @@ public class SIA001Sample
 
     public void Trigger() =>
         // SIA001: argument tagged [Id("Customer")] passed to parameter tagged [Id("Order")].
-#pragma warning disable SIA001
         ProcessOrder(CustomerId);
-#pragma warning restore SIA001
 }
 
 #endregion
@@ -149,9 +147,7 @@ public class SIA002Sample
     public void Trigger() =>
         // SIA002: Raw has no [Id] but is passed to an [Id("Order")] parameter.
         // Code fix: add [Id("Order")] to Raw's declaration.
-#pragma warning disable SIA002
         ProcessOrder(Raw);
-#pragma warning restore SIA002
 }
 
 #endregion
@@ -168,9 +164,7 @@ public class SIA003Sample
     public void Trigger() =>
         // SIA003: OrderId is [Id("Order")] but Consume's parameter has no [Id].
         // Code fix: add [Id("Order")] to Consume's value parameter.
-#pragma warning disable SIA003
         Consume(OrderId);
-#pragma warning restore SIA003
 }
 
 #endregion
@@ -180,9 +174,7 @@ public class SIA003Sample
 namespace InheritanceAbstractClassExplicit
 {
     // Explicit [Id(...)] values match what the convention would infer, so SIA005
-    // would warn on each one. Suppressed here because the whole point of this
-    // snippet is to spell out each tag by hand.
-#pragma warning disable SIA005
+    // would warn on each one.
     public abstract class Base
     {
         [Id("Base")]
@@ -200,7 +192,6 @@ namespace InheritanceAbstractClassExplicit
         [Id("Child2")]
         public override Guid Id { get; set; }
     }
-#pragma warning restore SIA005
 
     public static class Usage
     {
@@ -213,10 +204,8 @@ namespace InheritanceAbstractClassExplicit
             Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
-#pragma warning disable SIA001
             // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
             Foo(child2.Id, child2.Id);
-#pragma warning restore SIA001
         }
     }
 }
@@ -229,8 +218,7 @@ namespace InheritanceAbstractClassConvention
 {
     // SIA004 fires because Base/Child1/Child2 also exist in the interface-convention
     // scenario below; in real code this would never happen because there's only one
-    // definition per name. Suppressed here so the snippets can showcase every shape.
-#pragma warning disable SIA004
+    // definition per name.
     public abstract class Base
     {
         public abstract Guid Id { get; set; }
@@ -245,7 +233,6 @@ namespace InheritanceAbstractClassConvention
     {
         public override Guid Id { get; set; }
     }
-#pragma warning restore SIA004
 
     public static class Usage
     {
@@ -258,10 +245,8 @@ namespace InheritanceAbstractClassConvention
             Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
-#pragma warning disable SIA001
             // SIA001 on arg 1: convention gives {"Child2","Base"}
             Foo(child2.Id, child2.Id);
-#pragma warning restore SIA001
         }
     }
 }
@@ -272,7 +257,6 @@ namespace InheritanceAbstractClassConvention
 
 namespace InheritanceInterfaceExplicit
 {
-#pragma warning disable SIA005
     public interface Base
     {
         [Id("Base")]
@@ -290,7 +274,6 @@ namespace InheritanceInterfaceExplicit
         [Id("Child2")]
         public Guid Id { get; set; }
     }
-#pragma warning restore SIA005
 
     public static class Usage
     {
@@ -303,10 +286,8 @@ namespace InheritanceInterfaceExplicit
             Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
-#pragma warning disable SIA001
             // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
             Foo(child2.Id, child2.Id);
-#pragma warning restore SIA001
         }
     }
 }
@@ -319,7 +300,6 @@ namespace InheritanceInterfaceConvention
 {
     // See the note on InheritanceAbstractClassConvention — same name-collision
     // suppression rationale.
-#pragma warning disable SIA004
     public interface Base
     {
         Guid Id { get; set; }
@@ -334,7 +314,6 @@ namespace InheritanceInterfaceConvention
     {
         public Guid Id { get; set; }
     }
-#pragma warning restore SIA004
 
     public static class Usage
     {
@@ -347,10 +326,8 @@ namespace InheritanceInterfaceConvention
             Foo(child1.Id, child1.Id);
 
             var child2 = new Child2();
-#pragma warning disable SIA001
             // SIA001 on arg 1: {"Child2","Base"} is missing "Child1"
             Foo(child2.Id, child2.Id);
-#pragma warning restore SIA001
         }
     }
 }
