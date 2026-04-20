@@ -6,7 +6,7 @@ environment:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
 build_script:
 - appveyor DownloadFile https://dot.net/v1/dotnet-install.ps1
-- pwsh: ./dotnet-install.ps1 -JSonFile src/global.json -Architecture x64 -InstallDir 'C:\Program Files\dotnet'
+- pwsh: ./dotnet-install.ps1 -JSonFile global.json -Architecture x64 -InstallDir 'C:\Program Files\dotnet'
 - dotnet build src --configuration Release
 - dotnet build IntegrationTests --configuration Release
 - src\StrongIdAnalyzer.Tests\bin\Release\net10.0\StrongIdAnalyzer.Tests.exe --report-trx --results-directory TestResults --coverage --coverage-output-format cobertura --coverage-output TestResults\unit.cobertura.xml
