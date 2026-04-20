@@ -10,6 +10,7 @@
 #pragma warning disable CA1822
 #pragma warning disable CA1002
 
+#pragma warning disable SIA001
 #region BuggyExample
 
 public class Customer
@@ -39,13 +40,11 @@ public static class BuggyUsage
 {
     public static decimal Run(OrderService service, Order order) =>
         // BUG: Passing CustomerId where OrderId is expected.
-        // With conventions both sides carry inferred tags, so this is SIA001.
-#pragma warning disable SIA001
         service.GetOrderAmount(order.CustomerId);
-#pragma warning restore SIA001
 }
 
 #endregion
+#pragma warning restore SIA001
 
 #region SilentMismatch
 
