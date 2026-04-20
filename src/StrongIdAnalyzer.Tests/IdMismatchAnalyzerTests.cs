@@ -2867,6 +2867,468 @@ public class IdMismatchAnalyzerTests
         AreEqual("SIA001", diagnostics[0].Id);
     }
 
+    [Test]
+    public async Task LinqSelect_ExpressionBodiedLambda_UsesTaggedInvocation()
+    {
+        // Expression-bodied `Select(x => TaggedMethod(x))` — the lambda body resolves to
+        // a tagged invocation, and that tag should become the new element tag flowing
+        // out of the Select. No identity, no method group — the "tagged body" arm of
+        // GetSelectElementTags.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public IEnumerable<Guid> Values { get; set; } = null!;
+
+                [Id("Product")]
+                public Guid Target { get; set; }
+
+                [return: Id("Customer")]
+                private static Guid Echo([Id("Customer")] Guid v) => v;
+
+                public void Copy() => Target = Values.Select(x => Echo(x)).First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+        IsTrue(diagnostics[0].GetMessage().Contains("Customer"));
+        IsTrue(diagnostics[0].GetMessage().Contains("Product"));
+    }
+
+    [Test]
+    public async Task CollectionTag_DoesNotLeakAsScalar_PassedToUntaggedCollectionParam()
+    {
+        // Direct assertion for SuppressCollectionTag: a [Id]-tagged collection passed
+        // into a user-owned untagged IEnumerable parameter must not fire SIA003.
+        // The tag on a collection-typed member is an element tag, not a scalar tag,
+        // and the receiver slot of a LINQ-shape extension is itself a collection.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public IEnumerable<Guid> Values { get; set; } = null!;
+
+                public void Accept(IEnumerable<Guid> list) { }
+
+                public void Go() => Accept(Values);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public async Task ArrayIndexer_ElementAccess_InheritsElementTag()
+    {
+        // Direct `arr[i]` — exercises IArrayElementReferenceOperation through
+        // GetAccessInfo, which defers to GetReceiverElementTags on the array ref.
+        var source = """
+            using System;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public Guid[] Values { get; set; } = null!;
+
+                public void ConsumeOrder([Id("Order")] Guid value) { }
+
+                public void Go() => ConsumeOrder(Values[0]);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [TestCase("Single")]
+    [TestCase("SingleOrDefault")]
+    [TestCase("Last")]
+    [TestCase("LastOrDefault")]
+    [TestCase("ElementAt")]
+    [TestCase("FirstOrDefault")]
+    public async Task LinqElementReturning_AllNamedMethods_SurfaceElementTag(string methodName)
+    {
+        // `.ElementAt(0)` takes an int; the other operators in this case list are
+        // parameterless. Supply a literal argument that satisfies either overload —
+        // the extra int arg is ignored by Single/First/etc. because they accept
+        // predicate overloads, so use the bare form unless the method needs an index.
+        var call = methodName == "ElementAt"
+            ? $"{methodName}(0)"
+            : $"{methodName}()";
+
+        var source = $$"""
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public IEnumerable<Guid> Values { get; set; } = null!;
+
+                [Id("Order")]
+                public Guid Target { get; set; }
+
+                public void Copy() => Target = Values.{{call}};
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [TestCase("OrderBy(x => x)")]
+    [TestCase("Take(5)")]
+    [TestCase("Skip(2)")]
+    [TestCase("Distinct()")]
+    [TestCase("Reverse()")]
+    [TestCase("ToList()")]
+    [TestCase("ToArray()")]
+    [TestCase("ToHashSet()")]
+    [TestCase("AsEnumerable()")]
+    [TestCase("Append(System.Guid.Empty)")]
+    [TestCase("Prepend(System.Guid.Empty)")]
+    public async Task LinqElementPreserving_ChainPropagatesElementTag(string call)
+    {
+        var source = $$"""
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public IEnumerable<Guid> Values { get; set; } = null!;
+
+                [Id("Order")]
+                public Guid Target { get; set; }
+
+                public void Copy() => Target = Values.{{call}}.First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public async Task UserDefinedExtension_StaticFormCall_PropagatesTag()
+    {
+        // `Paged.TakePage(values, 0, 10)` — unreduced form, method.ReducedFrom is null,
+        // Parameters[0] already includes the receiver slot. Hits the `?? method` arm of
+        // GetExtensionReceiverType.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public static class Paged
+            {
+                public static IEnumerable<T> TakePage<T>(this IEnumerable<T> source, int page, int size) =>
+                    source.Skip(page * size).Take(size);
+            }
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public IEnumerable<Guid> Values { get; set; } = null!;
+
+                [Id("Order")]
+                public Guid Target { get; set; }
+
+                public void Copy() => Target = Paged.TakePage(Values, 0, 10).First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public async Task UnionIdOnCollection_ElementInheritsAnyOption()
+    {
+        // `[UnionId("A","B")] IEnumerable<Guid>` — the element carries both tags, so
+        // passing an element into a parameter tagged "A" alone matches, while "C"
+        // mismatches.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Holder
+            {
+                [UnionId("Customer", "Admin")]
+                public IEnumerable<Guid> Values { get; set; } = null!;
+
+                public void AcceptCustomer([Id("Customer")] Guid value) { }
+                public void AcceptProduct([Id("Product")] Guid value) { }
+
+                public void Go()
+                {
+                    foreach (var id in Values)
+                    {
+                        AcceptCustomer(id);
+                        AcceptProduct(id);
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+        IsTrue(diagnostics[0].GetMessage().Contains("Product"));
+    }
+
+    [Test]
+    public async Task CollectionMember_ConventionTag_DoesNotApply()
+    {
+        // The convention-tagging rule (`Id` / `XxxId`) is deliberately skipped for
+        // collection-typed members — `CustomerIds` does NOT pick up a "Customer" tag
+        // just because of its name, since the analyzer can't prove the name refers to
+        // the element vs. the container. Without that guard, passing `ids.First()` to
+        // an Order-tagged parameter would produce a spurious SIA001.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Holder
+            {
+                public IEnumerable<Guid> CustomerIds { get; set; } = null!;
+
+                public void AcceptOrder([Id("Order")] Guid value) { }
+
+                public void Go() => AcceptOrder(CustomerIds.First());
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
+    [Test]
+    public async Task ForEach_OverArray_InheritsElementTag()
+    {
+        var source = """
+            using System;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public Guid[] Values { get; set; } = null!;
+
+                public void ConsumeOrder([Id("Order")] Guid value) { }
+
+                public void Go()
+                {
+                    foreach (var id in Values)
+                    {
+                        ConsumeOrder(id);
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public async Task InheritedTag_CollectionOnInterface_FlowsIntoLambda()
+    {
+        // Interface declares the [Id] on an IEnumerable<Guid>. Implementation doesn't
+        // repeat the attribute. A LINQ lambda bound via the impl's static type should
+        // still see "Customer" on the element.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public interface ICustomers
+            {
+                [Id("Customer")]
+                IEnumerable<Guid> Ids { get; }
+            }
+
+            public class Impl : ICustomers
+            {
+                public IEnumerable<Guid> Ids { get; set; } = null!;
+            }
+
+            public class Holder
+            {
+                public void ConsumeOrder([Id("Order")] Guid value) { }
+
+                public void Go(Impl impl) =>
+                    impl.Ids.Select(id => { ConsumeOrder(id); return id; }).ToList();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public async Task InheritedTag_CollectionOnAbstractBase_ForeachOverDerived()
+    {
+        // Abstract base declares [Id] on a virtual collection property; derived class
+        // overrides without re-declaring the attribute. foreach over the derived view
+        // should still see the base's tag on the element.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+
+            public abstract class Base
+            {
+                [Id("Customer")]
+                public abstract IEnumerable<Guid> Ids { get; }
+            }
+
+            public class Derived : Base
+            {
+                public override IEnumerable<Guid> Ids => [];
+            }
+
+            public class Holder
+            {
+                public void ConsumeOrder([Id("Order")] Guid value) { }
+
+                public void Go(Derived derived)
+                {
+                    foreach (var id in derived.Ids)
+                    {
+                        ConsumeOrder(id);
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public async Task InheritedTag_ReturnIdOnInterfaceMethod_FlowsThroughImpl()
+    {
+        // [return: Id] on an interface method returning IEnumerable<T>. The
+        // implementation has no attribute; element-flow through `.First()` on the
+        // impl's result should still pick up the interface's tag.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public interface ISource
+            {
+                [return: Id("Customer")]
+                IEnumerable<Guid> Load();
+            }
+
+            public class Impl : ISource
+            {
+                public IEnumerable<Guid> Load() => [];
+            }
+
+            public class Holder
+            {
+                [Id("Order")]
+                public Guid Target { get; set; }
+
+                public void Copy(Impl impl) => Target = impl.Load().First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public async Task InheritedTag_RecordPrimaryCtorParameterOnCollection()
+    {
+        // [Id] written on a record primary-ctor parameter whose type is a collection.
+        // The compiler attaches the attribute to the parameter (default target); the
+        // synthesized property needs the bridging logic to surface it for element flow.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public record Snapshot([Id("Customer")] IEnumerable<Guid> Values);
+
+            public class Holder
+            {
+                [Id("Order")]
+                public Guid Target { get; set; }
+
+                public void Copy(Snapshot s) => Target = s.Values.First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(1, diagnostics.Length);
+        AreEqual("SIA001", diagnostics[0].Id);
+    }
+
+    [Test]
+    public async Task LinqSelect_ChangingElementType_DropsTag_NoChainLeak()
+    {
+        // `.Select(id => id.ToString())` changes element type Guid → string.
+        // Element tag drops at the Select boundary; the `.First()` result is an
+        // untagged string, so no spurious SIA fires when it flows into an untagged
+        // user-owned string target.
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public IEnumerable<Guid> Values { get; set; } = null!;
+
+                public string Target { get; set; } = "";
+
+                public void Copy() => Target = Values.Select(id => id.ToString()).First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        AreEqual(0, diagnostics.Length);
+    }
+
     static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string messagesSource,
         string consumerSource)

@@ -1263,12 +1263,60 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return IdInfo.Unknown;
         }
 
-        if (symbol is IMethodSymbol method)
+        return GetExplicitCollectionTags(symbol, config);
+    }
+
+    // Resolve `[Id]` / `[UnionId]` attributes for a collection-typed symbol, walking
+    // the override and interface-implementation chain so an interface-declared tag
+    // flows through its implementations. Convention tagging (name-based) is
+    // deliberately skipped — a collection-typed member whose name happens to match
+    // the `Id` / `XxxId` convention would spuriously acquire a tag that no caller
+    // can opt out of.
+    static IdInfo GetExplicitCollectionTags(ISymbol symbol, Config config)
+    {
+        if (TryGetFromIndex(symbol, config, out var indexed))
         {
-            return GetIdFromAttributes(method.GetReturnTypeAttributes());
+            return indexed.IsDefaultOrEmpty ? IdInfo.NotPresent : IdInfo.Present(indexed);
         }
 
-        return GetIdFromAttributes(symbol.GetAttributes());
+        if (symbol is IMethodSymbol method)
+        {
+            return GetReturnInfo(method, config);
+        }
+
+        var direct = GetIdFromAttributes(symbol.GetAttributes());
+        if (direct.State == IdState.Present)
+        {
+            return direct;
+        }
+
+        if (symbol is IPropertySymbol property)
+        {
+            var inherited = GetPropertyIdFromHierarchy(property);
+            if (inherited.State == IdState.Present)
+            {
+                return inherited;
+            }
+
+            if (FindRecordPrimaryParameter(property) is { } recordParameter)
+            {
+                var fromParameter = GetIdFromAttributes(recordParameter.GetAttributes());
+                if (fromParameter.State == IdState.Present)
+                {
+                    return fromParameter;
+                }
+            }
+        }
+        else if (symbol is IParameterSymbol parameter)
+        {
+            var inherited = GetParameterIdFromHierarchy(parameter);
+            if (inherited.State == IdState.Present)
+            {
+                return inherited;
+            }
+        }
+
+        return IdInfo.NotPresent;
     }
 
     // Select/SelectMany can preserve, transform, or drop the tag depending on the
