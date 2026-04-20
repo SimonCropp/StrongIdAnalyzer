@@ -644,6 +644,22 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public void Provider_Exposes_AllFixableDiagnosticIds()
+    {
+        var ids = new AddIdCodeFixProvider().FixableDiagnosticIds.OrderBy(_ => _).ToArray();
+        var expected = new[] { "SIA001", "SIA002", "SIA003", "SIA005", "SIA006" };
+        AreEqual(expected.Length, ids.Length);
+        for (var i = 0; i < expected.Length; i++)
+        {
+            AreEqual(expected[i], ids[i]);
+        }
+    }
+
+    [Test]
+    public void Provider_FixAll_UsesBatchFixer() =>
+        AreSame(WellKnownFixAllProviders.BatchFixer, new AddIdCodeFixProvider().GetFixAllProvider());
+
+    [Test]
     public async Task SIA003_UnionSource_AppliesUnionFix_GenericForm()
     {
         // Companion to SIA003_UnionSource_OffersUnionAndPerValueFixes, which only
