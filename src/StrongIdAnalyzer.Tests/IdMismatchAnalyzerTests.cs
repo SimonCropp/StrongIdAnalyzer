@@ -2553,6 +2553,228 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task SIA006_SingletonEmptyString_NoDiagnostic()
+    {
+        // `[UnionId("")]` is caught by SIA007 (empty tag is an error). SIA006
+        // "singleton should be Id" would just recommend trading one invalid
+        // shape for another, so it stays silent here.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [UnionId("")]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        var sia006 = diagnostics.Where(_ => _.Id == "SIA006").ToArray();
+        await Assert.That(sia006.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task SIA007_EmptyIdTag_FiresError()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("")]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+        var sia007 = diagnostics.Where(_ => _.Id == "SIA007").ToArray();
+
+        await Assert.That(sia007.Length).IsEqualTo(1);
+        await Assert.That(sia007[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
+    }
+
+    [Test]
+    public async Task SIA007_WhitespaceIdTag_FiresError()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id(" ")]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+        var sia007 = diagnostics.Where(_ => _.Id == "SIA007").ToArray();
+
+        await Assert.That(sia007.Length).IsEqualTo(1);
+        await Assert.That(sia007[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
+    }
+
+    [Test]
+    public async Task SIA007_EmptyUnionOption_FiresError()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [UnionId("")]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+        var sia007 = diagnostics.Where(_ => _.Id == "SIA007").ToArray();
+
+        await Assert.That(sia007.Length).IsEqualTo(1);
+        await Assert.That(sia007[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
+    }
+
+    [Test]
+    public async Task SIA007_EmptyUnion_FiresError()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [UnionId()]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+        var sia007 = diagnostics.Where(_ => _.Id == "SIA007").ToArray();
+
+        await Assert.That(sia007.Length).IsEqualTo(1);
+        await Assert.That(sia007[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
+    }
+
+    [Test]
+    public async Task SIA007_UnionWithOneEmpty_FiresError()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [UnionId("", "Customer")]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+        var sia007 = diagnostics.Where(_ => _.Id == "SIA007").ToArray();
+
+        await Assert.That(sia007.Length).IsEqualTo(1);
+        await Assert.That(sia007[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
+    }
+
+    [Test]
+    public async Task SIA007_UnionWithOneWhitespace_FiresError()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [UnionId(" ", "Customer")]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+        var sia007 = diagnostics.Where(_ => _.Id == "SIA007").ToArray();
+
+        await Assert.That(sia007.Length).IsEqualTo(1);
+        await Assert.That(sia007[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
+    }
+
+    [Test]
+    public async Task SIA007_NonEmptyTags_NoDiagnostic()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public Guid One { get; set; }
+
+                [UnionId("Customer", "Order")]
+                public Guid Two { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Count(_ => _.Id == "SIA007")).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task SIA006_EmptyUnion_NoDiagnostic()
+    {
+        // Regression: `[UnionId()]` (params array, zero values) previously tripped
+        // the singleton path — the analyzer's length check was `> 1` (skip), so
+        // length 0 fell through to "has only one option" with an empty "" value
+        // and a codefix that produced `[Id("")]`. Only the exact length-1 case
+        // is a collapsible singleton; zero-option unions should stay silent.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [UnionId()]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        var sia006 = diagnostics.Where(_ => _.Id == "SIA006").ToArray();
+        await Assert.That(sia006.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task SIA005_MultiDeclaratorField_DoesNotFireRedundant()
+    {
+        // Regression: `[Id("Customer")] Guid CustomerId, OrderId;` applies to
+        // BOTH declarators. The per-symbol SIA005 check fires only for
+        // `CustomerId` (whose convention name matches the tag), and the codefix
+        // strips the shared attribute — silently switching `OrderId` from the
+        // explicit "Customer" tag to the "Order" value its name convention
+        // implies. Multi-declarator fields must be skipped.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public Guid CustomerId, OrderId;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+        await Assert.That(sia005.Length).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task AnonymousType_WriteIntoAnonProperty_IsSilent()
     {
         // Writes into anon-type properties have no fix site (anon members can't carry
