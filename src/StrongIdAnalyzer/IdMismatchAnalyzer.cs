@@ -2308,6 +2308,24 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
+            // Param-name ↔ property-name correspondence: a parameter whose name maps
+            // (first-char-upper) to the target property's name is the obvious carrier
+            // for that property's value. The user has already expressed the binding
+            // through naming — requiring an extra `[Id("X")]` on the parameter would be
+            // noise. Covers primary-ctor `Tenant(string id) { Id { get; } = id; }`,
+            // regular-ctor `Tenant(string id) => Id = id;`, and trivial setters
+            // `void Reset(string id) => Id = id;` uniformly.
+            //
+            // Tag mismatches via an explicit attribute on the parameter aren't silenced
+            // here — those flow through the SIA001 branch above (source is Present),
+            // not this one (source is NotPresent).
+            if (sourceSymbol is IParameterSymbol parameter &&
+                targetSymbol is IPropertySymbol property &&
+                ParameterNameCorrespondsToProperty(parameter.Name, property.Name))
+            {
+                return;
+            }
+
             // Fix site is the source symbol's declaration (add Id matching target). The
             // codefix splits the pipe-delimited tags and offers one fix per option plus a
             // combined [UnionId(...)] when the target is multi-tag.
@@ -2353,6 +2371,33 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 targetSymbol,
                 source));
         }
+    }
+
+    // Parameters are camelCase, properties PascalCase — so `id` ↔ `Id` and
+    // `customerId` ↔ `CustomerId` should match. Compare ordinal after upper-casing
+    // the parameter's first character, matching the same casing rule already used
+    // by convention rule 2.
+    static bool ParameterNameCorrespondsToProperty(string parameterName, string propertyName)
+    {
+        if (parameterName.Length == 0 || parameterName.Length != propertyName.Length)
+        {
+            return false;
+        }
+
+        if (char.ToUpperInvariant(parameterName[0]) != propertyName[0])
+        {
+            return false;
+        }
+
+        for (var i = 1; i < parameterName.Length; i++)
+        {
+            if (parameterName[i] != propertyName[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     static bool IsBoundaryTarget(ISymbol target)
