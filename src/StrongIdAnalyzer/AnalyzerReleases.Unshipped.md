@@ -8,3 +8,4 @@ SIA003 | IdAttribute.Usage | Warning | Source has Id while target has none
 SIA004 | IdAttribute.Usage | Error | Multiple declarations map to the same conventional Id name
 SIA005 | IdAttribute.Usage | Warning | [Id(...)] attribute matches the naming convention and is redundant
 SIA006 | IdAttribute.Usage | Warning | [UnionId("x")] with a single option should be [Id("x")]
+SIA007 | IdAttribute.Usage | Error | Id tag must not be empty or whitespace

@@ -61,8 +61,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor emptyTagRule = new(
+        id: "SIA007",
+        title: "Id tag must not be empty or whitespace",
+        messageFormat: "[{0}] tag must not be empty or whitespace",
+        category: "IdAttribute.Usage",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
-        [idMismatchRule, missingSourceIdRule, droppedIdRule, ambiguousConventionRule, redundantIdRule, singletonUnionRule];
+        [idMismatchRule, missingSourceIdRule, droppedIdRule, ambiguousConventionRule, redundantIdRule, singletonUnionRule, emptyTagRule];
 
     public override void Initialize(AnalysisContext context)
     {
@@ -124,9 +132,100 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 SymbolKind.Field,
                 SymbolKind.Parameter);
 
+            start.RegisterSymbolAction(
+                AnalyzeEmptyTag,
+                SymbolKind.Property,
+                SymbolKind.Field,
+                SymbolKind.Parameter,
+                SymbolKind.Method);
+
             start.RegisterCompilationEndAction(
                 _ => ReportConventionDiagnostics(_, ambiguity, redundantCandidates));
         });
+    }
+
+    // SIA007: `[Id("")]`, `[Id(" ")]`, `[UnionId("")]`, `[UnionId("", "Customer")]`,
+    // and `[UnionId()]` are all semantically meaningless — an empty/whitespace tag
+    // can never identify a domain type. Fires at Error severity so the build
+    // breaks; there is no codefix because the user's intent isn't recoverable
+    // from an empty string.
+    static void AnalyzeEmptyTag(SymbolAnalysisContext context)
+    {
+        foreach (var attribute in context.Symbol.GetAttributes())
+        {
+            CheckEmptyTag(context, attribute);
+        }
+
+        if (context.Symbol is IMethodSymbol method)
+        {
+            foreach (var attribute in method.GetReturnTypeAttributes())
+            {
+                CheckEmptyTag(context, attribute);
+            }
+        }
+    }
+
+    static void CheckEmptyTag(SymbolAnalysisContext context, AttributeData attribute)
+    {
+        if (IsAttributeNamed(attribute, idMetadataName))
+        {
+            // Generic `[Id<T>]` can't have an empty tag — the type argument binds
+            // at compile time. Only the string-arg constructor needs checking.
+            if (attribute.ConstructorArguments.Length > 0 &&
+                attribute.ConstructorArguments[0].Value is string s &&
+                string.IsNullOrWhiteSpace(s))
+            {
+                ReportEmptyTag(context, attribute, "Id");
+            }
+            return;
+        }
+
+        if (!IsAttributeNamed(attribute, unionIdMetadataName))
+        {
+            return;
+        }
+
+        if (attribute.ConstructorArguments.Length == 0)
+        {
+            ReportEmptyTag(context, attribute, "UnionId");
+            return;
+        }
+
+        var first = attribute.ConstructorArguments[0];
+        if (first.Kind != TypedConstantKind.Array)
+        {
+            return;
+        }
+
+        if (first.Values.Length == 0)
+        {
+            ReportEmptyTag(context, attribute, "UnionId");
+            return;
+        }
+
+        foreach (var element in first.Values)
+        {
+            if (element.Value is string option &&
+                string.IsNullOrWhiteSpace(option))
+            {
+                ReportEmptyTag(context, attribute, "UnionId");
+                return;
+            }
+        }
+    }
+
+    static void ReportEmptyTag(SymbolAnalysisContext context, AttributeData attribute, string attributeName)
+    {
+        var reference = attribute.ApplicationSyntaxReference;
+        if (reference is null)
+        {
+            return;
+        }
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            emptyTagRule,
+            Location.Create(reference.SyntaxTree, reference.Span),
+            attributeName));
     }
 
     static void AnalyzeSingletonUnion(SymbolAnalysisContext context)
@@ -139,7 +238,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
 
             var options = ExtractUnionOptions(attribute);
-            if (options.Length > 1)
+            // Only the exact singleton case is redundant. Empty `[UnionId()]`
+            // is a different shape of user error — "has only one option" would
+            // lie, and the codefix would emit `[Id("")]`, which is worse than
+            // staying silent.
+            if (options.Length != 1)
             {
                 return;
             }
@@ -150,7 +253,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            var singleValue = options.Length == 1 ? options[0] : "";
+            var singleValue = options[0];
             var properties = ImmutableDictionary<string, string?>.Empty.Add(ValueKey, singleValue);
             context.ReportDiagnostic(Diagnostic.Create(
                 singletonUnionRule,
@@ -173,6 +276,20 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         if (!TryGetConventionName(symbol, out var conventionName, out var fromContainingType))
+        {
+            return;
+        }
+
+        // Multi-declarator fields (`[Id("Customer")] Guid CustomerId, OrderId;`)
+        // share the attribute across all declarators. SIA005 would fire only on
+        // the declarator whose convention matches the tag, and removing the
+        // shared attribute silently changes what the unflagged declarator means
+        // — OrderId would flip from the explicit "Customer" tag to its
+        // convention-inferred "Order". Skip the whole group rather than produce
+        // a fix that breaks its sibling.
+        if (symbol is IFieldSymbol &&
+            symbol.DeclaringSyntaxReferences[0].GetSyntax(context.CancellationToken)
+                is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: > 1 } })
         {
             return;
         }
@@ -449,7 +566,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static string? GetAttributeValue(AttributeData attribute)
     {
         if (attribute.ConstructorArguments.Length > 0 &&
-            attribute.ConstructorArguments[0].Value is string value)
+            attribute.ConstructorArguments[0].Value is string value &&
+            value.Length > 0)
         {
             return value;
         }
@@ -2032,6 +2150,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             {
                 if (attribute.ConstructorArguments.Length > 0 &&
                     attribute.ConstructorArguments[0].Value is string s &&
+                    s.Length > 0 &&
                     seen.Add(s))
                 {
                     tags.Add(s);
@@ -2098,7 +2217,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var builder = ImmutableArray.CreateBuilder<string>(first.Values.Length);
         foreach (var element in first.Values)
         {
-            if (element.Value is string s)
+            // Empty tags are dropped here — [Id("")] is never a valid shape, so
+            // letting one through would propagate into diagnostics/codefixes that
+            // round-trip the tag back into [Id("")] / [UnionId("", ...)] output.
+            if (element.Value is string s && s.Length > 0)
             {
                 builder.Add(s);
             }
