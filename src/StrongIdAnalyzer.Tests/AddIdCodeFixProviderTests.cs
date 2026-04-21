@@ -61,7 +61,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFix(source);
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA002", "Add");
 
         await Contains(fixedSource, "[Id(\"Order\")]");
         await Contains(fixedSource, "public Guid Value { get; set; }");
@@ -84,7 +84,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFix(source);
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA002", "Add");
 
         await Contains(fixedSource, "[Id(\"Order\")]");
         await Contains(fixedSource, "public Guid Field;");
@@ -105,7 +105,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFix(source);
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA002", "Add");
 
         await Contains(fixedSource, "[Id<Order>] Guid input");
     }
@@ -130,7 +130,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFix(source);
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Add");
 
         await Contains(fixedSource, "[Id<Order>] Guid value");
     }
@@ -155,7 +155,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFix(source);
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Add");
 
         await Contains(fixedSource, "[Id<Order>]");
         await Contains(fixedSource, "public Guid Value { get; set; }");
@@ -178,7 +178,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFix(source);
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA002", "Add");
 
         await Contains(fixedSource, "[Id<Order>]");
         await Contains(fixedSource, "public Guid Other { get; set; }");
@@ -204,6 +204,112 @@ public class AddIdCodeFixProviderTests
         var fixedSource = await ApplyFix(source);
 
         await Contains(fixedSource, "[Id(\"custom-tag\")]");
+    }
+
+    [Test]
+    public async Task SIA002_RenamesSourceParameterToConventionName()
+    {
+        var source =
+            """
+            using System;
+
+            public class Customer
+            {
+                [Id("Customer")]
+                public Guid Id { get; set; }
+            }
+
+            public static class Extensions
+            {
+                public static bool Exists(Customer customer, Guid id) => customer.Id == id;
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA002", "Rename");
+
+        await Contains(fixedSource, "Guid customerId");
+        await DoesNotContain(fixedSource, "Guid id)");
+    }
+
+    [Test]
+    public async Task SIA003_RenamesTargetParameterToConventionName()
+    {
+        var source =
+            """
+            using System;
+
+            public class Target
+            {
+                public static void Consume(Guid value) { }
+            }
+
+            public class Holder
+            {
+                public Guid OrderId { get; set; }
+
+                public void Use() => Target.Consume(OrderId);
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Rename");
+
+        await Contains(fixedSource, "Guid orderId");
+        await DoesNotContain(fixedSource, "Guid value");
+    }
+
+    [Test]
+    public async Task SIA002_NoRenameWhenTagNotValidIdentifier()
+    {
+        // custom-tag can't form a legal identifier, so only the attribute fix is offered.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                public Guid Value { get; set; }
+
+                public static void Consume([Id("custom-tag")] Guid value) { }
+
+                public void Use() => Consume(Value);
+            }
+            """;
+
+        var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
+
+        await Assert.That(titles.Any(_ => _.StartsWith("Rename", StringComparison.Ordinal))).IsFalse();
+        await Assert.That(titles.Any(_ => _.StartsWith("Add", StringComparison.Ordinal))).IsTrue();
+    }
+
+    [Test]
+    public async Task SIA002_NoRenameForUnionIdSource()
+    {
+        // The source needs a UnionId to match; convention produces exactly one tag,
+        // so no rename alternative is offered.
+        var source =
+            """
+            using System;
+
+            public class Customer;
+            public class Order;
+
+            public class Target
+            {
+                public Guid Subject { get; set; }
+            }
+
+            public class Holder
+            {
+                [UnionId("Customer", "Order")]
+                public Guid Subject { get; set; }
+
+                public Target Create() => new Target { Subject = Subject };
+            }
+            """;
+
+        var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
+
+        await Assert.That(titles.Any(_ => _.StartsWith("Rename", StringComparison.Ordinal))).IsFalse();
     }
 
     [Test]
@@ -827,7 +933,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFix(source, "SIA002");
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA002", "Add");
 
         await Contains(fixedSource, "[Id<Election>]");
         await DoesNotContain(fixedSource, "[Id(\"Election\")]");
@@ -869,8 +975,13 @@ public class AddIdCodeFixProviderTests
             """;
 
         var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
-        await Assert.That(titles.Length).IsEqualTo(1);
-        await Assert.That(titles[0]).IsEqualTo("Add [Id<User>] to field 'System'");
+        // Two fixes: add the attribute, or rename the field to the convention form.
+        // The convention-derived tag "ModifiedBy" from the interface member is NOT
+        // offered — it's an inference, not a declaration, and suggesting it would
+        // override the deliberate [Id<User>] already on BaseEntity.ModifiedById.
+        await Assert.That(titles.Length).IsEqualTo(2);
+        await Assert.That(titles).Contains("Add [Id<User>] to field 'System'");
+        await Assert.That(titles).Contains("Rename field 'System' to 'UserId'");
     }
 
     [Test]
@@ -963,7 +1074,7 @@ public class AddIdCodeFixProviderTests
             }
             """;
 
-        var fixedSource = await ApplyFix(source, "SIA002");
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA002", "Add");
 
         await Contains(fixedSource, "[Id(\"NotATypeInScope\")]");
         await DoesNotContain(fixedSource, "[Id<NotATypeInScope>]");

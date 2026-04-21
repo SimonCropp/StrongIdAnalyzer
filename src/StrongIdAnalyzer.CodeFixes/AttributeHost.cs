@@ -86,13 +86,16 @@ static class AttributeHost
             _ => name.ToString()
         };
 
-    // Rename heuristic: if the host name ends with "Id" (e.g. `bidId`, `BidId`), produce
-    // `<tag>Id` with the first character matching the original's case. Skips when the
-    // host is named just "Id" — fixing that would require renaming the containing type.
+    // Rename heuristic: produce `<tag>Id`, matching the first-character case of the
+    // current identifier (camelCase for parameters like `id`, PascalCase for a property
+    // like `Value`). Skips property/field named exactly "Id" — its convention tag is
+    // the containing type's name, so `<tag>Id` would require moving the declaration
+    // to a different type. Parameters named `id` are fine to rename since they have
+    // no containing-type convention.
     public static bool TryGetRenameTarget(SyntaxNode host, string tag, out string newName)
     {
         newName = "";
-        if (tag.Length == 0)
+        if (tag.Length == 0 || !SyntaxFacts.IsValidIdentifier(tag))
         {
             return false;
         }
@@ -111,8 +114,8 @@ static class AttributeHost
             return false;
         }
 
-        if (currentName.Length <= 2 ||
-            !currentName.EndsWith("Id", StringComparison.Ordinal))
+        if (host is not ParameterSyntax &&
+            string.Equals(currentName, "Id", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

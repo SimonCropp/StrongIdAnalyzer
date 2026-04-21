@@ -389,6 +389,24 @@ public class AddIdCodeFixProvider : CodeFixProvider
                     equivalenceKey: $"AddId:{singleValue}"),
                 diagnostic);
         }
+
+        // For a single-tag diagnostic, renaming the host to `<Tag>Id` satisfies the
+        // naming convention without introducing an attribute. Skipped for UnionId
+        // sources (values.Length > 1) since convention produces exactly one tag.
+        if (values.Length == 1 &&
+            AttributeHost.TryGetRenameTarget(host, values[0], out var newName))
+        {
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    $"Rename {hostDescription} to '{newName}'",
+                    cancel => RenameAsync(
+                        context.Document,
+                        declarationLocation,
+                        newName,
+                        cancel),
+                    equivalenceKey: $"RenameId:{newName}"),
+                diagnostic);
+        }
     }
 
     static async Task RegisterReplaceUnionWithIdFix(CodeFixContext context, Diagnostic diagnostic)
