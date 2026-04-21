@@ -570,8 +570,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static string? GetAttributeValue(AttributeData attribute)
     {
         if (attribute.ConstructorArguments.Length > 0 &&
-            attribute.ConstructorArguments[0].Value is string value &&
-            value.Length > 0)
+            attribute.ConstructorArguments[0].Value is string { Length: > 0 } value)
         {
             return value;
         }
@@ -2160,8 +2159,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (IsAttributeNamed(attribute, idMetadataName))
             {
                 if (attribute.ConstructorArguments.Length > 0 &&
-                    attribute.ConstructorArguments[0].Value is string s &&
-                    s.Length > 0 &&
+                    attribute.ConstructorArguments[0].Value is string { Length: > 0 } s &&
                     seen.Add(s))
                 {
                     tags.Add(s);
@@ -2231,7 +2229,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // Empty tags are dropped here — [Id("")] is never a valid shape, so
             // letting one through would propagate into diagnostics/codefixes that
             // round-trip the tag back into [Id("")] / [UnionId("", ...)] output.
-            if (element.Value is string s && s.Length > 0)
+            if (element.Value is string { Length: > 0 } s)
             {
                 builder.Add(s);
             }
