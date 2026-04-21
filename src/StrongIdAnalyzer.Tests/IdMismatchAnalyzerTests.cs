@@ -2775,8 +2775,11 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
-    public async Task AnonymousType_PropertyConvention_IsSkipped()
+    public async Task AnonymousType_WriteIntoAnonProperty_IsSilent()
     {
+        // Writes into anon-type properties have no fix site (anon members can't carry
+        // [Id]) — the convention tag on the anon target is suppressed at report time so
+        // the `BillId` ↔ `ProgramBillBase` mismatch produces no diagnostic.
         var source =
             """
             using System;
@@ -2793,6 +2796,61 @@ public class IdMismatchAnalyzerTests
         var diagnostics = await GetDiagnostics(source);
 
         await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task AnonymousType_ReadFromAnonProperty_FlowsConventionTag()
+    {
+        // Reading `extract.CustomerId` from an anonymous type carries the "Customer"
+        // convention tag, so the assignment into a `[Id("Customer")]` target is allowed.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public Guid Value { get; set; }
+
+                public void Build(Guid raw)
+                {
+                    var anon = new { CustomerId = raw };
+                    Value = anon.CustomerId;
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task AnonymousType_ReadFromAnonProperty_MismatchedTagFires()
+    {
+        // The convention tag on the anon-property source ("Order") doesn't match the
+        // [Id("Customer")] target — SIA001 fires as it would for any mismatched flow.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public Guid Value { get; set; }
+
+                public void Build(Guid raw)
+                {
+                    var anon = new { OrderId = raw };
+                    Value = anon.OrderId;
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
     }
 
     [Test]
