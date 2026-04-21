@@ -493,6 +493,34 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA003_RenamesRecordPrimaryCtorIdParameter()
+    {
+        var source =
+            """
+            using System;
+
+            public class CommitmentReportSummaryView
+            {
+                public Guid CommitmentId { get; init; }
+            }
+
+            public class Holder
+            {
+                public IdAndFirstPublished Make(CommitmentReportSummaryView v) => new(v.CommitmentId, null);
+            }
+
+            public record IdAndFirstPublished(Guid Id, int? FirstPublished);
+            """;
+
+        var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
+        await Assert.That(titles).Contains("Rename parameter 'Id' to 'CommitmentId'");
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Rename parameter 'Id'");
+        await Contains(fixedSource, "public record IdAndFirstPublished(Guid CommitmentId, int? FirstPublished);");
+        await Contains(fixedSource, "new(v.CommitmentId, null)");
+    }
+
+    [Test]
     public async Task SIA001_NoRenameWhenExplicitAttributePresent()
     {
         var source =
