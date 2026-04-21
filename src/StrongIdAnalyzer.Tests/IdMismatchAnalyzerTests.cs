@@ -916,6 +916,30 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task StringTypedId_MismatchFires()
+    {
+        // string implements IEnumerable<char>; the collection-tag suppression must not
+        // treat string-typed Id members as element-tagged collections.
+        var source =
+            """
+            public class Holder
+            {
+                [Id("Customer")]
+                public string Value { get; set; } = "";
+
+                public void Consume([Id("Order")] string value) { }
+
+                public void Use() => Consume(Value);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
+    [Test]
     public async Task EqualityCheck_MismatchedIds_Fires()
     {
         var source =
