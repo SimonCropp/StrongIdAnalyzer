@@ -86,7 +86,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // identity keeps cross-assembly usage working — e.g. messages assembly tags
             // a property with [Id("Customer")] and the consumer assembly assigns it.
             var suppressedNamespaces = NamespaceSuppression.Read(
-                start.Options.AnalyzerConfigOptionsProvider);
+                start.Options.AnalyzerConfigOptionsProvider,
+                start.Compilation);
             var config = new Config(suppressedNamespaces, start.Compilation);
 
             start.RegisterOperationAction(

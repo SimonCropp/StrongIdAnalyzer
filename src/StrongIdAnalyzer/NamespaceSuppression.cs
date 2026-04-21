@@ -17,9 +17,16 @@ static class NamespaceSuppression
             new(["Microsoft"], true)
         ];
 
-    public static ImmutableArray<NamespacePattern> Read(AnalyzerConfigOptionsProvider options)
+    public static ImmutableArray<NamespacePattern> Read(
+        AnalyzerConfigOptionsProvider options,
+        Compilation compilation)
     {
-        if (!options.GlobalOptions.TryGetValue(optionKey, out var raw))
+        // Read from any syntax tree's options rather than GlobalOptions — `[*.cs]`
+        // editorconfig entries are per-tree and never surface via GlobalOptions.
+        // The value is project-uniform in practice, so a single tree sample is
+        // sufficient and keeps this a one-time read at CompilationStart.
+        var tree = compilation.SyntaxTrees.FirstOrDefault();
+        if (tree is null || !options.GetOptions(tree).TryGetValue(optionKey, out var raw))
         {
             return Default;
         }
