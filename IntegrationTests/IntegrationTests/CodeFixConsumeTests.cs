@@ -62,7 +62,7 @@ public class CodeFixConsumeTests
 
         await codeFix.RegisterCodeFixesAsync(context);
 
-        var action = actions.ToImmutable().Single();
+        var action = actions.ToImmutable().Single(_ => _.EquivalenceKey!.StartsWith("AddId:"));
         var operations = await action.GetOperationsAsync(CancellationToken.None);
         var apply = operations.OfType<ApplyChangesOperation>().Single();
         var newDoc = apply.ChangedSolution.GetDocument(document.Id)!;
