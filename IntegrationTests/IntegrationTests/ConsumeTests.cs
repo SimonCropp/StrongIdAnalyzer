@@ -19,6 +19,10 @@ public class ConsumeTests
         // Compile-time: this line fails to build if the source generator did not emit
         // IdAttribute into the consumer compilation.
         _ = new IdAttribute("Order");
+
+    [Test]
+    public void GeneratedUnionIdAttribute_IsAvailable() =>
+        _ = new UnionIdAttribute("Order", "Customer");
 }
 
 public class IdSample

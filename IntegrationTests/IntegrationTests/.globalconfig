@@ -1,0 +1,9 @@
+# is_global marks this as a global analyzer config — keys without a section header
+# land in AnalyzerConfigOptionsProvider.GlobalOptions, which is where the analyzer
+# reads `strongidanalyzer.suppressed_namespaces` from.
+is_global = true
+
+# Defaults (System*, Microsoft*) are replaced wholesale when this key is set —
+# include them alongside the Suppressed* prefix used by
+# SuppressedNamespaceConsumeTests so the rest of the project still compiles clean.
+strongidanalyzer.suppressed_namespaces = System*,Microsoft*,Suppressed*
