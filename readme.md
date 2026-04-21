@@ -224,7 +224,7 @@ Most declarations don't need an explicit `[Id("...")]` — the analyzer infers a
 
 - **Parameters named exactly `id`** — rule 1 doesn't apply to parameters (a bare `id` has no containing-type equivalent, and parameters should be name-driven so method signatures read cleanly). Write `orderId`, or add `[Id("Order")]` explicitly.
 - **Names that are exactly `Id`** (on parameters) or shorter than 3 characters under rule 2 — so a property literally named `Id` only matches rule 1, never rule 2.
-- **Anonymous-type properties** — `new { CustomerId = x }`. They can't carry `[Id]`, so tagging them would produce diagnostics the user has no way to silence (matters for EF `HasIndex`, LINQ projections, etc.).
+- **Anonymous-type properties under rule 1** — a bare `Id` on `new { Id = x }` would map to a synthesized `<>f__AnonymousType*` name, which is meaningless as a tag. Rule 2 still applies (`new { CustomerId = x }` reads as `"Customer"`), so values projected through anonymous types in LINQ pipelines or EF `HasIndex` expressions keep flowing the right tag downstream. Writes **into** anonymous-type properties never produce a diagnostic — there's no fix site, since anon members can't carry `[Id]`.
 - **Indexers** — `this[Guid id]` never participates.
 - **Implicitly-declared fields** — backing fields, primary-constructor capture fields, and similar compiler-synthesized members.
 - **Members declared in referenced metadata** — BCL and third-party members (`Diagnostic.Id`, `EventArgs`, …) never receive convention tags. If it were otherwise, any library property named `Id` would suddenly carry a tag the user can't change.
