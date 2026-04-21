@@ -2775,6 +2775,112 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task ParamMatchingPropertyName_PrimaryCtor_IsSilent()
+    {
+        // The primary-ctor parameter `id` is the obvious carrier for the same-named
+        // tagged property `Id`. Requiring an explicit [Id("Tenant")] on the parameter
+        // would be noise — the user has already expressed intent via the name match.
+        var source =
+            """
+            using System;
+
+            public class Tenant(string id)
+            {
+                public string Id { get; } = id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task ParamMatchingPropertyName_RegularCtor_IsSilent()
+    {
+        var source =
+            """
+            using System;
+
+            public class Tenant
+            {
+                public Tenant(string id) => Id = id;
+                public string Id { get; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task ParamMatchingPropertyName_MethodSetter_IsSilent()
+    {
+        // Same name-correspondence rule applies outside constructors: a method param
+        // `id` writing to property `Id` is just as obviously the carrier as in a ctor.
+        var source =
+            """
+            using System;
+
+            public class Order
+            {
+                public string Id { get; set; } = "";
+                public void Reset(string id) => Id = id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task ParamMatchingPropertyName_NameMismatch_StillFires()
+    {
+        // Parameter name doesn't correspond to the property name — the suppression
+        // doesn't apply, so SIA002 fires as before. The fix is to rename the parameter
+        // (auto-tag via convention) or add [Id("Customer")] explicitly.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                public void Update(string raw) => Value = raw;
+                [Id("Customer")] public string Value { get; set; } = "";
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA002");
+    }
+
+    [Test]
+    public async Task ParamMatchingPropertyName_ExplicitTagMismatch_StillFiresSIA001()
+    {
+        // Even with names corresponding, an explicit tag on the parameter that
+        // disagrees with the property's tag goes through SIA001 (mismatch), which the
+        // suppression does NOT silence — source is tagged, not untagged.
+        var source =
+            """
+            using System;
+
+            public class Holder([Id("Customer")] string id)
+            {
+                [Id("Order")] public string Id { get; } = id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
+    [Test]
     public async Task AnonymousType_WriteIntoAnonProperty_IsSilent()
     {
         // Writes into anon-type properties have no fix site (anon members can't carry
