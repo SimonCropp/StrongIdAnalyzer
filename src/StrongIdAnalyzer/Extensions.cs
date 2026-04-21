@@ -97,6 +97,13 @@ static class Extensions
             return null;
         }
 
+        // string implements IEnumerable<char> but is used as a scalar primitive ID type,
+        // so exclude it from collection/element handling.
+        if (named.SpecialType == SpecialType.System_String)
+        {
+            return null;
+        }
+
         if (named is
             {
                 IsGenericType: true,
