@@ -46,14 +46,16 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public void Consume([Id("Order")] System.Guid value) { }
+                public void Consume([Id("Order")] Guid value) { }
             }
 
             public class Holder
             {
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use(Target target) => target.Consume(Value);
             }
@@ -62,7 +64,7 @@ public class AddIdCodeFixProviderTests
         var fixedSource = await ApplyFix(source);
 
         await Contains(fixedSource, "[Id(\"Order\")]");
-        await Contains(fixedSource, "public System.Guid Value { get; set; }");
+        await Contains(fixedSource, "public Guid Value { get; set; }");
     }
 
     [Test]
@@ -70,11 +72,13 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid Field;
+                public Guid Field;
 
-                public static void Consume([Id("Order")] System.Guid value) { }
+                public static void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(Field);
             }
@@ -83,7 +87,7 @@ public class AddIdCodeFixProviderTests
         var fixedSource = await ApplyFix(source);
 
         await Contains(fixedSource, "[Id(\"Order\")]");
-        await Contains(fixedSource, "public System.Guid Field;");
+        await Contains(fixedSource, "public Guid Field;");
     }
 
     [Test]
@@ -91,17 +95,19 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public static void Consume([Id("Order")] System.Guid value) { }
+                public static void Consume([Id("Order")] Guid value) { }
 
-                public void Use(System.Guid input) => Consume(input);
+                public void Use(Guid input) => Consume(input);
             }
             """;
 
         var fixedSource = await ApplyFix(source);
 
-        await Contains(fixedSource, "[Id<Order>] System.Guid input");
+        await Contains(fixedSource, "[Id<Order>] Guid input");
     }
 
     [Test]
@@ -109,14 +115,16 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public static void Consume(System.Guid value) { }
+                public static void Consume(Guid value) { }
             }
 
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use() => Target.Consume(OrderId);
             }
@@ -124,7 +132,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFix(source);
 
-        await Contains(fixedSource, "[Id<Order>] System.Guid value");
+        await Contains(fixedSource, "[Id<Order>] Guid value");
     }
 
     [Test]
@@ -132,14 +140,16 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
             }
 
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
                 public void Use(Target target) => target.Value = OrderId;
             }
@@ -148,7 +158,7 @@ public class AddIdCodeFixProviderTests
         var fixedSource = await ApplyFix(source);
 
         await Contains(fixedSource, "[Id<Order>]");
-        await Contains(fixedSource, "public System.Guid Value { get; set; }");
+        await Contains(fixedSource, "public Guid Value { get; set; }");
     }
 
     [Test]
@@ -156,11 +166,13 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
 
-                public System.Guid Other { get; set; }
+                public Guid Other { get; set; }
 
                 public bool Check() => OrderId == Other;
             }
@@ -169,7 +181,7 @@ public class AddIdCodeFixProviderTests
         var fixedSource = await ApplyFix(source);
 
         await Contains(fixedSource, "[Id<Order>]");
-        await Contains(fixedSource, "public System.Guid Other { get; set; }");
+        await Contains(fixedSource, "public Guid Other { get; set; }");
     }
 
     [Test]
@@ -177,11 +189,13 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
-                public static void Consume([Id("custom-tag")] System.Guid value) { }
+                public static void Consume([Id("custom-tag")] Guid value) { }
 
                 public void Use() => Consume(Value);
             }
@@ -197,11 +211,13 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid a, b;
+                public Guid a, b;
 
-                public static void Consume([Id("Order")] System.Guid value) { }
+                public static void Consume([Id("Order")] Guid value) { }
 
                 public void Use() => Consume(a);
             }
@@ -217,10 +233,12 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
                 [UnionId("Customer")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
             }
             """;
 
@@ -237,15 +255,17 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public static void Consume([Id("Bid")] System.Guid value) { }
+                public static void Consume([Id("Bid")] Guid value) { }
             }
 
             public class Bid
             {
                 [Id("TreasuryBid")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
                 public void Use() => Target.Consume(Id);
             }
@@ -255,7 +275,7 @@ public class AddIdCodeFixProviderTests
         // fix now (see SIA001_OffersFixOnSourceSide_WhenTargetHasExplicitAttribute).
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute on parameter 'value'");
 
-        await Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid value");
+        await Contains(fixedSource, "[Id(\"TreasuryBid\")] Guid value");
         await DoesNotContain(fixedSource, "[Id(\"Bid\")]");
     }
 
@@ -264,15 +284,17 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public static void Consume(System.Guid bidId) { }
+                public static void Consume(Guid bidId) { }
             }
 
             public class Bid
             {
                 [Id("TreasuryBid")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
                 public void Use() => Target.Consume(Id);
             }
@@ -280,7 +302,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Add");
 
-        await Contains(fixedSource, "[Id(\"TreasuryBid\")] System.Guid bidId");
+        await Contains(fixedSource, "[Id(\"TreasuryBid\")] Guid bidId");
     }
 
     [Test]
@@ -288,15 +310,17 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public static void Consume(System.Guid bidId) { }
+                public static void Consume(Guid bidId) { }
             }
 
             public class Bid
             {
                 [Id("TreasuryBid")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
                 public void Use() => Target.Consume(Id);
             }
@@ -304,7 +328,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
-        await Contains(fixedSource, "System.Guid treasuryBidId");
+        await Contains(fixedSource, "Guid treasuryBidId");
         await DoesNotContain(fixedSource, "bidId");
     }
 
@@ -313,15 +337,17 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public System.Guid BidId { get; set; }
+                public Guid BidId { get; set; }
             }
 
             public class Bid
             {
                 [Id("TreasuryBid")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
                 public void Use(Target target) => target.BidId = Id;
             }
@@ -329,7 +355,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
-        await Contains(fixedSource, "public System.Guid TreasuryBidId");
+        await Contains(fixedSource, "public Guid TreasuryBidId");
         await Contains(fixedSource, "target.TreasuryBidId = Id");
     }
 
@@ -338,15 +364,17 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public System.Guid BidId;
+                public Guid BidId;
             }
 
             public class Bid
             {
                 [Id("TreasuryBid")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
                 public void Use(Target target) => target.BidId = Id;
             }
@@ -354,7 +382,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
-        await Contains(fixedSource, "public System.Guid TreasuryBidId;");
+        await Contains(fixedSource, "public Guid TreasuryBidId;");
         await Contains(fixedSource, "target.TreasuryBidId = Id");
     }
 
@@ -363,15 +391,17 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public static void Consume([Id("Bid")] System.Guid bidId) { }
+                public static void Consume([Id("Bid")] Guid bidId) { }
             }
 
             public class Bid
             {
                 [Id("TreasuryBid")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
                 public void Use() => Target.Consume(Id);
             }
@@ -402,16 +432,18 @@ public class AddIdCodeFixProviderTests
         // declaring type (BaseEntity).
         var source =
             """
+            using System;
+
             public class BaseEntity
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class TreasuryBid : BaseEntity;
 
             public class Target
             {
-                public static void BuildTreasureMeasures(System.Guid orderId) { }
+                public static void BuildTreasureMeasures(Guid orderId) { }
             }
 
             public class Holder
@@ -422,7 +454,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
 
-        await Contains(fixedSource, "System.Guid treasuryBidId");
+        await Contains(fixedSource, "Guid treasuryBidId");
         await DoesNotContain(fixedSource, "orderId");
     }
 
@@ -431,16 +463,18 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class BaseEntity
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
 
             public class TreasuryBid : BaseEntity;
 
             public class Target
             {
-                public static void BuildTreasureMeasures([Id("Other")] System.Guid value) { }
+                public static void BuildTreasureMeasures([Id("Other")] Guid value) { }
             }
 
             public class Holder
@@ -451,7 +485,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute");
 
-        await Contains(fixedSource, "[Id<TreasuryBid>] System.Guid value");
+        await Contains(fixedSource, "[Id<TreasuryBid>] Guid value");
     }
 
     [Test]
@@ -463,13 +497,15 @@ public class AddIdCodeFixProviderTests
         // demote the target's tag.
         var source =
             """
-            public record ProgramBillOutcomeInput(System.Guid VariationId);
+            using System;
+
+            public record ProgramBillOutcomeInput(Guid VariationId);
 
             public class Input
             {
                 public System.Collections.Generic.IReadOnlyList<ProgramBillOutcomeInput> Outcomes { get; set; } = [];
 
-                public ProgramBillOutcomeInput ForId([Id("VariationBase")] System.Guid guid) =>
+                public ProgramBillOutcomeInput ForId([Id("VariationBase")] Guid guid) =>
                     System.Linq.Enumerable.Single(Outcomes, _ => _.VariationId == guid);
             }
             """;
@@ -483,13 +519,15 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
-            public record ProgramBillOutcomeInput(System.Guid VariationId);
+            using System;
+
+            public record ProgramBillOutcomeInput(Guid VariationId);
 
             public class Input
             {
                 public System.Collections.Generic.IReadOnlyList<ProgramBillOutcomeInput> Outcomes { get; set; } = [];
 
-                public ProgramBillOutcomeInput ForId([Id("VariationBase")] System.Guid guid) =>
+                public ProgramBillOutcomeInput ForId([Id("VariationBase")] Guid guid) =>
                     System.Linq.Enumerable.Single(Outcomes, _ => _.VariationId == guid);
             }
             """;
@@ -499,7 +537,7 @@ public class AddIdCodeFixProviderTests
             "SIA001",
             "Add [Id(\"VariationBase\")] to parameter 'VariationId'");
 
-        await Contains(fixedSource, "[Id(\"VariationBase\")] System.Guid VariationId");
+        await Contains(fixedSource, "[Id(\"VariationBase\")] Guid VariationId");
     }
 
     [Test]
@@ -509,15 +547,17 @@ public class AddIdCodeFixProviderTests
         // so the IDE popup tells the user which side of the call is affected.
         var mismatchSource =
             """
+            using System;
+
             public class Target
             {
-                public static void Consume(System.Guid orderId) { }
+                public static void Consume(Guid orderId) { }
             }
 
             public class Bid
             {
                 [Id("TreasuryBid")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
                 public void Use() => Target.Consume(Id);
             }
@@ -531,15 +571,17 @@ public class AddIdCodeFixProviderTests
 
         var changeSource =
             """
+            using System;
+
             public class Target
             {
-                public static void Consume([Id("Order")] System.Guid value) { }
+                public static void Consume([Id("Order")] Guid value) { }
             }
 
             public class Bid
             {
                 [Id("TreasuryBid")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
                 public void Use() => Target.Consume(Id);
             }
@@ -550,10 +592,12 @@ public class AddIdCodeFixProviderTests
 
         var redundantSource =
             """
+            using System;
+
             public class OrderRedundant
             {
                 [Id("OrderRedundant")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
             """;
 
@@ -562,10 +606,12 @@ public class AddIdCodeFixProviderTests
 
         var unionSource =
             """
+            using System;
+
             public class Holder
             {
                 [UnionId("Order")]
-                public System.Guid OrderId { get; set; }
+                public Guid OrderId { get; set; }
             }
             """;
 
@@ -579,17 +625,19 @@ public class AddIdCodeFixProviderTests
     {
         var source =
             """
+            using System;
+
             public class Order
             {
                 [Id("Order")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
             """;
 
         var fixedSource = await ApplyFix(source, "SIA005");
 
         await Assert.That(!fixedSource.Contains("[Id(")).IsTrue();
-        await Contains(fixedSource, "public System.Guid Id { get; set; }");
+        await Contains(fixedSource, "public Guid Id { get; set; }");
     }
 
     [Test]
@@ -604,7 +652,7 @@ public class AddIdCodeFixProviderTests
             public class Order
             {
                 [Obsolete, Id("Order")]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
             }
             """;
 
@@ -620,15 +668,17 @@ public class AddIdCodeFixProviderTests
         // Names avoid the Id/XxxId convention so the target genuinely reads as untagged.
         var source =
             """
+            using System;
+
             public class Target
             {
-                public System.Guid Subject { get; set; }
+                public Guid Subject { get; set; }
             }
 
             public class Holder
             {
                 [UnionId("Customer", "Order")]
-                public System.Guid Subject { get; set; }
+                public Guid Subject { get; set; }
 
                 public Target Create() => new Target { Subject = Subject };
             }
@@ -667,18 +717,20 @@ public class AddIdCodeFixProviderTests
         // checks the resulting [UnionId<...>] attribute is emitted in generic form.
         var source =
             """
+            using System;
+
             public class Customer;
             public class Order;
 
             public class Target
             {
-                public System.Guid Subject { get; set; }
+                public Guid Subject { get; set; }
             }
 
             public class Holder
             {
                 [UnionId("Customer", "Order")]
-                public System.Guid Subject { get; set; }
+                public Guid Subject { get; set; }
 
                 public Target Create() => new Target { Subject = Subject };
             }
@@ -696,17 +748,19 @@ public class AddIdCodeFixProviderTests
         // fall back to the string-arg form `[UnionId("a", "b")]` rather than generics.
         var source =
             """
+            using System;
+
             public class Order;
 
             public class Target
             {
-                public System.Guid Subject { get; set; }
+                public Guid Subject { get; set; }
             }
 
             public class Holder
             {
                 [UnionId("custom-tag", "Order")]
-                public System.Guid Subject { get; set; }
+                public Guid Subject { get; set; }
 
                 public Target Create() => new Target { Subject = Subject };
             }
@@ -725,18 +779,20 @@ public class AddIdCodeFixProviderTests
         // produce [Id<TreasuryBid>] not [Id("TreasuryBid")].
         var source =
             """
+            using System;
+
             public class TreasuryBid;
             public class Bid;
 
             public class Target
             {
-                public static void Consume([Id<Bid>] System.Guid value) { }
+                public static void Consume([Id<Bid>] Guid value) { }
             }
 
             public class Holder
             {
                 [Id<TreasuryBid>]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
                 public void Use() => Target.Consume(Id);
             }
@@ -744,7 +800,7 @@ public class AddIdCodeFixProviderTests
 
         var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Change attribute on parameter 'value'");
 
-        await Contains(fixedSource, "[Id<TreasuryBid>] System.Guid value");
+        await Contains(fixedSource, "[Id<TreasuryBid>] Guid value");
         await DoesNotContain(fixedSource, "[Id(\"TreasuryBid\")]");
     }
 
@@ -756,11 +812,13 @@ public class AddIdCodeFixProviderTests
         // type is visible at the fix site.
         var source =
             """
+            using System;
+
             public class Election
             {
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
-                public static System.Guid Election2022 = System.Guid.NewGuid();
+                public static Guid Election2022 = Guid.NewGuid();
             }
 
             public class Holder
@@ -776,15 +834,130 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA002_OnlyExplicitTags_WhenTaggedSideHasExplicitAttribute()
+    {
+        // ModifiedById has explicit [Id<User>] on the implementation, plus inherits
+        // an interface member named "ModifiedById" whose convention tag is "ModifiedBy".
+        // The fix should propose [Id<User>] only — convention-derived tags are
+        // inferences, not declarations, so suggesting them here would override the
+        // deliberate annotation already on BaseEntity.ModifiedById.
+        var source =
+            """
+            using System;
+
+            public class User { public Guid Id { get; set; } }
+
+            public interface IModified
+            {
+                Guid ModifiedById { get; set; }
+            }
+
+            public abstract class BaseEntity : IModified
+            {
+                [Id<User>]
+                public Guid ModifiedById { get; set; }
+            }
+
+            public class PoliticalParty : BaseEntity { }
+
+            public class Seeder
+            {
+                public static Guid System = Guid.NewGuid();
+
+                public PoliticalParty Make() => new() { ModifiedById = System };
+            }
+            """;
+
+        var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
+        await Assert.That(titles.Length).IsEqualTo(1);
+        await Assert.That(titles[0]).IsEqualTo("Add [Id<User>] to field 'System'");
+    }
+
+    [Test]
+    public async Task SIA002_PrefersGenericForm_WhenDiagnosticTreeIsStale()
+    {
+        // Simulates an out-of-process analyzer host (Rider): the diagnostic's
+        // Location.SourceTree is re-parsed on the fix side, so its identity no
+        // longer matches any tree in context.Document.Project.Solution. The
+        // codefix must still resolve the host to the live tree by file path
+        // and emit the generic form.
+        var source =
+            """
+            using System;
+
+            public class Election
+            {
+                public Guid Id { get; set; }
+
+                public static Guid Election2022 = Guid.NewGuid();
+            }
+
+            public class Holder
+            {
+                public void Use(Election e) => e.Id = Election.Election2022;
+            }
+            """;
+
+        var workspace = new AdhocWorkspace();
+        var projectInfo = ProjectInfo.Create(
+            ProjectId.CreateNewId(),
+            VersionStamp.Default,
+            name: "Tests",
+            assemblyName: "Tests",
+            language: LanguageNames.CSharp,
+            compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
+            metadataReferences: TrustedReferences.All);
+        var idAttrId = DocumentId.CreateNewId(projectInfo.Id);
+        var documentId = DocumentId.CreateNewId(projectInfo.Id);
+        var solution = workspace.CurrentSolution
+            .AddProject(projectInfo)
+            .AddDocument(idAttrId, "IdAttribute.cs", idAttributeSource, filePath: "IdAttribute.cs")
+            .AddDocument(documentId, "Test.cs", source, filePath: "Test.cs");
+
+        var compilation = (await solution.GetProject(projectInfo.Id)!.GetCompilationAsync())!;
+        var diagnostics = await compilation
+            .WithAnalyzers([new IdMismatchAnalyzer()])
+            .GetAnalyzerDiagnosticsAsync();
+        var diagnostic = diagnostics.Single(_ => _.Id == "SIA002");
+
+        // Fork: replace the document text with equivalent content. Roslyn produces
+        // a new SyntaxTree identity; the diagnostic's location still points at the
+        // old tree, which is no longer in the project's compilation.
+        var refreshedSolution = solution.WithDocumentText(
+            documentId,
+            Microsoft.CodeAnalysis.Text.SourceText.From(source));
+        var refreshedDocument = refreshedSolution.GetDocument(documentId)!;
+
+        var staleTree = diagnostic.AdditionalLocations[0].SourceTree!;
+        var refreshedCompilation = (await refreshedDocument.Project.GetCompilationAsync())!;
+        await Assert.That(refreshedCompilation.SyntaxTrees.Contains(staleTree)).IsFalse();
+        await Assert.That(staleTree.FilePath).IsEqualTo("Test.cs");
+
+        var actions = ImmutableArray.CreateBuilder<CodeAction>();
+        var context = new CodeFixContext(
+            refreshedDocument,
+            diagnostic,
+            (action, _) => actions.Add(action),
+            Cancel.None);
+        await new AddIdCodeFixProvider().RegisterCodeFixesAsync(context);
+
+        var titles = actions.Select(_ => _.Title).ToArray();
+        await Assert.That(titles.Any(_ => _.Contains("[Id<Election>]"))).IsTrue();
+        await Assert.That(titles.Any(_ => _.Contains("[Id(\"Election\")]"))).IsFalse();
+    }
+
+    [Test]
     public async Task SIA002_FallsBackToStringForm_WhenTagDoesNotMatchVisibleType()
     {
         var source =
             """
+            using System;
+
             public class Holder
             {
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
-                public static void Consume([Id("NotATypeInScope")] System.Guid value) { }
+                public static void Consume([Id("NotATypeInScope")] Guid value) { }
 
                 public void Use() => Consume(Value);
             }
@@ -803,18 +976,20 @@ public class AddIdCodeFixProviderTests
         // should render in generic form.
         var source =
             """
+            using System;
+
             public class TreasuryBid;
             public class Bid;
 
             public class Target
             {
-                public static void Consume([Id<Bid>] System.Guid value) { }
+                public static void Consume([Id<Bid>] Guid value) { }
             }
 
             public class Holder
             {
                 [Id<TreasuryBid>]
-                public System.Guid Id { get; set; }
+                public Guid Id { get; set; }
 
                 public void Use() => Target.Consume(Id);
             }

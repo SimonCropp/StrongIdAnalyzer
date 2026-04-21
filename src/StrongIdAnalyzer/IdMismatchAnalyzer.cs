@@ -1649,7 +1649,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         var receiverTags = ImmutableArray.CreateBuilder<string>();
         var memberTags = ImmutableArray.CreateBuilder<string>();
+        var explicitTags = ImmutableArray.CreateBuilder<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var explicitSeen = new HashSet<string>(StringComparer.Ordinal);
         var coveredTypes = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
 
         // 1. Walk the property's override + interface chain. At every level contribute
@@ -1673,6 +1675,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     {
                         memberTags.Add(tag);
                     }
+
+                    if (explicitSeen.Add(tag))
+                    {
+                        explicitTags.Add(tag);
+                    }
                 }
 
                 continue;
@@ -1692,6 +1699,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                         if (seen.Add(tag))
                         {
                             memberTags.Add(tag);
+                        }
+
+                        if (explicitSeen.Add(tag))
+                        {
+                            explicitTags.Add(tag);
                         }
                     }
 
@@ -1767,7 +1779,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return IdInfo.NotPresent;
         }
 
-        return IdInfo.Present([.. receiverTags, .. memberTags]);
+        return IdInfo.Present([.. receiverTags, .. memberTags], explicitTags.ToImmutable());
     }
 
     // Yields the member and then every override/interface-impl target reachable from it.
@@ -2065,7 +2077,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         return tags.Count == 0
             ? IdInfo.NotPresent
-            : IdInfo.Present(tags.ToImmutable());
+            : IdInfo.PresentExplicit(tags.ToImmutable());
     }
 
     // Reads `[UnionId(params string[] options)]`'s constructor argument. Roslyn surfaces
@@ -2240,13 +2252,22 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Pipe-delimited so a UnionId source can drive multiple codefix options (one
         // [Id(x)] per tag + one combined [UnionId(...)]). Pipe is the same separator
         // used in the rendered message — safe because tag values are identifier-like.
-        var joined = info.Tags.IsDefaultOrEmpty ? "" : string.Join("|", info.Tags);
+        //
+        // When the tagged side carries any explicit [Id]/[UnionId] tags we offer ONLY
+        // those as fix suggestions — convention-derived tags (member name, receiver
+        // type) on the same side are inferences, not declarations, and proposing them
+        // as add-fixes would override the deliberate annotation that's already there.
+        // The diagnostic message still shows the full effective tag set so the reader
+        // sees what the analyzer matched against.
+        var fixTags = info.ExplicitTags.IsDefaultOrEmpty ? info.Tags : info.ExplicitTags;
+        var joined = fixTags.IsDefaultOrEmpty ? "" : string.Join("|", fixTags);
+        var displayJoined = info.Tags.IsDefaultOrEmpty ? "" : string.Join("|", info.Tags);
         return Diagnostic.Create(
             rule,
             location,
             additionalLocations: GetAdditionalLocations(fixTarget),
             properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, joined),
-            messageArgs: joined);
+            messageArgs: displayJoined);
     }
 
     static Location[]? GetAdditionalLocations(ISymbol? fixTarget)
@@ -2308,22 +2329,39 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         public IdState State { get; }
         public ImmutableArray<string> Tags { get; }
 
-        IdInfo(IdState state, ImmutableArray<string> tags)
+        // Subset of Tags that came from explicit [Id]/[UnionId] attributes (as opposed
+        // to convention inference from member name or receiver type). When non-empty,
+        // SIA002/SIA003 fixes propose only these tags — guessing convention names onto
+        // the untagged side would override the deliberate annotation on the tagged side.
+        public ImmutableArray<string> ExplicitTags { get; }
+
+        IdInfo(IdState state, ImmutableArray<string> tags, ImmutableArray<string> explicitTags)
         {
             State = state;
             Tags = tags;
+            ExplicitTags = explicitTags;
         }
 
-        public static IdInfo Unknown { get; } = new(IdState.Unknown, ImmutableArray<string>.Empty);
-        public static IdInfo NotPresent { get; } = new(IdState.NotPresent, ImmutableArray<string>.Empty);
+        public static IdInfo Unknown { get; } = new(IdState.Unknown, ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+        public static IdInfo NotPresent { get; } = new(IdState.NotPresent, ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
 
         public static IdInfo Present(string tag) =>
-            new(IdState.Present, [tag]);
+            new(IdState.Present, [tag], ImmutableArray<string>.Empty);
 
         public static IdInfo Present(ImmutableArray<string> tags) =>
             tags.IsDefaultOrEmpty
                 ? NotPresent
-                : new(IdState.Present, tags);
+                : new(IdState.Present, tags, ImmutableArray<string>.Empty);
+
+        public static IdInfo Present(ImmutableArray<string> tags, ImmutableArray<string> explicitTags) =>
+            tags.IsDefaultOrEmpty
+                ? NotPresent
+                : new(IdState.Present, tags, explicitTags.IsDefault ? ImmutableArray<string>.Empty : explicitTags);
+
+        public static IdInfo PresentExplicit(ImmutableArray<string> tags) =>
+            tags.IsDefaultOrEmpty
+                ? NotPresent
+                : new(IdState.Present, tags, tags);
 
         // Single-value accessor for the fixer (which needs one string to write back).
         // Picks the first tag — callers that care about multi-tag must use Tags directly.

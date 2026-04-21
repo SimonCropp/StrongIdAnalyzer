@@ -20,15 +20,17 @@ public class IdAttributeGeneratorTests
     {
         var source =
             """
+            using System;
+
             public class Target
             {
-                public static void Consume([Id("Order")] System.Guid value) { }
+                public static void Consume([Id("Order")] Guid value) { }
             }
 
             public class Holder
             {
                 [Id("Order")]
-                public System.Guid Value { get; set; }
+                public Guid Value { get; set; }
 
                 public void Use() => Target.Consume(Value);
             }

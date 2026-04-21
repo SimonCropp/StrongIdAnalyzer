@@ -128,8 +128,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         var hasExplicit = AttributeHost.HasIdFamilyAttribute(host);
         var hostDescription = AttributeHost.Describe(host);
         var preferGeneric = await ShouldUseGenericAsync(
-            context.Document.Project.Solution,
-            declarationLocation,
+            context.Document.Project,
             host,
             value,
             context.CancellationToken).ConfigureAwait(false);
@@ -252,11 +251,15 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
     // Decide whether the fix output should use the generic attribute form `[Id<X>]`
     // for a specific tag value. Generic form is chosen when the value is a valid
-    // C# identifier AND resolves to a type visible at the host's position — that
-    // way the emitted `[Id<X>]` is guaranteed to compile.
+    // C# identifier and a type with that name is visible at the host's position.
+    //
+    // In out-of-process analyzer hosts (Rider) the syntax tree carried by the
+    // diagnostic location is re-parsed on the fix side and does not match the
+    // live project tree by identity — Solution.GetDocument(tree) returns null,
+    // so we previously fell back to string form for every tag. The fix maps the
+    // host's span onto the live tree at the same file path before looking up.
     static async Task<bool> ShouldUseGenericAsync(
-        Solution solution,
-        Location location,
+        Project project,
         SyntaxNode host,
         string value,
         Cancel cancel)
@@ -266,20 +269,33 @@ public class AddIdCodeFixProvider : CodeFixProvider
             return false;
         }
 
-        var document = solution.GetDocument(location.SourceTree);
-        if (document is null)
-        {
-            return false;
-        }
-
-        var model = await document
-            .GetSemanticModelAsync(cancel)
+        var compilation = await project
+            .GetCompilationAsync(cancel)
             .ConfigureAwait(false);
-        if (model is null)
+        if (compilation is null)
         {
             return false;
         }
 
+        var tree = host.SyntaxTree;
+
+        if (!compilation.SyntaxTrees.Contains(tree))
+        {
+            var filePath = tree.FilePath;
+            if (string.IsNullOrEmpty(filePath))
+            {
+                return false;
+            }
+
+            tree = compilation.SyntaxTrees
+                .FirstOrDefault(_ => string.Equals(_.FilePath, filePath, StringComparison.Ordinal));
+            if (tree is null)
+            {
+                return false;
+            }
+        }
+
+        var model = compilation.GetSemanticModel(tree);
         var symbols = model.LookupNamespacesAndTypes(host.SpanStart, name: value);
         return symbols.Any(_ => _ is INamedTypeSymbol);
     }
@@ -325,8 +341,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         for (var i = 0; i < values.Length; i++)
         {
             perValueGeneric[i] = await ShouldUseGenericAsync(
-                context.Document.Project.Solution,
-                declarationLocation,
+                context.Document.Project,
                 host,
                 values[i],
                 context.CancellationToken).ConfigureAwait(false);
@@ -401,8 +416,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         }
 
         var preferGeneric = await ShouldUseGenericAsync(
-            context.Document.Project.Solution,
-            location,
+            context.Document.Project,
             host: attribute,
             value: value,
             cancel: context.CancellationToken).ConfigureAwait(false);
