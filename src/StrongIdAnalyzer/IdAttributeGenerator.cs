@@ -120,8 +120,39 @@ public class IdAttributeGenerator : IIncrementalGenerator
         var supportsGenericAttributes = context.ParseOptionsProvider.Select((options, _) =>
             options is CSharpParseOptions { LanguageVersion: >= LanguageVersion.CSharp11 });
 
-        context.RegisterSourceOutput(supportsGenericAttributes, (spc, supportsGeneric) =>
+        // If a referenced assembly already exposes StrongIdAnalyzer.IdAttribute to us
+        // (e.g. an upstream project that grants InternalsVisibleTo), skip emitting to
+        // avoid CS0436 type-conflict errors. We must check actual accessibility from
+        // the current compilation's assembly — GetTypesByMetadataName returns types
+        // from referenced assemblies regardless of accessibility, so an internal-without-IVT
+        // match doesn't count.
+        var attributeAlreadyVisible = context.CompilationProvider.Select((compilation, _) =>
         {
+            var types = compilation.GetTypesByMetadataName("StrongIdAnalyzer.IdAttribute");
+            var currentAssembly = compilation.Assembly;
+            foreach (var type in types)
+            {
+                if (SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, currentAssembly))
+                {
+                    continue;
+                }
+                if (compilation.IsSymbolAccessibleWithin(type, currentAssembly))
+                {
+                    return true;
+                }
+            }
+            return false;
+        });
+
+        var input = supportsGenericAttributes.Combine(attributeAlreadyVisible);
+
+        context.RegisterSourceOutput(input, (spc, pair) =>
+        {
+            var (supportsGeneric, alreadyVisible) = pair;
+            if (alreadyVisible)
+            {
+                return;
+            }
             var source = supportsGeneric ? baseSource + genericSource : baseSource;
             spc.AddSource("IdAttribute.g.cs", source);
         });

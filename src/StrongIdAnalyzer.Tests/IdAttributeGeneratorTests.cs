@@ -48,6 +48,44 @@ public class IdAttributeGeneratorTests
         await Assert.That(errors.Length).IsEqualTo(0);
     }
 
+    [Test]
+    public async Task SkipsEmit_WhenAttributeVisibleFromReference()
+    {
+        // Simulate an upstream assembly that already has StrongIdAnalyzer.IdAttribute
+        // exposed (public here stands in for InternalsVisibleTo).
+        var upstreamSource =
+            """
+            namespace StrongIdAnalyzer;
+            using System;
+            public sealed class IdAttribute(string type) : Attribute;
+            """;
+        var upstream = CSharpCompilation.Create(
+            "Upstream",
+            [CSharpSyntaxTree.ParseText(upstreamSource)],
+            TrustedReferences.All,
+            new(OutputKind.DynamicallyLinkedLibrary));
+
+        using var peStream = new MemoryStream();
+        var emitResult = upstream.Emit(peStream);
+        await Assert.That(emitResult.Success).IsTrue();
+        peStream.Position = 0;
+        var upstreamRef = MetadataReference.CreateFromStream(peStream);
+
+        var compilation = CSharpCompilation.Create(
+            "Downstream",
+            [CSharpSyntaxTree.ParseText("public class Dummy {}")],
+            [.. TrustedReferences.All, upstreamRef],
+            new(OutputKind.DynamicallyLinkedLibrary));
+
+        var driver = CSharpGeneratorDriver.Create(new IdAttributeGenerator());
+        var runResult = driver.RunGenerators(compilation).GetRunResult();
+
+        var generated = runResult.GeneratedTrees
+            .Where(_ => _.FilePath.EndsWith("IdAttribute.g.cs"))
+            .ToArray();
+        await Assert.That(generated.Length).IsEqualTo(0);
+    }
+
     static GeneratorDriverRunResult RunGenerator(string source)
     {
         var compilation = BuildCompilation(source);
