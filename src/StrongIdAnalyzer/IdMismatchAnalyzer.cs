@@ -307,17 +307,21 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     return false;
                 }
 
-                // Anonymous-type properties can't carry [Id] attributes, and a convention
-                // tag on one would produce SIA001/002/003 reports the user has no way to
-                // silence. Treat them as untagged so values can flow through `new { ... }`
-                // shapes (EF `HasIndex`, LINQ projections) without noise.
-                if (property.ContainingType is { IsAnonymousType: true })
-                {
-                    return false;
-                }
-
                 name = property.Name;
                 containingType = property.ContainingType;
+
+                // Anonymous-type properties can't carry [Id]. The `Id` rule (containing-type
+                // name) on an anon type would map to the synthesized `<>f__AnonymousType*`
+                // name, which is meaningless as a tag — disable it. The `XxxId` rule is
+                // purely name-based, so it still applies and lets values read OUT of an anon
+                // property carry their conventional tag (e.g. `extract.CustomerId` flowing
+                // into a `[Id("Customer")]` target). Writes INTO anon properties are
+                // separately silenced in Report — no fix site exists on the anon side.
+                if (containingType is { IsAnonymousType: true })
+                {
+                    allowIdRule = false;
+                }
+
                 break;
             case IFieldSymbol field:
                 if (field.IsImplicitlyDeclared)
@@ -882,6 +886,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // [Id] so firing here would just be noise.
         if (untaggedSymbol is null ||
             untaggedSymbol.DeclaringSyntaxReferences.IsEmpty)
+        {
+            return;
+        }
+
+        // Anonymous-type members can't carry [Id]; suppress for the same reason as the
+        // target-side check in Report.
+        if (untaggedSymbol is IPropertySymbol { ContainingType.IsAnonymousType: true })
         {
             return;
         }
@@ -2116,6 +2127,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         IdInfo target,
         Config config)
     {
+        // Anonymous-type properties can't carry [Id], so any diagnostic against one as a
+        // target has no fix site (covers SIA001/SIA002/SIA003 from a `new { X = expr }`
+        // initializer's synthesized assignment, and any other write where the target lives
+        // on an anonymous type). Reads from anon properties still carry their convention
+        // tag — see TryGetConventionName.
+        if (targetSymbol is IPropertySymbol { ContainingType.IsAnonymousType: true })
+        {
+            return;
+        }
+
         if (source.State == IdState.Unknown ||
             target.State == IdState.Unknown)
         {
@@ -2214,14 +2235,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static bool IsBoundaryTarget(ISymbol target)
     {
-        // Anonymous-type members can't carry [Id], so flowing a tagged value into one
-        // (e.g. `new { BillId = order.BillId }` in an EF `HasIndex` expression) has no
-        // fix site. Treat as boundary so SIA003 stays quiet.
-        if (target is IPropertySymbol { ContainingType.IsAnonymousType: true })
-        {
-            return true;
-        }
-
+        // Anonymous-type members are filtered out earlier in Report, so they can't reach
+        // here. The remaining checks cover targets whose declared type can't meaningfully
+        // hold a tag.
+        //
         // For parameters on a generic method, `.Type` is already substituted at the call
         // site (T → Guid). Inspect the original definition so the type-parameter check
         // actually catches `T`. Properties/fields don't have this issue since their
