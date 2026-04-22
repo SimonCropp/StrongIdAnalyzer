@@ -4026,6 +4026,312 @@ public class IdMismatchAnalyzerTests
         await Assert.That(diagnostics.Length).IsEqualTo(0);
     }
 
+    [Test]
+    public async Task IdTag_OnTypeParameter_TagsCollectionMember()
+    {
+        // `[IdTag]` on T means `WellKnownId<Operation>.Guids` picks up tag "Operation"
+        // at the use site. `.First()` carries the element tag to the target, so an
+        // explicit-tagged target is silent. `Target` intentionally does not match the
+        // Id/XxxId convention so SIA005 (redundant attribute) does not interfere.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Operation;
+
+            public static class WellKnownId<[IdTag] T>
+            {
+                public static IEnumerable<Guid> Guids => null!;
+            }
+
+            public class Holder
+            {
+                [Id<Operation>]
+                public Guid Target { get; set; }
+
+                public void Copy() =>
+                    Target = WellKnownId<Operation>.Guids.First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IdTag_FlowsThroughExceptChain()
+    {
+        // Reproduces the CommitmentsDataModel case: the LINQ chain walks back through
+        // Except (element-preserving) to WellKnownId<Operation>.Guids, which picks up
+        // its implicit tag from `[IdTag] T`.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Operation;
+
+            public static class WellKnownId<[IdTag] T>
+            {
+                public static IEnumerable<Guid> Guids => null!;
+            }
+
+            public class Holder
+            {
+                [Id<Operation>]
+                static Guid[] blocked = null!;
+
+                [Id<Operation>]
+                public Guid Target { get; set; }
+
+                public void Copy() =>
+                    Target = WellKnownId<Operation>.Guids.Except(blocked).First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IdTag_Mismatch_ReportsSIA001()
+    {
+        // Tag substitution must actually kick in — if the use site is
+        // `WellKnownId<Operation>` but the target is `[Id<Customer>]`, SIA001 fires.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Operation;
+            public class Customer;
+
+            public static class WellKnownId<[IdTag] T>
+            {
+                public static IEnumerable<Guid> Guids => null!;
+            }
+
+            public class Holder
+            {
+                [Id<Customer>]
+                public Guid Target { get; set; }
+
+                public void Copy() =>
+                    Target = WellKnownId<Operation>.Guids.First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
+    [Test]
+    public async Task IdTag_ScalarMethodReturn_ProducesNoImplicitTag()
+    {
+        // Scalar method returns are out of scope for implicit [IdTag] flow — otherwise
+        // factory methods (`MakeGuid`, `NewX`) inside a tagged generic would force
+        // every caller storing the result into an untagged field to add [Id] too.
+        // A call-site assignment into an unrelated-tag target stays silent.
+        var source =
+            """
+            using System;
+
+            public class Operation;
+            public class Customer;
+
+            public static class WellKnownId<[IdTag] T>
+            {
+                public static Guid MakeGuid(int index) => Guid.Empty;
+            }
+
+            public class Holder
+            {
+                [Id<Customer>]
+                public Guid Target { get; set; }
+
+                public void Copy() => Target = WellKnownId<Operation>.MakeGuid(0);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IdTag_MethodParameter_ProducesNoImplicitTag()
+    {
+        // Parameters of members inside a `[IdTag]`-tagged generic stay untagged. The
+        // caller's tagged argument landing in an untagged target is SIA003 territory —
+        // that's the pre-existing policy and is unchanged by [IdTag].
+        var source =
+            """
+            using System;
+
+            public class Operation;
+            public class Customer;
+
+            public static class WellKnownId<[IdTag] T>
+            {
+                public static string GetName(Guid id) => "";
+            }
+
+            public class Holder
+            {
+                [Id<Customer>]
+                public Guid Source { get; set; }
+
+                public string Use() => WellKnownId<Operation>.GetName(Source);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA003");
+    }
+
+    [Test]
+    public async Task IdTag_OpenGenericSelfReference_ProducesNoTag()
+    {
+        // Inside WellKnownId<T> itself T is still a type parameter — no real tag name
+        // is available, so the analyzer must not infer anything. Cross-assigning the
+        // untagged Guids to an untagged Guid target is silent.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public static class WellKnownId<[IdTag] T>
+            {
+                public static IEnumerable<Guid> Guids => null!;
+
+                public static Guid First() => Guids.First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IdTag_MultipleTagParameters_ProducesUnion()
+    {
+        // Two `[IdTag]` type parameters produce a union tag set on the collection
+        // member. `.First()` inherits the set, so assigning to a target tagged with
+        // either one is silent.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Operation;
+            public class Customer;
+            public class Order;
+
+            public static class Cross<[IdTag] T1, [IdTag] T2>
+            {
+                public static IEnumerable<Guid> Values => null!;
+            }
+
+            public class Holder
+            {
+                [Id<Customer>]
+                public Guid Target { get; set; }
+
+                public void Copy() => Target = Cross<Operation, Customer>.Values.First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IdTag_NoAttribute_ProducesNoTag()
+    {
+        // Without `[IdTag]`, a plain generic type parameter must NOT leak a tag.
+        // The `.Select(_ => new Holder { Target = _ })` shape forces the lambda param
+        // resolution path: receiver Guids is untagged, so `_` falls back to NotPresent,
+        // and the assignment to `[Id<Operation>] Target` fires SIA002.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Operation;
+
+            public static class WellKnownId<T>
+            {
+                public static IEnumerable<Guid> Guids => null!;
+            }
+
+            public class Holder
+            {
+                [Id<Operation>]
+                public Guid Target { get; set; }
+
+                public void Use() =>
+                    WellKnownId<Operation>.Guids
+                        .Select(_ => new Holder { Target = _ });
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA002");
+    }
+
+    [Test]
+    public async Task IdTag_NestedGeneric_PicksUpOuterTag()
+    {
+        // A non-generic nested type inside Outer<[IdTag] T> inherits T's substitution
+        // via ContainingType walking, so a collection member on Inner picks up the
+        // outer tag. `.First()` carries the element tag to the assignment target.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Operation;
+
+            public static class Outer<[IdTag] T>
+            {
+                public static class Inner
+                {
+                    public static IEnumerable<Guid> Values => null!;
+                }
+            }
+
+            public class Holder
+            {
+                [Id<Operation>]
+                public Guid Target { get; set; }
+
+                public void Copy() => Target = Outer<Operation>.Inner.Values.First();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
     static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string messagesSource,
         string consumerSource)

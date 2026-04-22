@@ -46,6 +46,21 @@ public class IdAttributeGenerator : IIncrementalGenerator
         #pragma warning disable CS9113
         sealed class UnionIdAttribute(params string[] types) : Attribute;
         #pragma warning restore CS9113
+
+        /// <summary>
+        /// Marks a generic type parameter as an Id tag source for collection-typed
+        /// members of the containing type. <c>WellKnownId&lt;Operation&gt;.Guids</c>,
+        /// where <c>Guids</c> is an <c>IEnumerable&lt;Guid&gt;</c>, picks up the element
+        /// tag <c>"Operation"</c> at the use site without a per-member attribute —
+        /// so LINQ chains and foreach loops over it bind their element variables to
+        /// that tag. Scalar members (method returns, properties, parameters) still
+        /// need explicit <see cref="IdAttribute"/> / <see cref="UnionIdAttribute"/>.
+        /// Open-generic references (T still unsubstituted) produce no tag.
+        /// </summary>
+        [AttributeUsage(AttributeTargets.GenericParameter, Inherited = false)]
+        [ExcludeFromCodeCoverage]
+        [DebuggerNonUserCode]
+        sealed class IdTagAttribute : Attribute;
         """;
 
     // Generic variant — equivalent to [Id(nameof(T))] but enforced by the compiler to

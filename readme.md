@@ -811,6 +811,45 @@ Lambda-parameter binding applies to any extension method on `IEnumerable<T>` reg
 Element-returning inference (`.First()` and friends) stays closed to the `System.Linq.Enumerable`/`Queryable` allowlist — a third-party method named `First` could have different semantics, and the element-returning category depends on the semantics, not the signature.
 
 
+### Tagging from a generic type parameter
+
+Generic container types — lookup tables, well-known-id registries, per-domain helpers — can declare the Id tag at the type-parameter level via `[IdTag]`. Collection-typed members of such a container pick up the substituted type argument's short name as an implicit element tag at each use site, so LINQ chains and foreach loops bind their element variables to the right tag without a per-member attribute.
+
+<!-- snippet: IdTagTypeParameter -->
+<a id='snippet-IdTagTypeParameter'></a>
+```cs
+public class Operation;
+
+public static class WellKnownId<[IdTag] T>
+{
+    // [IdTag] on the type parameter marks it as an Id tag source. Members of the
+    // containing type implicitly carry the substituted type argument's short name
+    // as an Id tag at every use site — so WellKnownId<Customer>.Guids is treated
+    // as a Customer-tagged collection without a per-member attribute.
+    public static IEnumerable<Guid> Guids { get; } = [];
+}
+
+public class OperationIndex
+{
+    [Id("Operation")]
+    static Guid[] blocked = [];
+
+    [Id("Customer")]
+    public Guid LatestCustomerId { get; set; }
+
+    // SIA001: .Except is element-preserving, so the walk terminates at
+    // WellKnownId<Operation>.Guids whose implicit tag is "Operation". That tag
+    // rides through .First() and collides with the "Customer"-tagged target.
+    public void Copy() =>
+        LatestCustomerId = WellKnownId<Operation>.Guids.Except(blocked).First();
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L426-L454' title='Snippet source file'>snippet source</a> | <a href='#snippet-IdTagTypeParameter' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+The implicit flow is deliberately scoped to collection elements. Scalar members — method returns, properties, parameters — still need explicit `[Id]` / `[UnionId]`; otherwise a factory like `WellKnownId<T>.MakeGuid(int)` would silently tag every call site, forcing every receiving field and variable onto the attribute to avoid SIA003. Open-generic references (where the type parameter is still unsubstituted, e.g. member accesses from inside `WellKnownId<T>` itself) produce no implicit tag. Multiple `[IdTag]` parameters on the same type contribute a union: a collection declared on `Cross<[IdTag] T1, [IdTag] T2>` carries both tag names. Nested types inherit the outer type's `[IdTag]` parameters.
+
+
 ### What is not supported
 
 Multi-type-parameter containers — `Dictionary<K,V>`, `KeyValuePair<K,V>`, `ILookup<K,V>`, `IGrouping<K,T>`, `ValueTuple<…>` — are deliberately excluded in this release. A bare `[Id("Customer")]` attribute on a `Dictionary<Guid,Guid>` has no unambiguous target (key? value? both?), so the analyzer ignores the attribute on these shapes and produces no diagnostics for reads through them.
@@ -827,7 +866,7 @@ public class CustomerOrderMap
     public Dictionary<Guid, string> OrdersByCustomer { get; set; } = [];
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L426-L437' title='Snippet source file'>snippet source</a> | <a href='#snippet-UnsupportedMultiTCollection' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L456-L467' title='Snippet source file'>snippet source</a> | <a href='#snippet-UnsupportedMultiTCollection' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Distinct attributes for the key and value positions, plus tuple-field-level tagging, are on the roadmap but will require a dedicated design pass.
