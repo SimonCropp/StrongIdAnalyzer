@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsTestProject>true</IsTestProject>
+    <ImplicitUsings>true</ImplicitUsings>
+    <WarningsAsErrors>SIA001;SIA002;SIA003</WarningsAsErrors>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="StrongIdAnalyzer" />
+    <PackageReference Include="TUnit" />
+    <ProjectReference Include="..\UpstreamLib\UpstreamLib.csproj" />
+  </ItemGroup>
+</Project>
