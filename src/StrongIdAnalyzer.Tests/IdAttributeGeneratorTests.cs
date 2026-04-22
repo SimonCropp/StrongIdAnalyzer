@@ -84,6 +84,11 @@ public class IdAttributeGeneratorTests
             .Where(_ => _.FilePath.EndsWith("IdAttribute.g.cs"))
             .ToArray();
         await Assert.That(generated.Length).IsEqualTo(0);
+
+        var globalUsings = runResult.GeneratedTrees
+            .Single(_ => _.FilePath.EndsWith("IdAttributeGlobalUsings.g.cs"));
+        await Assert.That(globalUsings.ToString().Contains("global using StrongIdAnalyzer"))
+            .IsTrue();
     }
 
     static GeneratorDriverRunResult RunGenerator(string source)

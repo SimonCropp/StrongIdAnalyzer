@@ -6,4 +6,6 @@
     <File Path="nuget.config" />
   </Folder>
   <Project Path="IntegrationTests/IntegrationTests.csproj" />
+  <Project Path="UpstreamLib/UpstreamLib.csproj" />
+  <Project Path="UpstreamReferencingTests/UpstreamReferencingTests.csproj" />
 </Solution>
