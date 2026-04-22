@@ -586,6 +586,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     const string idMetadataName = "IdAttribute";
     const string unionIdMetadataName = "UnionIdAttribute";
+    const string idTagMetadataName = "IdTagAttribute";
     const string indexAttributeMetadataName = "StrongIdIndexAttribute";
 
     // Looks up pre-resolved tags for `symbol` in the containing-assembly index, if one
@@ -778,6 +779,78 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static bool IsAnyIdAttribute(AttributeData attribute) =>
         IsAttributeNamed(attribute, idMetadataName) ||
         TryGetGenericIdTag(attribute, out _);
+
+    // Walk the containing-type chain of `symbol` and collect substituted type-argument
+    // short names for every original-definition type parameter marked [IdTag]. The
+    // attribute is opt-in at the type-parameter declaration, so this produces a tag set
+    // only when the author explicitly marked a generic as an Id-tag source.
+    //
+    // Scope: only wired into the collection-element path (GetExplicitCollectionTags) so
+    // `WellKnownId<Customer>.Guids` flows a tag through LINQ chains. Scalar members
+    // (method returns, properties, parameters) still need explicit [Id] / [UnionId] —
+    // otherwise every factory method inside a `[IdTag]`-annotated type would surface
+    // SIA003 against callers storing the result into an untagged field.
+    //
+    // Skipped when the type argument is still a type parameter (open-generic reference
+    // from inside the declaring type itself) or an error type — same guard TryGetGenericIdTag
+    // uses, for the same reason: no real tag name is available yet.
+    static ImmutableArray<string> GetImplicitTagsFromContainingGenerics(ISymbol symbol)
+    {
+        ImmutableArray<string>.Builder? builder = null;
+        HashSet<string>? seen = null;
+        var containing = symbol.ContainingType;
+        while (containing is not null)
+        {
+            var originalParams = containing.OriginalDefinition.TypeParameters;
+            var constructedArgs = containing.TypeArguments;
+            var count = Math.Min(originalParams.Length, constructedArgs.Length);
+            for (var i = 0; i < count; i++)
+            {
+                if (!HasIdTagAttribute(originalParams[i]))
+                {
+                    continue;
+                }
+
+                var arg = constructedArgs[i];
+                if (arg.TypeKind is TypeKind.Error or TypeKind.TypeParameter)
+                {
+                    continue;
+                }
+
+                var name = arg.Name;
+                if (string.IsNullOrEmpty(name))
+                {
+                    continue;
+                }
+
+                seen ??= new(StringComparer.Ordinal);
+                if (!seen.Add(name))
+                {
+                    continue;
+                }
+
+                builder ??= ImmutableArray.CreateBuilder<string>();
+                builder.Add(name);
+            }
+
+            containing = containing.ContainingType;
+        }
+
+        return builder?.ToImmutable() ?? [];
+    }
+
+    static bool HasIdTagAttribute(ITypeParameterSymbol parameter)
+    {
+        foreach (var attribute in parameter.GetAttributes())
+        {
+            if (IsAttributeNamed(attribute, idTagMetadataName))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     // Matches `[UnionId<T1, T2, ...>]` (arities 2..5). Each type argument contributes its
     // short name as a tag, mirroring `[UnionId(nameof(T1), nameof(T2), ...)]`.
@@ -1438,6 +1511,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             {
                 return inherited;
             }
+        }
+
+        var implicitTags = GetImplicitTagsFromContainingGenerics(symbol);
+        if (!implicitTags.IsDefaultOrEmpty)
+        {
+            return IdInfo.PresentExplicit(implicitTags);
         }
 
         return IdInfo.NotPresent;

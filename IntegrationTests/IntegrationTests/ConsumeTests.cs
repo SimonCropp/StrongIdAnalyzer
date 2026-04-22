@@ -23,6 +23,42 @@ public class ConsumeTests
     [Test]
     public void GeneratedUnionIdAttribute_IsAvailable() =>
         _ = new UnionIdAttribute("Order", "Customer");
+
+    [Test]
+    public void IdTagTypeParameter_FlowsThroughLinqChain()
+    {
+        // Mirrors the CommitmentsDataModel shape: WellKnownId<Operation>.Guids is
+        // implicitly tagged via [IdTag] T, flows through Except and Select, and
+        // binds the lambda param to the substituted tag — no SIA002 at build time.
+        var mapper = new RoleOperationMapper();
+        mapper.Seed();
+    }
+}
+
+public class Operation;
+
+public static class WellKnownId<[IdTag] T>
+{
+    public static IEnumerable<System.Guid> Guids { get; } = [];
+}
+
+public class RoleOperationMapper
+{
+    [Id<Operation>]
+    static System.Guid[] blocked = [];
+
+    public List<Row> Seed() =>
+        WellKnownId<Operation>
+            .Guids
+            .Except(blocked)
+            .Select(_ => new Row { Target = _ })
+            .ToList();
+}
+
+public class Row
+{
+    [Id<Operation>]
+    public System.Guid Target { get; set; }
 }
 
 public class IdSample

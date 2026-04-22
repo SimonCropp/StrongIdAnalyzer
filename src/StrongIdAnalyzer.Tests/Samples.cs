@@ -423,6 +423,36 @@ public class PagedReader
 
 #endregion
 
+#region IdTagTypeParameter
+
+public class Operation;
+
+public static class WellKnownId<[IdTag] T>
+{
+    // [IdTag] on the type parameter marks it as an Id tag source. Members of the
+    // containing type implicitly carry the substituted type argument's short name
+    // as an Id tag at every use site — so WellKnownId<Customer>.Guids is treated
+    // as a Customer-tagged collection without a per-member attribute.
+    public static IEnumerable<Guid> Guids { get; } = [];
+}
+
+public class OperationIndex
+{
+    [Id("Operation")]
+    static Guid[] blocked = [];
+
+    [Id("Customer")]
+    public Guid LatestCustomerId { get; set; }
+
+    // SIA001: .Except is element-preserving, so the walk terminates at
+    // WellKnownId<Operation>.Guids whose implicit tag is "Operation". That tag
+    // rides through .First() and collides with the "Customer"-tagged target.
+    public void Copy() =>
+        LatestCustomerId = WellKnownId<Operation>.Guids.Except(blocked).First();
+}
+
+#endregion
+
 #region UnsupportedMultiTCollection
 
 public class CustomerOrderMap
