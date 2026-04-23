@@ -88,7 +88,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             var suppressedNamespaces = NamespaceSuppression.Read(
                 start.Options.AnalyzerConfigOptionsProvider,
                 start.Compilation);
-            var config = new Config(suppressedNamespaces, start.Compilation);
+            var inferSuffixTags = SuffixInference.Read(
+                start.Options.AnalyzerConfigOptionsProvider,
+                start.Compilation);
+            var config = new Config(suppressedNamespaces, inferSuffixTags, start.Compilation);
 
             start.RegisterOperationAction(
                 _ => AnalyzeArgument(_, config),
@@ -699,10 +702,21 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     const string unionIdGenericMetadataPrefix = "UnionIdAttribute`";
     const int unionIdMaxGenericArity = 5;
 
-    readonly struct Config(ImmutableArray<NamespacePattern> suppressedNamespaces, Compilation compilation)
+    readonly struct Config(
+        ImmutableArray<NamespacePattern> suppressedNamespaces,
+        bool inferSuffixTags,
+        Compilation compilation)
     {
         public ImmutableArray<NamespacePattern> SuppressedNamespaces { get; } = suppressedNamespaces;
+        public bool InferSuffixTags { get; } = inferSuffixTags;
         public Compilation Compilation { get; } = compilation;
+
+        // Lazy index of every tag observed in the source compilation — convention-derived
+        // and explicit. Populated on first parameter-suffix inference attempt and shared
+        // for the rest of the compilation. Thread-safe via Lazy<T>'s default publication
+        // mode.
+        public Lazy<ImmutableHashSet<string>> KnownTags { get; } =
+            new(() => CollectKnownTags(compilation));
 
         // Tag-to-ancestor-name cache. Keyed by a tag string; value is the union of base-type
         // and interface names for every type in the compilation whose simple name equals
@@ -2024,6 +2038,22 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
+            // Opt-in suffix inference runs before the whole-name rule. Applies to
+            // properties and fields at access sites (parameters don't participate in
+            // the member-chain walk); mirrors the corresponding hook in
+            // GetIdWithInheritance for parameter references.
+            if (config.InferSuffixTags &&
+                level is IPropertySymbol or IFieldSymbol &&
+                SuffixInference.TryMatch(level.Name, config.KnownTags.Value, out var suffixTag))
+            {
+                if (seen.Add(suffixTag))
+                {
+                    memberTags.Add(suffixTag);
+                }
+
+                continue;
+            }
+
             if (TryGetConventionName(level, out var convName))
             {
                 if (seen.Add(convName))
@@ -2179,13 +2209,128 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // `Diagnostic.Id`, `DateTime.Now`) never receive automatic tags — otherwise any
         // property named `Id` in referenced assemblies would suddenly carry a tag the
         // user can't change.
-        if (!symbol.DeclaringSyntaxReferences.IsEmpty &&
-            TryGetConventionName(symbol, out var conventionName))
+        if (!symbol.DeclaringSyntaxReferences.IsEmpty)
         {
-            return IdInfo.Present(conventionName);
+            // Opt-in suffix inference runs before the whole-name rule. For
+            // `sourceProductId` / `SourceProductId` the whole-name rule would infer
+            // "SourceProduct" (which matches nothing and is noisy); the suffix rule
+            // instead prefers "Product" when that is a known tag. Applies to
+            // properties, fields, and parameters — DTO/command types with
+            // `Source*Id` / `Target*Id` properties want the same relief. On suffix miss
+            // we fall through to the existing whole-name rule, so current behavior is
+            // unchanged for names that don't match a known suffix.
+            if (config.InferSuffixTags &&
+                symbol is IPropertySymbol or IFieldSymbol or IParameterSymbol &&
+                SuffixInference.TryMatch(symbol.Name, config.KnownTags.Value, out var suffixTag))
+            {
+                return IdInfo.Present(suffixTag);
+            }
+
+            if (TryGetConventionName(symbol, out var conventionName))
+            {
+                return IdInfo.Present(conventionName);
+            }
         }
 
         return direct;
+    }
+
+    // Collects every tag observed in the source compilation — both convention-derived
+    // (via `TryGetConventionName`) and explicit ([Id]/[UnionId]). Drives the parameter
+    // suffix-inference gate: a suffix match is only accepted when the candidate word
+    // already exists as a tag in the compilation, which keeps incidental names like
+    // `hashedId` or `rawId` from being picked up.
+    static ImmutableHashSet<string> CollectKnownTags(Compilation compilation)
+    {
+        var builder = ImmutableHashSet.CreateBuilder(StringComparer.Ordinal);
+        foreach (var type in EnumerateSourceTypes(compilation.Assembly.GlobalNamespace))
+        {
+            foreach (var member in type.GetMembers())
+            {
+                if (member is IPropertySymbol or IFieldSymbol &&
+                    TryGetConventionName(member, out var conv))
+                {
+                    builder.Add(conv);
+                }
+
+                var explicitInfo = GetIdFromAttributes(member.GetAttributes());
+                if (explicitInfo.State == IdState.Present)
+                {
+                    foreach (var t in explicitInfo.Tags)
+                    {
+                        builder.Add(t);
+                    }
+                }
+
+                if (member is IMethodSymbol method)
+                {
+                    var returnInfo = GetIdFromAttributes(method.GetReturnTypeAttributes());
+                    if (returnInfo.State == IdState.Present)
+                    {
+                        foreach (var t in returnInfo.Tags)
+                        {
+                            builder.Add(t);
+                        }
+                    }
+
+                    foreach (var parameter in method.Parameters)
+                    {
+                        var paramInfo = GetIdFromAttributes(parameter.GetAttributes());
+                        if (paramInfo.State == IdState.Present)
+                        {
+                            foreach (var t in paramInfo.Tags)
+                            {
+                                builder.Add(t);
+                            }
+                        }
+
+                        if (TryGetConventionName(parameter, out var paramConv))
+                        {
+                            builder.Add(paramConv);
+                        }
+                    }
+                }
+            }
+        }
+
+        return builder.ToImmutable();
+    }
+
+    static IEnumerable<INamedTypeSymbol> EnumerateSourceTypes(INamespaceSymbol ns)
+    {
+        foreach (var member in ns.GetMembers())
+        {
+            switch (member)
+            {
+                case INamedTypeSymbol type:
+                    yield return type;
+                    foreach (var nested in EnumerateNestedTypes(type))
+                    {
+                        yield return nested;
+                    }
+
+                    break;
+                case INamespaceSymbol child:
+                    foreach (var t in EnumerateSourceTypes(child))
+                    {
+                        yield return t;
+                    }
+
+                    break;
+            }
+        }
+    }
+
+    static IEnumerable<INamedTypeSymbol> EnumerateNestedTypes(INamedTypeSymbol type)
+    {
+        foreach (var nested in type.GetTypeMembers())
+        {
+            yield return nested;
+            foreach (var deeper in EnumerateNestedTypes(nested))
+            {
+                yield return deeper;
+            }
+        }
     }
 
     static IdInfo GetParameterIdFromHierarchy(IParameterSymbol parameter)

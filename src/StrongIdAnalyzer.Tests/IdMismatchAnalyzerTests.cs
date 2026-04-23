@@ -2306,6 +2306,341 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task SuffixInference_Disabled_Parameter_FallsThroughToWholeNameRule()
+    {
+        // Default (off): `sourceProductId` is whole-name-inferred as "SourceProduct".
+        // Passing a Product.Id ("Product") in fires SIA001 — the noise the opt-in feature
+        // is designed to remove.
+        var source =
+            """
+            using System;
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Duplicate(Guid sourceProductId) { }
+
+                public void Trigger(Product p) => Duplicate(p.Id);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        var message = diagnostics[0].GetMessage();
+        await Assert.That(message.Contains("Product")).IsTrue();
+        await Assert.That(message.Contains("SourceProduct")).IsTrue();
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_Parameter_MatchesKnownTag()
+    {
+        // Opt-in: `sourceProductId` / `targetProductId` both infer "Product" because
+        // Product.Id is a known convention tag. Source tag matches → no diagnostic.
+        var source =
+            """
+            using System;
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Duplicate(Guid sourceProductId, Guid targetProductId, string newName) { }
+
+                public void Trigger(Product p) => Duplicate(p.Id, p.Id, "n");
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_Parameter_MismatchFiresSIA001()
+    {
+        // Opt-in: a `CustomerId` source flowing into `sourceProductId` crosses domains.
+        var source =
+            """
+            using System;
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Customer
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Duplicate(Guid sourceProductId) { }
+
+                public void Trigger(Customer c) => Duplicate(c.Id);
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        var message = diagnostics[0].GetMessage();
+        await Assert.That(message.Contains("Customer")).IsTrue();
+        await Assert.That(message.Contains("Product")).IsTrue();
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_UnknownWord_FallsThrough()
+    {
+        // `rawProductBytesId` — last word before `Id` is `Bytes`, which is not a known
+        // tag. Suffix rule declines; the whole-name rule then infers "RawProductBytes".
+        // Source Product → SIA001 Product vs RawProductBytes, confirming the suffix rule
+        // did NOT silently tag the parameter as "Product".
+        var source =
+            """
+            using System;
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Store(Guid rawProductBytesId) { }
+
+                public void Trigger(Product p) => Store(p.Id);
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        var message = diagnostics[0].GetMessage();
+        await Assert.That(message.Contains("RawProductBytes")).IsTrue();
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_LastWordWins()
+    {
+        // `productOrderId` — last word before `Id` is `Order`, so the param is tagged
+        // "Order". Passing a Product.Id in fires SIA001 (Product vs Order).
+        var source =
+            """
+            using System;
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Order
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Process(Guid productOrderId) { }
+
+                public void Trigger(Product p) => Process(p.Id);
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        var message = diagnostics[0].GetMessage();
+        await Assert.That(message.Contains("Product")).IsTrue();
+        await Assert.That(message.Contains("Order")).IsTrue();
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_OnProperty()
+    {
+        // Properties on a command / DTO type: `SourceProductId` and `TargetProductId`
+        // both infer "Product" via the suffix rule. Assigning each to a Product.Id is
+        // clean; the string property `NewName` doesn't participate.
+        var source =
+            """
+            using System;
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class DuplicateProductCommand
+            {
+                public Guid SourceProductId { get; set; }
+                public Guid TargetProductId { get; set; }
+                public string NewName { get; set; } = "";
+            }
+
+            public class Caller
+            {
+                public void Build(Product p, DuplicateProductCommand cmd)
+                {
+                    cmd.SourceProductId = p.Id;
+                    cmd.TargetProductId = p.Id;
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_OnField()
+    {
+        // Same rule on a plain field. `SourceProductId` infers "Product" with the flag on.
+        var source =
+            """
+            using System;
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Slot
+            {
+                public Guid SourceProductId;
+            }
+
+            public class Caller
+            {
+                public void Fill(Product p, Slot s) => s.SourceProductId = p.Id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task SuffixInference_Disabled_PropertyFallsThrough()
+    {
+        // With the flag off, `SourceProductId` is whole-name-tagged "SourceProduct" via
+        // rule 2. Assigning a Product.Id ("Product") into it fires SIA001 — the baseline
+        // noise the opt-in removes.
+        var source =
+            """
+            using System;
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class DuplicateProductCommand
+            {
+                public Guid SourceProductId { get; set; }
+            }
+
+            public class Caller
+            {
+                public void Build(Product p, DuplicateProductCommand cmd) => cmd.SourceProductId = p.Id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        var message = diagnostics[0].GetMessage();
+        await Assert.That(message.Contains("Product")).IsTrue();
+        await Assert.That(message.Contains("SourceProduct")).IsTrue();
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_ExplicitAttributeWins()
+    {
+        // Explicit `[Id("Customer")]` on the parameter overrides suffix inference.
+        // Source is a Product.Id → fires SIA001 (Product vs Customer), not Product vs Product.
+        var source =
+            """
+            using System;
+            using StrongIdAnalyzer;
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Customer
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Process([Id("Customer")] Guid sourceProductId) { }
+
+                public void Trigger(Product p) => Process(p.Id);
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        var sia001 = diagnostics.Where(_ => _.Id == "SIA001").ToArray();
+        await Assert.That(sia001.Length).IsEqualTo(1);
+        var message = sia001[0].GetMessage();
+        await Assert.That(message.Contains("Product")).IsTrue();
+        await Assert.That(message.Contains("Customer")).IsTrue();
+    }
+
+    [Test]
     public async Task SIA005_RedundantAttributeOnParameter_Fires()
     {
         var source =

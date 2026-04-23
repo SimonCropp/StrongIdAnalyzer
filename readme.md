@@ -257,6 +257,79 @@ public class Customer
 }
 ```
 
+### Suffix inference (opt-in)
+
+Member names frequently carry a qualifier prefix — parameters like `sourceProductId`, `targetProductId`, `oldOrderId`, `newOrderId`, or properties on command / DTO types like:
+
+```cs
+public class DuplicateProductCommand
+{
+    public Guid SourceProductId { get; set; }
+    public Guid TargetProductId { get; set; }
+    public string NewName { get; set; }
+}
+```
+
+Under rule 2 the whole prefix becomes the tag (`SourceProductId` → `"SourceProduct"`), which is almost never what the user means: the intent is usually `"Product"`, with `Source` / `Target` purely disambiguating two members of the same domain.
+
+Enable the opt-in suffix rule to have the analyzer pick the **last upper-case-delimited word before `Id`** as the tag, *but only if that word is a known tag in the compilation*:
+
+```editorconfig
+[*.cs]
+strongidanalyzer.infer_suffix_ids = true
+```
+
+With the flag on:
+
+```cs
+public class Product
+{
+    public Guid Id { get; set; } // tag: "Product" (rule 1)
+}
+
+// Both properties tag as "Product"; assigning a Product.Id to either is clean.
+public class DuplicateProductCommand
+{
+    public Guid SourceProductId { get; set; }
+    public Guid TargetProductId { get; set; }
+    public string NewName { get; set; }
+}
+
+// Same rule applies to parameters.
+public void DuplicateProduct(Guid sourceProductId, Guid targetProductId, string newName) { }
+
+var product = new Product();
+DuplicateProduct(product.Id, product.Id, "n"); // OK
+```
+
+#### How the match works
+
+For any property, field, or parameter whose name ends in `Id`:
+
+1. Walk back from the trailing `Id` to the last upper-case letter — that span is the candidate word.
+2. If the candidate word is in the compilation's **known-tag set** (any tag produced by rule 1, rule 2, or an explicit `[Id]` / `[UnionId]` anywhere in the source), accept it.
+3. Otherwise, fall through to rule 2 (the whole-name rule) unchanged.
+
+The known-tag constraint is deliberate — without it, every `hashedId`, `rawId`, `validId` in the codebase would start getting tagged on the last word, producing noise. Restricting to words that are *already* tags in the project means the rule only fires where the intent is unambiguous.
+
+#### Examples
+
+| Member name                | Flag off (rule 2)        | Flag on, `Product` known         | Flag on, nothing known  |
+|----------------------------|--------------------------|----------------------------------|-------------------------|
+| `ProductId` / `productId`  | `"Product"`              | `"Product"` (rule 2)             | `"Product"` (rule 2)    |
+| `SourceProductId`          | `"SourceProduct"`        | `"Product"`                      | `"SourceProduct"`       |
+| `rawProductBytesId`        | `"RawProductBytes"`      | `"RawProductBytes"` — last word `"Bytes"` unknown | `"RawProductBytes"` |
+| `productOrderId` (both known) | `"ProductOrder"`      | `"Order"` — last word wins       | `"ProductOrder"`        |
+| `HashedId`                 | `"Hashed"`               | `"Hashed"` (no prefix; rule 2)   | `"Hashed"`              |
+
+Explicit `[Id("...")]` / `[UnionId(...)]` on the member still wins over the suffix rule — same precedence as the other naming-convention rules.
+
+#### What the flag does not change
+
+- Method names — `GetSourceProductId()` and similar don't get suffix-inferred. Method names describe behavior (`Get`, `Find`, `Build`), not data, so treating the leading word as a qualifier would be noisy. Apply `[return: Id("Product")]` to tag the return type explicitly.
+- Codefixes — SIA001/SIA002/SIA003 still offer the add-`[Id]` and rename fixes; the rename fix may propose stripping the qualifier (e.g. `SourceProductId` → `ProductId`), which is a lossy rename — decline the rename fix when the qualifier is meaningful.
+- Referenced metadata — members from BCL / third-party libraries never receive convention tags, suffix-inferred or otherwise.
+
 
 ## Diagnostics
 

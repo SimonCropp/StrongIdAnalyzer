@@ -44,6 +44,8 @@ For inherited `Id` members, the effective tag set is the **union** of explicit t
 
 Record primary-constructor parameters: `[Id]` on the parameter is bridged onto the synthesized property (the compiler leaves it on the parameter by default). Explicit `[property: Id(...)]` still wins.
 
+Opt-in **suffix inference** (`.editorconfig`, `strongidanalyzer.infer_suffix_ids = true`, default off) extends rule 2 for properties, fields, and parameters: the last upper-case-delimited word before the trailing `Id` is taken as the tag if it matches a tag already present in the compilation (any rule 1 / rule 2 / explicit attribute). So `sourceProductId` / `SourceProductId` → `"Product"` when `Product` has a conventional `Id`. On miss, falls through to the normal whole-name rule. Known-tag set is computed lazily via `Lazy<ImmutableHashSet<string>>` on `Config`, populated by walking `compilation.Assembly.GlobalNamespace` on first use. Hook point: `GetIdWithInheritance`, before the `TryGetConventionName` fallback.
+
 ### Source resolution
 
 SIA001/002/003 fire when the source expression is a **property / field / parameter reference**, or a **method invocation whose target method carries `[return: Id]` / `[return: UnionId]`** (override / interface-impl return attributes are walked). `await` is transparently unwrapped — a tagged async method's result flows through `await`. Literals, locals, untagged invocations, and compound expressions (ternaries, casts, null-coalescing) are deliberately `Unknown` and suppress all three diagnostics — this is what keeps noise down around `Guid.NewGuid()` and `Guid.Empty`. Don't "fix" this by analyzing more expression shapes without understanding why it's restricted.

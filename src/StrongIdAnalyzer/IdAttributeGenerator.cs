@@ -138,7 +138,7 @@ public class IdAttributeGenerator : IIncrementalGenerator
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var supportsGenericAttributes = context.ParseOptionsProvider.Select((options, _) =>
-            options is CSharpParseOptions { LanguageVersion: >= LanguageVersion.CSharp11 });
+            options is CSharpParseOptions {LanguageVersion: >= LanguageVersion.CSharp11});
 
         // If a referenced assembly already exposes StrongIdAnalyzer.IdAttribute to us
         // (e.g. an upstream project that grants InternalsVisibleTo), skip emitting to
@@ -156,26 +156,32 @@ public class IdAttributeGenerator : IIncrementalGenerator
                 {
                     continue;
                 }
+
                 if (compilation.IsSymbolAccessibleWithin(type, currentAssembly))
                 {
                     return true;
                 }
             }
+
             return false;
         });
 
         var input = supportsGenericAttributes.Combine(attributeAlreadyVisible);
 
-        context.RegisterSourceOutput(input, (spc, pair) =>
-        {
-            var (supportsGeneric, alreadyVisible) = pair;
-            spc.AddSource("IdAttributeGlobalUsings.g.cs", globalUsingSource);
-            if (alreadyVisible)
+        context.RegisterSourceOutput(
+            input,
+            (productionContext, pair) =>
             {
-                return;
-            }
-            var source = supportsGeneric ? baseSource + genericSource : baseSource;
-            spc.AddSource("IdAttribute.g.cs", source);
-        });
+                var (supportsGeneric, alreadyVisible) = pair;
+                productionContext.AddSource("IdAttributeGlobalUsings.g.cs", globalUsingSource);
+                if (alreadyVisible)
+                {
+                    return;
+                }
+
+                var source = supportsGeneric ? baseSource + genericSource : baseSource;
+                productionContext.AddSource("IdAttribute.g.cs", source);
+            });
     }
+
 }

@@ -5,3 +5,9 @@ root = true
 # include them alongside the Suppressed* prefix used by
 # SuppressedNamespaceConsumeTests so the rest of the project still compiles clean.
 strongidanalyzer.suppressed_namespaces = System*,Microsoft*,Suppressed*
+
+# Opt-in suffix inference — used by SuffixInferenceConsumeTests.
+# With this flag off, `SourceProductId` / `TargetProductId` (properties and parameters)
+# would be tagged "SourceProduct" / "TargetProduct" by the whole-name rule and fail
+# the build.
+strongidanalyzer.infer_suffix_ids = true
