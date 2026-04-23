@@ -716,7 +716,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // for the rest of the compilation. Thread-safe via Lazy<T>'s default publication
         // mode.
         public Lazy<ImmutableHashSet<string>> KnownTags { get; } =
-            new(() => CollectKnownTags(compilation));
+            new(() => CollectKnownTags(compilation, suppressedNamespaces));
 
         // Tag-to-ancestor-name cache. Keyed by a tag string; value is the union of base-type
         // and interface names for every type in the compilation whose simple name equals
@@ -2247,25 +2247,37 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // KnownTags powers suffix inference's "is this candidate a real domain?" check.
     // Two contributions qualify a tag as a domain:
     //   (1) A type that has a conventional `Id` member — declared directly OR inherited
-    //       from a base type (rule 1 walks the receiver's static-type chain, so a derived
-    //       type inheriting `Id` still produces its own name as a tag).
-    //   (2) An explicit `[Id]` / `[UnionId]` / `[return: Id]` anywhere in source.
+    //       from a base type. The walk uses `compilation.GlobalNamespace` (merged across
+    //       source AND referenced metadata, minus suppressed namespaces), so a project
+    //       referencing a domain assembly that defines `AccessGroup` / `Group` still
+    //       sees them as known tags. Without this, a Seeding project's `accessGroupId`
+    //       parameter would resolve to `"Group"` (an explicit-tag match in source) even
+    //       though `"AccessGroup"` is the right whole-prefix tag, defined upstream.
+    //   (2) An explicit `[Id]` / `[UnionId]` / `[return: Id]` in this compilation's
+    //       source. Cross-assembly explicit attributes already flow through the normal
+    //       analyzer paths; KnownTags only needs the source ones here.
     // The rule-2 `XxxId` convention on properties/fields/parameters is deliberately
     // NOT included: it would create circularity for longest-first inference, where a
     // member like `sourceProductId` would contribute "SourceProduct" to the set and
     // then immediately match itself, defeating the descent to "Product". Domain-ness
     // needs an independent signal — a type or an explicit attribute — not the same
     // member name we're trying to classify.
-    static ImmutableHashSet<string> CollectKnownTags(Compilation compilation)
+    static ImmutableHashSet<string> CollectKnownTags(
+        Compilation compilation,
+        ImmutableArray<NamespacePattern> suppressedNamespaces)
     {
         var builder = ImmutableHashSet.CreateBuilder(StringComparer.Ordinal);
-        foreach (var type in EnumerateSourceTypes(compilation.Assembly.GlobalNamespace))
+
+        foreach (var type in EnumerateAccessibleTypes(compilation.GlobalNamespace, suppressedNamespaces))
         {
             if (type.Name.Length > 0 && HasIdMemberInChain(type))
             {
                 builder.Add(type.Name);
             }
+        }
 
+        foreach (var type in EnumerateSourceTypes(compilation.Assembly.GlobalNamespace))
+        {
             foreach (var member in type.GetMembers())
             {
                 var explicitInfo = GetIdFromAttributes(member.GetAttributes());
@@ -2304,6 +2316,42 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         return builder.ToImmutable();
+    }
+
+    // Walks the merged global namespace (source + references) yielding types whose
+    // containing namespace doesn't match any suppression pattern. The default suppression
+    // set (`System*,Microsoft*`) keeps BCL types out of the walk — without it KnownTags
+    // would balloon and traverse thousands of unrelated framework types per compilation.
+    static IEnumerable<INamedTypeSymbol> EnumerateAccessibleTypes(
+        INamespaceSymbol ns,
+        ImmutableArray<NamespacePattern> suppressedNamespaces)
+    {
+        foreach (var member in ns.GetMembers())
+        {
+            switch (member)
+            {
+                case INamedTypeSymbol type:
+                    if (NamespaceSuppression.IsSuppressed(type, suppressedNamespaces))
+                    {
+                        break;
+                    }
+
+                    yield return type;
+                    foreach (var nested in EnumerateNestedTypes(type))
+                    {
+                        yield return nested;
+                    }
+
+                    break;
+                case INamespaceSymbol child:
+                    foreach (var t in EnumerateAccessibleTypes(child, suppressedNamespaces))
+                    {
+                        yield return t;
+                    }
+
+                    break;
+            }
+        }
     }
 
     static bool HasIdMemberInChain(INamedTypeSymbol type)

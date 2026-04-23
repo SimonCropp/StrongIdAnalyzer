@@ -2779,6 +2779,60 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task SuffixInference_Enabled_WholePrefixWinsOverInnerWord_TypesInReferencedAssembly()
+    {
+        // Real-world shape from a downstream Seeding-style project: `AccessGroup` and
+        // `Group` (both with `Id` via `BaseEntity`) live in the upstream assembly. The
+        // consumer assembly has explicit `[Id<Group>]` attributes — so its source-only
+        // KnownTags would have `"Group"` but not `"AccessGroup"`. Without walking the
+        // referenced assembly's types, longest-first matching of the consumer's
+        // `accessGroupId` parameter would skip `"AccessGroup"` (looks unknown) and fall
+        // through to `"Group"`, then wrongly fire SIA001 against `AccessGroup` sources.
+        var upstream =
+            """
+            using System;
+
+            namespace Upstream;
+
+            public abstract class BaseEntity
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Group : BaseEntity { }
+
+            public class AccessGroup : BaseEntity { }
+            """;
+
+        var consumer =
+            """
+            using System;
+            using StrongIdAnalyzer;
+            using Upstream;
+
+            public class Holder
+            {
+                [Id<Group>]
+                public static readonly Guid SomeGroupId = Guid.NewGuid();
+
+                public void AddUser(Guid accessGroupId) { }
+
+                public void Trigger(AccessGroup ag) => AddUser(ag.Id);
+            }
+            """;
+
+        var diagnostics = await GetCrossAssemblyDiagnosticsWithOptions(
+            upstream,
+            consumer,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task SuffixInference_Enabled_WholePrefixUnknown_FallsBackToInnerWord()
     {
         // `productOrderId` — `ProductOrder` is NOT a known tag, so the longest-first walk
@@ -4961,7 +5015,16 @@ public class IdMismatchAnalyzerTests
 
     static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string messagesSource,
-        string consumerSource)
+        string consumerSource) =>
+        GetCrossAssemblyDiagnosticsWithOptions(
+            messagesSource,
+            consumerSource,
+            new Dictionary<string, string>());
+
+    static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnosticsWithOptions(
+        string messagesSource,
+        string consumerSource,
+        IDictionary<string, string> globalOptions)
     {
         var messagesBase = CSharpCompilation.Create(
             "Messages",
@@ -4993,7 +5056,7 @@ public class IdMismatchAnalyzerTests
 
         var analyzerOptions = new AnalyzerOptions(
             [],
-            new TestAnalyzerConfigOptionsProvider(new Dictionary<string, string>()));
+            new TestAnalyzerConfigOptionsProvider(globalOptions));
 
         return consumerCompilation
             .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
