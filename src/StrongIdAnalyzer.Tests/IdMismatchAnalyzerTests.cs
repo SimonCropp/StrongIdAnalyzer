@@ -2680,6 +2680,98 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task SuffixInference_Enabled_WholePrefixWinsOverInnerWord()
+    {
+        // `AccessGroupId` — both `AccessGroup` and `Group` are known tags. Longest-first
+        // resolution prefers the exact whole-prefix tag over the inner-word `Group`.
+        // Assigning an `AccessGroup` id to it is clean; passing a `Group` id fires SIA001.
+        var source =
+            """
+            using System;
+
+            public class Group
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class AccessGroup
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class AccessRule
+            {
+                public Guid AccessGroupId { get; set; }
+            }
+
+            public class Holder
+            {
+                public void AssignFromAccessGroup(AccessRule rule, AccessGroup ag) =>
+                    rule.AccessGroupId = ag.Id;
+
+                public void AssignFromGroup(AccessRule rule, Group g) =>
+                    rule.AccessGroupId = g.Id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        var message = diagnostics[0].GetMessage();
+        await Assert.That(message.Contains("Group")).IsTrue();
+        await Assert.That(message.Contains("AccessGroup")).IsTrue();
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_WholePrefixUnknown_FallsBackToInnerWord()
+    {
+        // `productOrderId` — `ProductOrder` is NOT a known tag, so the longest-first walk
+        // descends to `Order` (also known). Passing a `Product.Id` fires SIA001
+        // (Product vs Order). Mirrors SuffixInference_Enabled_LastWordWins to lock in
+        // that the descent still works when the whole prefix has no matching tag.
+        var source =
+            """
+            using System;
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Order
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Process(Guid productOrderId) { }
+
+                public void Trigger(Product p) => Process(p.Id);
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        var message = diagnostics[0].GetMessage();
+        await Assert.That(message.Contains("Product")).IsTrue();
+        await Assert.That(message.Contains("Order")).IsTrue();
+    }
+
+    [Test]
     public async Task SIA005_RedundantAttributeOnParameter_Fires()
     {
         var source =

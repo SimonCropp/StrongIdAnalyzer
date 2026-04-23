@@ -2244,6 +2244,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // suffix-inference gate: a suffix match is only accepted when the candidate word
     // already exists as a tag in the compilation, which keeps incidental names like
     // `hashedId` or `rawId` from being picked up.
+    // KnownTags powers suffix inference's "is this candidate a real domain?" check.
+    // Two contributions qualify a tag as a domain:
+    //   (1) A type with a conventional `Id` member (rule 1 → containing-type name).
+    //   (2) An explicit `[Id]` / `[UnionId]` / `[return: Id]` anywhere in source.
+    // The rule-2 `XxxId` convention on properties/fields/parameters is deliberately
+    // NOT included: it would create circularity for longest-first inference, where a
+    // member like `sourceProductId` would contribute "SourceProduct" to the set and
+    // then immediately match itself, defeating the descent to "Product". Domain-ness
+    // needs an independent signal — a type or an explicit attribute — not the same
+    // member name we're trying to classify.
     static ImmutableHashSet<string> CollectKnownTags(Compilation compilation)
     {
         var builder = ImmutableHashSet.CreateBuilder(StringComparer.Ordinal);
@@ -2252,6 +2262,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             foreach (var member in type.GetMembers())
             {
                 if (member is IPropertySymbol or IFieldSymbol &&
+                    member.Name == "Id" &&
                     TryGetConventionName(member, out var conv))
                 {
                     builder.Add(conv);
@@ -2286,11 +2297,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                             {
                                 builder.Add(t);
                             }
-                        }
-
-                        if (TryGetConventionName(parameter, out var paramConv))
-                        {
-                            builder.Add(paramConv);
                         }
                     }
                 }

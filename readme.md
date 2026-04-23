@@ -283,7 +283,7 @@ public class DuplicateProductCommand
 
 Under rule 2 the whole prefix becomes the id (`SourceProductId` → `"SourceProduct"`), which is almost never what the user means: the intent is usually `"Product"`, with `Source` / `Target` purely disambiguating two members of the same domain.
 
-Enable the opt-in suffix rule in `.editorconfig` to have the analyzer pick the **last upper-case-delimited word before `Id`** as the id, *but only if that word is a known id in the compilation*:
+Enable the opt-in suffix rule in `.editorconfig` to have the analyzer pick an **upper-case-delimited tail of the name before `Id`** as the id, *but only if that tail is a known id in the compilation* — preferring the longest matching tail:
 
 ```editorconfig
 [*.cs]
@@ -318,12 +318,11 @@ DuplicateProduct(product.Id, product.Id, "n"); // OK
 
 For any property, field, or parameter whose name ends in `Id`:
 
-1. Walk back from the trailing `Id` to the last upper-case letter — that span is the first candidate word.
-2. If the candidate word is in the compilation's **known-id set** (any id produced by rule 1, rule 2, or an explicit `[Id]` / `[UnionId]` anywhere in the source), accept it.
-3. Otherwise, step back one character and walk to the **next** upper-case boundary — each step lengthens the candidate by one more upper-case-delimited word. Accept the first candidate that's in the known-id set.
-4. If no candidate short of the whole prefix matches, fall through to rule 2 (the whole-name rule) unchanged.
+1. Take the **whole prefix** (everything before the trailing `Id`) as the first candidate. If it's in the compilation's **known-id set** (any id produced by rule 1, or an explicit `[Id]` / `[UnionId]` / `[return: Id]` anywhere in the source), accept it. Rule 2 (`XxxId` naming) does *not* contribute to the known-id set — otherwise the member being analyzed would add its own whole-prefix as a known id and match itself.
+2. Otherwise, step forward to the next upper-case boundary — each step shortens the candidate by one upper-case-delimited word. Accept the first candidate that's in the known-id set.
+3. If no candidate matches, fall through to rule 2 (the whole-name rule) unchanged.
 
-Shortest-first means "last word wins": `productOrderId` with both `Product` and `Order` known resolves to `"Order"`. Multi-word tails are picked up when the shortest candidate isn't known but a longer one is: `templateExternalObjectId` with `ExternalObject` known (but no `Object`) resolves to `"ExternalObject"`.
+Longest-first means an exact whole-prefix tag always wins over an inner word: `AccessGroupId` with both `AccessGroup` and `Group` known resolves to `"AccessGroup"`. The descent only kicks in when the whole prefix isn't a known id: `productOrderId` with `Product` and `Order` known (but no `ProductOrder`) resolves to `"Order"`, and `templateExternalObjectId` with `ExternalObject` known (but no `TemplateExternalObject` and no `Object`) resolves to `"ExternalObject"`.
 
 The known-id constraint is deliberate — without it, every `hashedId`, `rawId`, `validId` in the codebase would start getting tagged on the last word, producing noise. Restricting to words that are *already* ids in the project means the rule only fires where the intent is unambiguous.
 
@@ -335,7 +334,8 @@ The known-id constraint is deliberate — without it, every `hashedId`, `rawId`,
 | `SourceProductId`          | `"SourceProduct"`        | `"Product"`                      | `"SourceProduct"`       |
 | `templateExternalObjectId` (with `ExternalObject` known) | `"TemplateExternalObject"` | `"ExternalObject"` — `"Object"` unknown, walks back to match | `"TemplateExternalObject"` |
 | `rawProductBytesId`        | `"RawProductBytes"`      | `"RawProductBytes"` — no known candidate tail | `"RawProductBytes"` |
-| `productOrderId` (both known) | `"ProductOrder"`      | `"Order"` — shortest match wins  | `"ProductOrder"`        |
+| `productOrderId` (`Product`/`Order` known, not `ProductOrder`) | `"ProductOrder"` | `"Order"` — descends past unknown whole prefix | `"ProductOrder"` |
+| `AccessGroupId` (both `AccessGroup` and `Group` known) | `"AccessGroup"` | `"AccessGroup"` — longest match wins | `"AccessGroup"` |
 | `HashedId`                 | `"Hashed"`               | `"Hashed"` (no prefix; rule 2)   | `"Hashed"`              |
 
 Explicit `[Id("...")]` / `[UnionId(...)]` on the member still wins over the suffix rule — same precedence as the other naming-convention rules.
