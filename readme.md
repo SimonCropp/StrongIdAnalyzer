@@ -855,7 +855,21 @@ Ids flow through three categories of call, classified by signature rather than b
    * `Aggregate`
 
    The `*Async` counterparts from EF Core (`FirstAsync`, `SingleAsync`, …) are recognised by shape: any element-returning name + `Async` whose return type is `Task<T>` / `ValueTask<T>` over the receiver's element type flows the same way, so `await q.Select(_ => _.Tagged).SingleAsync()` is treated as a tagged scalar.
- * **Element-preserving** — `Where`, `OrderBy` / `OrderByDescending`, `ThenBy` / `ThenByDescending`, `Reverse`, `Take` / `TakeWhile` / `TakeLast`, `Skip` / `SkipWhile` / `SkipLast`, `Distinct` / `DistinctBy`, `Concat`, `Union` / `UnionBy`, `Intersect` / `IntersectBy`, `Except` / `ExceptBy`, `AsEnumerable`, `AsQueryable`, `ToArray`, `ToList`, `ToHashSet`, `Append`, `Prepend` pass the element id through unchanged, so chains like `ids.Where(x => x != Guid.Empty).First()` work.
+ * **Element-preserving** — the following methods pass the element id through unchanged, so chains like `ids.Where(x => x != Guid.Empty).First()` work:
+   * `Where`
+   * `OrderBy` / `OrderByDescending`
+   * `ThenBy` / `ThenByDescending`
+   * `Reverse`
+   * `Take` / `TakeWhile` / `TakeLast`
+   * `Skip` / `SkipWhile` / `SkipLast`
+   * `Distinct` / `DistinctBy`
+   * `Concat`
+   * `Union` / `UnionBy`
+   * `Intersect` / `IntersectBy`
+   * `Except` / `ExceptBy`
+   * `AsEnumerable` / `AsQueryable`
+   * `ToArray` / `ToList` / `ToHashSet`
+   * `Append` / `Prepend`
  * **`Select` / `SelectMany`** transform the element id according to the selector:
    * Identity lambda `x => x` keeps the receiver's element id.
    * Method group `Select(Converter)` reads `[return: Id(...)]` on the target method.
