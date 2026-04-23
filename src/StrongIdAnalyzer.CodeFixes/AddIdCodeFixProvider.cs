@@ -390,12 +390,23 @@ public class AddIdCodeFixProvider : CodeFixProvider
                 diagnostic);
         }
 
-        // For a single-tag diagnostic, renaming the host to `<Tag>Id` satisfies the
-        // naming convention without introducing an attribute. Skipped for UnionId
-        // sources (values.Length > 1) since convention produces exactly one tag.
-        if (values.Length == 1 &&
-            AttributeHost.TryGetRenameTarget(host, values[0], out var newName))
+        // Renaming the host to `<Tag>Id` satisfies the naming convention without
+        // introducing an attribute. For multi-tag sources (explicit [UnionId] or
+        // convention inheritance up a type chain), any single tag satisfies the
+        // other side via set containment, so offer one rename per tag.
+        var seenRenames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var singleValue in values)
         {
+            if (!AttributeHost.TryGetRenameTarget(host, singleValue, out var newName))
+            {
+                continue;
+            }
+
+            if (!seenRenames.Add(newName))
+            {
+                continue;
+            }
+
             context.RegisterCodeFix(
                 CodeAction.Create(
                     $"Rename {hostDescription} to '{newName}'",

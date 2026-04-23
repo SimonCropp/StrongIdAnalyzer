@@ -282,10 +282,11 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
-    public async Task SIA002_NoRenameForUnionIdSource()
+    public async Task SIA002_RenameOfferedPerTagForUnionIdSource()
     {
-        // The source needs a UnionId to match; convention produces exactly one tag,
-        // so no rename alternative is offered.
+        // Multi-tag source (explicit [UnionId]): rename to `<Tag>Id` for any single
+        // tag gives a convention-tagged name that intersects the source set via
+        // containment, so offer one rename per tag.
         var source =
             """
             using System;
@@ -309,7 +310,39 @@ public class AddIdCodeFixProviderTests
 
         var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
 
-        await Assert.That(titles.Any(_ => _.StartsWith("Rename", StringComparison.Ordinal))).IsFalse();
+        await Assert.That(titles).Contains("Rename property 'Subject' to 'CustomerId'");
+        await Assert.That(titles).Contains("Rename property 'Subject' to 'OrderId'");
+    }
+
+    [Test]
+    public async Task SIA002_RenameOfferedForInheritedConventionIdSource()
+    {
+        // Convention inheritance: `_.Id` on a `GoalAccessRule` whose `Id` is inherited
+        // from `AccessRule` produces tags {GoalAccessRule, AccessRule}. The untagged
+        // lambda parameter should get a rename offer per tag.
+        var source =
+            """
+            using System;
+            using System.Linq;
+
+            public class AccessRule
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class GoalAccessRule : AccessRule;
+
+            public class Holder
+            {
+                public bool Check(IQueryable<GoalAccessRule> rules, Guid id) =>
+                    rules.Any(_ => _.Id == id);
+            }
+            """;
+
+        var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
+
+        await Assert.That(titles).Contains("Rename parameter 'id' to 'goalAccessRuleId'");
+        await Assert.That(titles).Contains("Rename parameter 'id' to 'accessRuleId'");
     }
 
     [Test]
