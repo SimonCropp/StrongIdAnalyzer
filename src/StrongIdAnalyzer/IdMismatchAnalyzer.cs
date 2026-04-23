@@ -2246,7 +2246,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // `hashedId` or `rawId` from being picked up.
     // KnownTags powers suffix inference's "is this candidate a real domain?" check.
     // Two contributions qualify a tag as a domain:
-    //   (1) A type with a conventional `Id` member (rule 1 → containing-type name).
+    //   (1) A type that has a conventional `Id` member — declared directly OR inherited
+    //       from a base type (rule 1 walks the receiver's static-type chain, so a derived
+    //       type inheriting `Id` still produces its own name as a tag).
     //   (2) An explicit `[Id]` / `[UnionId]` / `[return: Id]` anywhere in source.
     // The rule-2 `XxxId` convention on properties/fields/parameters is deliberately
     // NOT included: it would create circularity for longest-first inference, where a
@@ -2259,15 +2261,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var builder = ImmutableHashSet.CreateBuilder(StringComparer.Ordinal);
         foreach (var type in EnumerateSourceTypes(compilation.Assembly.GlobalNamespace))
         {
+            if (type.Name.Length > 0 && HasIdMemberInChain(type))
+            {
+                builder.Add(type.Name);
+            }
+
             foreach (var member in type.GetMembers())
             {
-                if (member is IPropertySymbol or IFieldSymbol &&
-                    member.Name == "Id" &&
-                    TryGetConventionName(member, out var conv))
-                {
-                    builder.Add(conv);
-                }
-
                 var explicitInfo = GetIdFromAttributes(member.GetAttributes());
                 if (explicitInfo.State == IdState.Present)
                 {
@@ -2304,6 +2304,27 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         return builder.ToImmutable();
+    }
+
+    static bool HasIdMemberInChain(INamedTypeSymbol type)
+    {
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            if (current.SpecialType == SpecialType.System_Object)
+            {
+                return false;
+            }
+
+            foreach (var member in current.GetMembers("Id"))
+            {
+                if (member is IPropertySymbol { IsIndexer: false } or IFieldSymbol { IsImplicitlyDeclared: false })
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     static IEnumerable<INamedTypeSymbol> EnumerateSourceTypes(INamespaceSymbol ns)

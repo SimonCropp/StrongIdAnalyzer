@@ -2729,6 +2729,56 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task SuffixInference_Enabled_WholePrefixWinsOverInnerWord_IdInherited()
+    {
+        // Same shape as the AccessGroup/Group case but `AccessGroup` inherits `Id` from a
+        // base type rather than declaring it directly. Both `Group` and `AccessGroup` must
+        // qualify as known tags (the receiver-walk produces "AccessGroup" at the call site,
+        // so KnownTags has to recognise inherited `Id` members too) — otherwise longest-first
+        // matching falls through to "Group" and wrongly fires SIA001 on AccessGroup sources.
+        var source =
+            """
+            using System;
+
+            public abstract class BaseEntity
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Group : BaseEntity { }
+
+            public class AccessGroup : BaseEntity { }
+
+            public class AccessRule : BaseEntity
+            {
+                public Guid AccessGroupId { get; set; }
+            }
+
+            public class Holder
+            {
+                public void AssignFromAccessGroup(AccessRule rule, AccessGroup ag) =>
+                    rule.AccessGroupId = ag.Id;
+
+                public void AssignFromGroup(AccessRule rule, Group g) =>
+                    rule.AccessGroupId = g.Id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        var message = diagnostics[0].GetMessage();
+        await Assert.That(message.Contains("Group")).IsTrue();
+        await Assert.That(message.Contains("AccessGroup")).IsTrue();
+    }
+
+    [Test]
     public async Task SuffixInference_Enabled_WholePrefixUnknown_FallsBackToInnerWord()
     {
         // `productOrderId` — `ProductOrder` is NOT a known tag, so the longest-first walk
