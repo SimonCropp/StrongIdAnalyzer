@@ -4332,6 +4332,117 @@ public class IdMismatchAnalyzerTests
         await Assert.That(diagnostics.Length).IsEqualTo(0);
     }
 
+    [Test]
+    public async Task LocalFromAwaitedAsyncLinqSelect_PropagatesProjectionTag()
+    {
+        // `var id = await q.Select(_ => _.Tagged).SingleAsync();` — the tag on
+        // Row.CustomerId should survive the Select + await + SingleAsync and
+        // reach the consumer. Stand in for EF Core's IQueryable async ext.
+        var source =
+            """
+            using System;
+            using System.Linq;
+            using System.Threading.Tasks;
+
+            public static class AsyncLinq
+            {
+                public static Task<T> SingleAsync<T>(this IQueryable<T> source) => Task.FromResult(default(T)!);
+            }
+
+            public class Row
+            {
+                public Guid CustomerId { get; set; }
+            }
+
+            public class Holder
+            {
+                public IQueryable<Row> Rows { get; set; } = null!;
+
+                public void ConsumeOrder([Id("Order")] Guid value) { }
+
+                public async Task Use()
+                {
+                    var id = await Rows.Select(_ => _.CustomerId).SingleAsync();
+                    ConsumeOrder(id);
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
+    [Test]
+    public async Task AsyncLinqElementReturn_MatchingTag_NoDiagnostic()
+    {
+        // FirstAsync returning Task<Guid> over an IQueryable<Guid> tagged
+        // [Id("Customer")] should flow the tag through to a matching target.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+            using System.Threading.Tasks;
+
+            public static class AsyncLinq
+            {
+                public static Task<T> FirstAsync<T>(this IQueryable<T> source) => Task.FromResult(default(T)!);
+            }
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public IQueryable<Guid> Ids { get; set; } = null!;
+
+                public void ConsumeCustomer([Id("Customer")] Guid value) { }
+
+                public async Task Use()
+                {
+                    ConsumeCustomer(await Ids.FirstAsync());
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task IQueryable_SelectLambda_PropagatesTagToFirst()
+    {
+        // IQueryable<T>.Select takes an expression-tree lambda — the selector
+        // surfaces directly as IAnonymousFunctionOperation after unwrap (not
+        // wrapped in IDelegateCreationOperation). The tag on Row.CustomerId
+        // must still flow through the projection + .First().
+        var source =
+            """
+            using System;
+            using System.Linq;
+
+            public class Row
+            {
+                public Guid CustomerId { get; set; }
+            }
+
+            public class Holder
+            {
+                public IQueryable<Row> Rows { get; set; } = null!;
+
+                public void ConsumeOrder([Id("Order")] Guid value) { }
+
+                public void Use() => ConsumeOrder(Rows.Select(_ => _.CustomerId).First());
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
     static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string messagesSource,
         string consumerSource)

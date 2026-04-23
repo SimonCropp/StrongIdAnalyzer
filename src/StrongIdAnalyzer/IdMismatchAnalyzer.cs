@@ -1226,6 +1226,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     return IdInfo.Present(boundTags);
                 }
 
+                // `var id = await q.Select(_ => _.Tagged).SingleAsync();` — the
+                // local inherits a Present tag from its initializer expression
+                // when one is resolvable. Literals / invocations returning an
+                // untagged value stay Unknown.
+                if (TryResolveLocalInitializer(local, config, out var initInfo))
+                {
+                    return initInfo;
+                }
+
                 return IdInfo.Unknown;
             case IInvocationOperation invocation:
                 if (TryResolveLinqElementReturn(invocation, config, out var linqInfo))
@@ -1372,6 +1381,52 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // For element-returning LINQ (`.First()`, `.Single()`, `.ElementAt()` etc.) surface
     // the receiver's element tag as the invocation's result tag — so `customerIds.First()`
     // is treated as a single Customer id.
+    // `var x = <expr>;` — trace <expr>'s IdInfo and use it for reads of `x`.
+    // Only Present results propagate; Unknown/NotPresent fall through to the
+    // existing local-handling so LocalBindings (foreach) stays authoritative.
+    static bool TryResolveLocalInitializer(
+        ILocalReferenceOperation localRef,
+        Config config,
+        out IdInfo info)
+    {
+        info = IdInfo.Unknown;
+
+        var reference = localRef.Local.DeclaringSyntaxReferences.FirstOrDefault();
+        if (reference is null)
+        {
+            return false;
+        }
+
+        if (reference.GetSyntax() is not VariableDeclaratorSyntax
+            {
+                Initializer.Value: { } initializerSyntax
+            })
+        {
+            return false;
+        }
+
+        var semanticModel = localRef.SemanticModel;
+        if (semanticModel is null)
+        {
+            return false;
+        }
+
+        var initializerOp = semanticModel.GetOperation(initializerSyntax);
+        if (initializerOp is null)
+        {
+            return false;
+        }
+
+        var resolved = GetAccessInfo(initializerOp, config);
+        if (resolved.State != IdState.Present)
+        {
+            return false;
+        }
+
+        info = resolved;
+        return true;
+    }
+
     static bool TryResolveLinqElementReturn(
         IInvocationOperation invocation,
         Config config,
@@ -1379,8 +1434,24 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         info = IdInfo.Unknown;
 
-        if (!invocation.TargetMethod.IsLinqMethod() ||
-            !IsElementReturningLinq(invocation.TargetMethod.Name))
+        var targetMethod = invocation.TargetMethod;
+        var name = targetMethod.Name;
+        var isAsync = false;
+
+        if (targetMethod.IsLinqMethod() && IsElementReturningLinq(name))
+        {
+            // sync System.Linq variant
+        }
+        else if (name.Length > 5 &&
+                 name.EndsWith("Async", StringComparison.Ordinal) &&
+                 IsElementReturningLinq(name.Substring(0, name.Length - 5)))
+        {
+            // EF Core / IQueryable async extensions participate by shape:
+            // element-returning name + "Async" returning Task<T> / ValueTask<T>
+            // whose T matches the receiver's element type.
+            isAsync = true;
+        }
+        else
         {
             return false;
         }
@@ -1391,9 +1462,23 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
+        var resultType = invocation.Type;
+        if (isAsync)
+        {
+            if (resultType is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } task &&
+                task.Name is "Task" or "ValueTask")
+            {
+                resultType = task.TypeArguments[0];
+            }
+            else
+            {
+                return false;
+            }
+        }
+
         var element = receiver.Type.TryGetEnumerableElementType();
         if (element is null ||
-            !SymbolEqualityComparer.Default.Equals(element, invocation.Type))
+            !SymbolEqualityComparer.Default.Equals(element, resultType))
         {
             return false;
         }
@@ -1538,36 +1623,43 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         selector = selector.Unwrap();
 
-        if (selector is IDelegateCreationOperation creation)
+        // IEnumerable<T>.Select passes Func<T,R> — the lambda sits inside an
+        // IDelegateCreationOperation. IQueryable<T>.Select passes an
+        // Expression<Func<T,R>> — the lambda surfaces directly after unwrap.
+        // Peel either wrapper so method-group and expression-tree selectors
+        // flow through the same analysis.
+        var target = selector switch
         {
-            var target = creation.Target.Unwrap();
+            IDelegateCreationOperation creation => creation.Target.Unwrap(),
+            IAnonymousFunctionOperation or IMethodReferenceOperation => selector,
+            _ => (IOperation?)null
+        };
 
-            if (target is IMethodReferenceOperation methodRef)
+        if (target is IMethodReferenceOperation methodRef)
+        {
+            return GetReturnInfo(methodRef.Method, config);
+        }
+
+        if (target is IAnonymousFunctionOperation lambda)
+        {
+            var body = GetSingleReturnExpression(lambda);
+            if (body is null)
             {
-                return GetReturnInfo(methodRef.Method, config);
+                return IdInfo.Unknown;
             }
 
-            if (target is IAnonymousFunctionOperation lambda)
+            if (IsIdentityReference(body, lambda))
             {
-                var body = GetSingleReturnExpression(lambda);
-                if (body is null)
+                var next = GetLinqReceiver(invocation);
+                if (next is null)
                 {
                     return IdInfo.Unknown;
                 }
 
-                if (IsIdentityReference(body, lambda))
-                {
-                    var next = GetLinqReceiver(invocation);
-                    if (next is null)
-                    {
-                        return IdInfo.Unknown;
-                    }
-
-                    return GetReceiverElementTags(next, config);
-                }
-
-                return GetAccessInfo(body, config);
+                return GetReceiverElementTags(next, config);
             }
+
+            return GetAccessInfo(body, config);
         }
 
         return IdInfo.Unknown;
