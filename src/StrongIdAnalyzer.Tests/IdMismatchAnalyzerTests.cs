@@ -2641,6 +2641,45 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task SuffixInference_Enabled_MultiWordTail_MatchesKnownTag()
+    {
+        // `templateExternalObjectId` / `newExternalObjectId`: the last single word
+        // ("Object") is not a known tag, but "ExternalObject" is. The walk continues
+        // back to the next upper-case boundary and matches the multi-word tail.
+        var source =
+            """
+            using System;
+
+            public record ExternalObject(Guid Id);
+
+            public class Service
+            {
+                public ExternalObject? Get(Guid externalObjectId) => null;
+            }
+
+            public class Holder
+            {
+                private readonly Service service = new();
+
+                public void Run(Guid templateExternalObjectId, Guid newExternalObjectId)
+                {
+                    service.Get(templateExternalObjectId);
+                    service.Get(newExternalObjectId);
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task SIA005_RedundantAttributeOnParameter_Fires()
     {
         var source =
