@@ -318,9 +318,12 @@ DuplicateProduct(product.Id, product.Id, "n"); // OK
 
 For any property, field, or parameter whose name ends in `Id`:
 
-1. Walk back from the trailing `Id` to the last upper-case letter — that span is the candidate word.
+1. Walk back from the trailing `Id` to the last upper-case letter — that span is the first candidate word.
 2. If the candidate word is in the compilation's **known-id set** (any id produced by rule 1, rule 2, or an explicit `[Id]` / `[UnionId]` anywhere in the source), accept it.
-3. Otherwise, fall through to rule 2 (the whole-name rule) unchanged.
+3. Otherwise, step back one character and walk to the **next** upper-case boundary — each step lengthens the candidate by one more upper-case-delimited word. Accept the first candidate that's in the known-id set.
+4. If no candidate short of the whole prefix matches, fall through to rule 2 (the whole-name rule) unchanged.
+
+Shortest-first means "last word wins": `productOrderId` with both `Product` and `Order` known resolves to `"Order"`. Multi-word tails are picked up when the shortest candidate isn't known but a longer one is: `templateExternalObjectId` with `ExternalObject` known (but no `Object`) resolves to `"ExternalObject"`.
 
 The known-id constraint is deliberate — without it, every `hashedId`, `rawId`, `validId` in the codebase would start getting tagged on the last word, producing noise. Restricting to words that are *already* ids in the project means the rule only fires where the intent is unambiguous.
 
@@ -330,8 +333,9 @@ The known-id constraint is deliberate — without it, every `hashedId`, `rawId`,
 |----------------------------|--------------------------|----------------------------------|-------------------------|
 | `ProductId` / `productId`  | `"Product"`              | `"Product"` (rule 2)             | `"Product"` (rule 2)    |
 | `SourceProductId`          | `"SourceProduct"`        | `"Product"`                      | `"SourceProduct"`       |
-| `rawProductBytesId`        | `"RawProductBytes"`      | `"RawProductBytes"` — last word `"Bytes"` unknown | `"RawProductBytes"` |
-| `productOrderId` (both known) | `"ProductOrder"`      | `"Order"` — last word wins       | `"ProductOrder"`        |
+| `templateExternalObjectId` (with `ExternalObject` known) | `"TemplateExternalObject"` | `"ExternalObject"` — `"Object"` unknown, walks back to match | `"TemplateExternalObject"` |
+| `rawProductBytesId`        | `"RawProductBytes"`      | `"RawProductBytes"` — no known candidate tail | `"RawProductBytes"` |
+| `productOrderId` (both known) | `"ProductOrder"`      | `"Order"` — shortest match wins  | `"ProductOrder"`        |
 | `HashedId`                 | `"Hashed"`               | `"Hashed"` (no prefix; rule 2)   | `"Hashed"`              |
 
 Explicit `[Id("...")]` / `[UnionId(...)]` on the member still wins over the suffix rule — same precedence as the other naming-convention rules.

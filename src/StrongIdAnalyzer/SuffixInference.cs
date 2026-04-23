@@ -21,10 +21,14 @@ static class SuffixInference
         return bool.TryParse(raw, out var value) && value;
     }
 
-    // Matches `[prefix][Word]Id` where `Word` is the last upper-case boundary before the
-    // trailing `Id`. Returns the word only if it is (ordinally) a known tag. The
-    // whole-name `XxxId` case (no prefix) is handled by the existing convention rule and
-    // is rejected here to avoid duplicate tagging paths.
+    // Matches `[prefix][Word]Id` where `Word` is a suffix starting at an upper-case
+    // boundary before the trailing `Id`. Walks back through boundaries shortest-first
+    // (so "last word wins" when multiple candidates are known — e.g. `productOrderId`
+    // with both `Product` and `Order` known resolves to `Order`), and also accepts
+    // multi-word tails like `ExternalObject` in `templateExternalObjectId` when the
+    // single last word (`Object`) is not a known tag. The whole-name `XxxId` case (no
+    // prefix) is handled by the existing convention rule and is rejected here to avoid
+    // duplicate tagging paths.
     public static bool TryMatch(string name, ImmutableHashSet<string> knownTags, out string tag)
     {
         tag = "";
@@ -35,23 +39,29 @@ static class SuffixInference
 
         var prefixLength = name.Length - 2;
         var wordStart = prefixLength - 1;
-        while (wordStart > 0 && !char.IsUpper(name[wordStart]))
+
+        while (wordStart > 0)
         {
+            while (wordStart > 0 && !char.IsUpper(name[wordStart]))
+            {
+                wordStart--;
+            }
+
+            // wordStart == 0 means the candidate spans the whole prefix — that's the
+            // existing `TryGetConventionName` rule's territory.
+            if (wordStart == 0)
+            {
+                return false;
+            }
+
+            var word = name.Substring(wordStart, prefixLength - wordStart);
+            if (knownTags.Contains(word))
+            {
+                tag = word;
+                return true;
+            }
+
             wordStart--;
-        }
-
-        // wordStart == 0 means the entire name is `XxxId` (no prefix before the last word).
-        // That's the existing `TryGetConventionName` rule's territory — don't double-handle.
-        if (wordStart == 0)
-        {
-            return false;
-        }
-
-        var word = name.Substring(wordStart, prefixLength - wordStart);
-        if (knownTags.Contains(word))
-        {
-            tag = word;
-            return true;
         }
 
         return false;
