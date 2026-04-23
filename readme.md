@@ -326,6 +326,7 @@ Explicit `[Id("...")]` / `[UnionId(...)]` on the member still wins over the suff
 
 #### What the flag does not change
 
+- Local variables — `var sourceProductId = ...;` is still `Unknown`. Locals are temporary containers whose real identity comes from the right-hand side (`Guid.NewGuid()`, an untagged input, a tagged property…); tagging by local name would invent identities the RHS can't back up and produce false SIA001 noise. Flow a tag through a local by assigning from a tagged source (properties, parameters, `[return: Id]` methods, or `foreach` over a tagged collection) — the existing source-resolution rules already propagate the tag.
 - Method names — `GetSourceProductId()` and similar don't get suffix-inferred. Method names describe behavior (`Get`, `Find`, `Build`), not data, so treating the leading word as a qualifier would be noisy. Apply `[return: Id("Product")]` to tag the return type explicitly.
 - Codefixes — SIA001/SIA002/SIA003 still offer the add-`[Id]` and rename fixes; the rename fix may propose stripping the qualifier (e.g. `SourceProductId` → `ProductId`), which is a lossy rename — decline the rename fix when the qualifier is meaningful.
 - Referenced metadata — members from BCL / third-party libraries never receive convention tags, suffix-inferred or otherwise.
