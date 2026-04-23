@@ -642,14 +642,19 @@ Consume(new Guid("00000000-0000-0000-0000-000000000000")); // unknown — constr
 
 ### Local variables
 
-Locals don't support attributes in C#, so the analyzer can't resolve a tag for them — even if the value that flowed into the local was originally tagged.
+Locals don't support attributes in C#, but the analyzer resolves the initializer expression and propagates a Present tag through the local when one is found. A local initialised from a tagged field / property / parameter / return value / element-returning LINQ chain carries that tag forward; a local initialised from a literal, an untagged call, or any other expression that resolves to Unknown stays Unknown.
 
 ```cs
 [Id("Customer")] Guid source = default;
 
-var copy = source;      // tag does not flow through the local
-Consume(copy);          // unknown — local reference
+var copy = source;         // tag flows — copy is Customer
+Consume(copy);             // SIA001 if Consume expects a non-Customer tag
+
+var fresh = Guid.NewGuid();
+Consume(fresh);            // unknown — initializer resolves to Unknown
 ```
+
+Reassignments aren't tracked — only the declarator's initializer is inspected. `var x = tagged; x = other;` still reports `x` as the initializer's tag on every read.
 
 ### Method invocations
 
@@ -735,7 +740,7 @@ Only **explicit** `[Id]` / `[UnionId]` attributes on a collection-typed declarat
 
 Tags flow through three categories of call, classified by signature rather than by name:
 
- * **Element-returning** — `First`, `FirstOrDefault`, `Single`, `SingleOrDefault`, `Last`, `LastOrDefault`, `ElementAt`, `ElementAtOrDefault`, `Min`, `Max`, `Aggregate` on `System.Linq.Enumerable`/`Queryable` surface the receiver's element tag as the result's scalar tag.
+ * **Element-returning** — `First`, `FirstOrDefault`, `Single`, `SingleOrDefault`, `Last`, `LastOrDefault`, `ElementAt`, `ElementAtOrDefault`, `Min`, `Max`, `Aggregate` on `System.Linq.Enumerable`/`Queryable` surface the receiver's element tag as the result's scalar tag. The `*Async` counterparts from EF Core (`FirstAsync`, `SingleAsync`, …) are recognised by shape: any element-returning name + `Async` whose return type is `Task<T>` / `ValueTask<T>` over the receiver's element type flows the same way, so `await q.Select(_ => _.Tagged).SingleAsync()` is treated as a tagged scalar.
  * **Element-preserving** — `Where`, `OrderBy` / `OrderByDescending`, `ThenBy` / `ThenByDescending`, `Reverse`, `Take` / `TakeWhile` / `TakeLast`, `Skip` / `SkipWhile` / `SkipLast`, `Distinct` / `DistinctBy`, `Concat`, `Union` / `UnionBy`, `Intersect` / `IntersectBy`, `Except` / `ExceptBy`, `AsEnumerable`, `AsQueryable`, `ToArray`, `ToList`, `ToHashSet`, `Append`, `Prepend` pass the element tag through unchanged, so chains like `ids.Where(x => x != Guid.Empty).First()` work.
  * **`Select` / `SelectMany`** transform the element tag according to the selector:
    * Identity lambda `x => x` keeps the receiver's element tag.
