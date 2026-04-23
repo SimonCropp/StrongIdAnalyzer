@@ -177,11 +177,12 @@ C# 12 `using CustomerId = System.Guid;` at file scope, or generic `Id<Customer>`
 
 * **Pros:**
    * **No new runtime type — the primitive stays a primitive.** EF Core columns, JSON payloads, ASP.NET binders, Dapper parameters, `Dictionary<Guid, …>`, and every serializer, logger, cache, and message bus already in the stack keep working unchanged. No `ValueConverter`s, no `JsonConverter`s, no `IModelBinder`s, no per-wrapper-type adapters.
-   * **No shared-type coupling between domains.** Two bounded contexts (or two services) can each tag a `Guid Id` with a local `[Id("...")]` independently and still exchange the value as a plain `Guid` across any boundary — no shared `Domain.Core` assembly, no wire-format adapter. The tag is metadata on the declaration; the wire sees only the primitive.
+   * **No shared-type coupling between domains.** Two bounded contexts (or two services) can each tag a `Guid Id` with a local `[Id("...")]` independently and still exchange the value as a plain `Guid` across any boundary — no shared `Domain.Core` assembly, no wire-format adapter. The id is metadata on the declaration; the wire sees only the primitive.
    * **Incremental adoption.** Tag the declarations that matter, ignore the rest. No big-bang refactor — a codebase can go from zero tagged IDs to partially tagged to fully tagged without ever being in a broken state. Naming convention covers the common `Id` / `XxxId` case so most declarations need no attribute at all.
-   * **Inheritance and interface hierarchies are modeled** (see [Inheritance and covariant Id tagging](#inheritance-and-covariant-id-tagging)) — covariant tag sets mean `child.Id` satisfies parameters tagged for either the derived or base type.
+   * **Inheritance and interface hierarchies are modeled** (see [Inheritance and covariant Id tagging](#inheritance-and-covariant-id-tagging)) — covariant id sets mean `child.Id` satisfies parameters tagged for either the derived or base type.
 * **Cons:** enforcement is **compile-time only**. A `Guid` deserialized from an untrusted source isn't checked; flow through `object` / `dynamic` / reflection isn't tracked; expressions like ternaries, casts, and locals are intentionally `Unknown` (see [Sources the analyzer can resolve](#sources-the-analyzer-can-resolve)) to keep noise low, which means a few code shapes slip through. Where a runtime guarantee is required regardless of the code path, use family #1 or #2 instead.
 * **Best fit:** existing codebases where wrapper types would require a sprawling migration, or teams that want the compile-time catch without changing their serialization, ORM, or transport stack.
+
 
 ### Picking between them
 
@@ -197,48 +198,57 @@ This analyzer is deliberately complementary to families #1 and #2 — not a repl
 
 ## Naming conventions
 
-Most declarations don't need an explicit `[Id("...")]` — the analyzer infers a tag from two naming rules. Whatever falls through the rules stays untagged (no tag, no diagnostic) until an explicit attribute is added.
+Most declarations don't need an explicit `[Id("...")]` — the analyzer infers an id from two naming rules. Whatever falls through the rules stays untagged (no id, no diagnostic) until an explicit attribute is added.
+
 
 ### The two rules
 
-1. **`Id` on a type** — a property or field named exactly `Id` gets the **containing type's name** as its tag.
+1. **`Id` on a type** — a property or field named exactly `Id` gets the **containing type's name** as its id.
 
     ```cs
     public class Customer
     {
-        public Guid Id { get; set; } // tag: "Customer"
+        // id: "Customer"
+        public Guid Id { get; set; }
     }
     ```
 
-2. **`<Xxx>Id`** — a property, field, **or** parameter whose name ends in `Id` gets the prefix as its tag. The first character is upper-cased so camelCase parameters line up with PascalCase members.
+2. **`<Xxx>Id`** — a property, field, **or** parameter whose name ends in `Id` gets the prefix as its id. The first character is upper-cased so camelCase parameters line up with PascalCase members.
 
     ```cs
-    public Guid CustomerId { get; set; } // tag: "Customer"
-    public void Handle(Guid orderId) { } // tag: "Order" (first char upper-cased)
-    public Guid ShipmentId;              // tag: "Shipment"
+    // id: "Customer"
+    public Guid CustomerId { get; set; }
+
+    // id: "Order" (first char upper-cased)
+    public void Handle(Guid orderId) { }
+
+    // id: "Shipment"
+    public Guid ShipmentId;
     ```
 
-    The prefix is the whole identifier minus the trailing `Id` — `OldCustomerId` tags as `"OldCustomer"`, not `"Customer"`.
+    The prefix is the whole identifier minus the trailing `Id` — `OldCustomerId` resolves to `"OldCustomer"`, not `"Customer"`.
 
-### What does *not* get a convention tag
+### What does *not* get a convention id
 
 - **Parameters named exactly `id`** — rule 1 doesn't apply to parameters (a bare `id` has no containing-type equivalent, and parameters should be name-driven so method signatures read cleanly). Write `orderId`, or add `[Id("Order")]` explicitly.
 - **Names that are exactly `Id`** (on parameters) or shorter than 3 characters under rule 2 — so a property literally named `Id` only matches rule 1, never rule 2.
-- **Anonymous-type properties under rule 1** — a bare `Id` on `new { Id = x }` would map to a synthesized `<>f__AnonymousType*` name, which is meaningless as a tag. Rule 2 still applies (`new { CustomerId = x }` reads as `"Customer"`), so values projected through anonymous types in LINQ pipelines or EF `HasIndex` expressions keep flowing the right tag downstream. Writes **into** anonymous-type properties never produce a diagnostic — there's no fix site, since anon members can't carry `[Id]`.
+- **Anonymous-type properties under rule 1** — a bare `Id` on `new { Id = x }` would map to a synthesized `<>f__AnonymousType*` name, which is meaningless as an id. Rule 2 still applies (`new { CustomerId = x }` reads as `"Customer"`), so values projected through anonymous types in LINQ pipelines or EF `HasIndex` expressions keep flowing the right id downstream. Writes **into** anonymous-type properties never produce a diagnostic — there's no fix site, since anon members can't carry `[Id]`.
 - **Indexers** — `this[Guid id]` never participates.
 - **Implicitly-declared fields** — backing fields, primary-constructor capture fields, and similar compiler-synthesized members.
-- **Members declared in referenced metadata** — BCL and third-party members (`Diagnostic.Id`, `EventArgs`, …) never receive convention tags. If it were otherwise, any library property named `Id` would suddenly carry a tag the user can't change.
+- **Members declared in referenced metadata** — BCL and third-party members (`Diagnostic.Id`, `EventArgs`, …) never receive a convention id. If it were otherwise, any library property named `Id` would suddenly carry an id the user can't change.
+
 
 ### Precedence
 
-When resolving a symbol's tag set, the analyzer consults these sources in order and stops at the first that produces a tag:
+When resolving a symbol's id set, the analyzer consults these sources in order and stops at the first that produces an id:
 
 1. **Explicit `[Id]` / `[UnionId]`** directly on the symbol.
 2. **Inherited explicit attribute** via the property's override / interface-implementation chain, or the parameter's matching slot on overridden / implemented methods.
 3. **Record primary-constructor parameter attribute** bridged onto the synthesized property (see "Record primary-constructor parameters" below).
 4. **Naming convention** (rules 1 and 2 above).
 
-At access sites (`child.Id`), covariant receiver-type walking unions the current level's tags with every parent-type tag between the receiver type and the declaring type — see "Inheritance and covariant Id tagging".
+At access sites (`child.Id`), covariant receiver-type walking unions the current level's ids with every parent-type id between the receiver type and the declaring type — see "Inheritance and covariant Id tagging".
+
 
 ### Interaction with diagnostics
 
@@ -247,12 +257,13 @@ At access sites (`child.Id`), covariant receiver-type walking unions the current
 
 ### Overriding the convention
 
-Any `[Id("...")]` / `[UnionId("...")]` on the symbol wins over the convention, so the tag can be broadened, narrowed, or renamed at will:
+Any `[Id("...")]` / `[UnionId("...")]` on the symbol wins over the convention, so the id can be broadened, narrowed, or renamed at will:
 
 ```cs
 public class Customer
 {
-    [Id("Person")] // overrides the "Customer" convention tag
+    // overrides the "Customer" convention id
+    [Id("Person")]
     public Guid Id { get; set; }
 }
 ```
@@ -270,9 +281,9 @@ public class DuplicateProductCommand
 }
 ```
 
-Under rule 2 the whole prefix becomes the tag (`SourceProductId` → `"SourceProduct"`), which is almost never what the user means: the intent is usually `"Product"`, with `Source` / `Target` purely disambiguating two members of the same domain.
+Under rule 2 the whole prefix becomes the id (`SourceProductId` → `"SourceProduct"`), which is almost never what the user means: the intent is usually `"Product"`, with `Source` / `Target` purely disambiguating two members of the same domain.
 
-Enable the opt-in suffix rule to have the analyzer pick the **last upper-case-delimited word before `Id`** as the tag, *but only if that word is a known tag in the compilation*:
+Enable the opt-in suffix rule in `.editorconfig` to have the analyzer pick the **last upper-case-delimited word before `Id`** as the id, *but only if that word is a known id in the compilation*:
 
 ```editorconfig
 [*.cs]
@@ -284,10 +295,11 @@ With the flag on:
 ```cs
 public class Product
 {
-    public Guid Id { get; set; } // tag: "Product" (rule 1)
+    // id: "Product" (rule 1)
+    public Guid Id { get; set; }
 }
 
-// Both properties tag as "Product"; assigning a Product.Id to either is clean.
+// Both properties resolve to "Product"; assigning a Product.Id to either is clean.
 public class DuplicateProductCommand
 {
     public Guid SourceProductId { get; set; }
@@ -307,10 +319,10 @@ DuplicateProduct(product.Id, product.Id, "n"); // OK
 For any property, field, or parameter whose name ends in `Id`:
 
 1. Walk back from the trailing `Id` to the last upper-case letter — that span is the candidate word.
-2. If the candidate word is in the compilation's **known-tag set** (any tag produced by rule 1, rule 2, or an explicit `[Id]` / `[UnionId]` anywhere in the source), accept it.
+2. If the candidate word is in the compilation's **known-id set** (any id produced by rule 1, rule 2, or an explicit `[Id]` / `[UnionId]` anywhere in the source), accept it.
 3. Otherwise, fall through to rule 2 (the whole-name rule) unchanged.
 
-The known-tag constraint is deliberate — without it, every `hashedId`, `rawId`, `validId` in the codebase would start getting tagged on the last word, producing noise. Restricting to words that are *already* tags in the project means the rule only fires where the intent is unambiguous.
+The known-id constraint is deliberate — without it, every `hashedId`, `rawId`, `validId` in the codebase would start getting tagged on the last word, producing noise. Restricting to words that are *already* ids in the project means the rule only fires where the intent is unambiguous.
 
 #### Examples
 
@@ -326,10 +338,10 @@ Explicit `[Id("...")]` / `[UnionId(...)]` on the member still wins over the suff
 
 #### What the flag does not change
 
-- Local variables — `var sourceProductId = ...;` is still `Unknown`. Locals are temporary containers whose real identity comes from the right-hand side (`Guid.NewGuid()`, an untagged input, a tagged property…); tagging by local name would invent identities the RHS can't back up and produce false SIA001 noise. Flow a tag through a local by assigning from a tagged source (properties, parameters, `[return: Id]` methods, or `foreach` over a tagged collection) — the existing source-resolution rules already propagate the tag.
+- Local variables — `var sourceProductId = ...;` is still `Unknown`. Locals are temporary containers whose real identity comes from the right-hand side (`Guid.NewGuid()`, an untagged input, a tagged property…); tagging by local name would invent identities the RHS can't back up and produce false SIA001 noise. Flow an id through a local by assigning from a tagged source (properties, parameters, `[return: Id]` methods, or `foreach` over a tagged collection) — the existing source-resolution rules already propagate the id.
 - Method names — `GetSourceProductId()` and similar don't get suffix-inferred. Method names describe behavior (`Get`, `Find`, `Build`), not data, so treating the leading word as a qualifier would be noisy. Apply `[return: Id("Product")]` to tag the return type explicitly.
 - Codefixes — SIA001/SIA002/SIA003 still offer the add-`[Id]` and rename fixes; the rename fix may propose stripping the qualifier (e.g. `SourceProductId` → `ProductId`), which is a lossy rename — decline the rename fix when the qualifier is meaningful.
-- Referenced metadata — members from BCL / third-party libraries never receive convention tags, suffix-inferred or otherwise.
+- Referenced metadata — members from BCL / third-party libraries never receive a convention id, suffix-inferred or otherwise.
 
 
 ## Diagnostics
@@ -346,7 +358,7 @@ Explicit `[Id("...")]` / `[UnionId(...)]` on the member still wins over the suff
 
 ### SIA001 — Id mismatch
 
-Fires when both operands carry `[Id]` and the tag values differ. The analyzer sees an unambiguous cross-domain flow (e.g. a `Customer` id passed where an `Order` id is expected) and refuses it.
+Fires when both operands carry `[Id]` and the id values differ. The analyzer sees an unambiguous cross-domain flow (e.g. a `Customer` id passed where an `Order` id is expected) and refuses it.
 
 <!-- snippet: SIA001Example -->
 <a id='snippet-SIA001Example'></a>
@@ -371,11 +383,11 @@ public class SIA001Sample
 
 For flow-style mismatches (argument, assignment, property/field initializer) the analyzer attaches the **target** declaration as the fix site and offers:
 
- * **Change attribute on `<kind> '<name>'` to `[Id("<source tag>")]`** — when the target already carries an explicit `[Id]` / `[UnionId]`, replaces it with the source's tag.
- * **Add `[Id("<source tag>")]` to `<kind> '<name>'`** — when the target is untagged (its current tag came from naming convention), adds the attribute.
+ * **Change attribute on `<kind> '<name>'` to `[Id("<source id>")]`** — when the target already carries an explicit `[Id]` / `[UnionId]`, replaces it with the source's id.
+ * **Add `[Id("<source id>")]` to `<kind> '<name>'`** — when the target is untagged (its current id came from naming convention), adds the attribute.
  * **Rename `<kind> '<name>'` to `<sourceTag>Id`** — when the target has no explicit attribute and its name matches the `XxxId` convention. First-character case is preserved (`bidId` → `treasuryBidId`, `BidId` → `TreasuryBidId`). Works for parameters, properties, and single-declarator fields.
 
-The `<source tag>` is the receiver's static type, not the declaring type of the `Id` member. For `treasuryBid.Id` where `Id` is inherited from `BaseEntity`, the fix suggests `TreasuryBid` — what reads locally at the call site — rather than `BaseEntity`.
+The `<source id>` is the receiver's static type, not the declaring type of the `Id` member. For `treasuryBid.Id` where `Id` is inherited from `BaseEntity`, the fix suggests `TreasuryBid` — what reads locally at the call site — rather than `BaseEntity`.
 
 The fixer always changes the *target* side because the analyzer picks a direction by fix site, not by blaming. If the source annotation is the one that's actually wrong, fix it by hand — a silent cross-domain rewrite would be a behavior change dressed as a fix.
 
@@ -431,10 +443,10 @@ public class SIA003Sample
 <sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L155-L170' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-SIA003 is suppressed when the tag can't meaningfully survive:
+SIA003 is suppressed when the id can't meaningfully survive:
 
  * **Library metadata targets** — BCL and third-party members (`Dictionary<Guid, T>.this[Guid]`, `Guid.Equals(Guid)`, `object.Equals(object)`). Library authors can't apply `[Id]`.
- * **`object` parameters / properties / fields** — logging, serialization, message buses. The tag is erased through `object` anyway.
+ * **`object` parameters / properties / fields** — logging, serialization, message buses. The id is erased through `object` anyway.
  * **Unconstrained generic type parameters (`T`)** — identity methods, container helpers. Generics carry no domain intent.
  * **Targets in a suppressed namespace** — by default `System*` and `Microsoft*` (see below).
  * **Equality comparisons** — `==` / `!=` operands are symmetric, so only SIA001 / SIA002 apply.
@@ -444,7 +456,7 @@ SIA003 is suppressed when the tag can't meaningfully survive:
 
 Sometimes a member legitimately accepts any one of several domain types — a generic lookup helper, a cache key that can be either a Customer or a Product. The package ships `[UnionId("Customer", "Product")]` for that case.
 
-Two values are **compatible** when their tag sets overlap on at least one entry:
+Two values are **compatible** when their id sets overlap on at least one entry:
 
 | Source                           | Target                                  | Compatible?     |
 |----------------------------------|------------------------------------------|-----------------|
@@ -459,12 +471,12 @@ A `[UnionId("x")]` with a single option is always a mistake — use `[Id("x")]`.
 
 ## Inheritance and covariant Id tagging
 
-A property (or field) named `Id` inherited from a base type carries tags from **every** level of the chain its receiver walks — the base type's tag **and** the derived type's tag. At an access site like `child1.Id`, the tag set is the union of:
+A property (or field) named `Id` inherited from a base type carries ids from **every** level of the chain its receiver walks — the base type's id **and** the derived type's id. At an access site like `child1.Id`, the id set is the union of:
 
  * Every explicit `[Id("...")]` found on the property, its `override` chain, and its interface impls.
- * Every naming-convention tag for types in the receiver's static-type chain between the receiver type and the member's declaring type (inclusive), where the member was not redeclared.
+ * Every naming-convention id for types in the receiver's static-type chain between the receiver type and the member's declaring type (inclusive), where the member was not redeclared.
 
-Matching rules use set containment — a single-tag parameter is satisfied if its tag appears anywhere in the source's set. So given `public static void Foo(Guid child1Id, Guid baseId)`:
+Matching rules use set containment — a single-id parameter is satisfied if its id appears anywhere in the source's set. So given `public static void Foo(Guid child1Id, Guid baseId)`:
 
  * `Foo(child1.Id, child1.Id)` is **OK** — `child1.Id`'s set `{"Child1", "Base"}` covers both `"Child1"` and `"Base"`.
  * `Foo(child2.Id, child2.Id)` fires **SIA001 on the first argument only** — `{"Child2", "Base"}` covers `"Base"` but not `"Child1"`.
@@ -710,40 +722,52 @@ No `[Id]` can be attached to a literal, so there is nothing to compare against.
 ```cs
 void Consume([Id("Order")] Guid value) { }
 
-Consume(Guid.Empty);                                 // unknown — literal-like
-Consume(new Guid("00000000-0000-0000-0000-000000000000")); // unknown — constructor
+// unknown — literal-like
+Consume(Guid.Empty);
+
+// unknown — constructor
+Consume(new Guid("00000000-0000-0000-0000-000000000000"));
 ```
 
 ### Local variables
 
-Locals don't support attributes in C#, but the analyzer resolves the initializer expression and propagates a Present tag through the local when one is found. A local initialised from a tagged field / property / parameter / return value / element-returning LINQ chain carries that tag forward; a local initialised from a literal, an untagged call, or any other expression that resolves to Unknown stays Unknown.
+Locals don't support attributes in C#, but the analyzer resolves the initializer expression and propagates a Present id through the local when one is found. A local initialised from a tagged field / property / parameter / return value / element-returning LINQ chain carries that id forward; a local initialised from a literal, an untagged call, or any other expression that resolves to Unknown stays Unknown.
 
 ```cs
 [Id("Customer")] Guid source = default;
 
-var copy = source;         // tag flows — copy is Customer
-Consume(copy);             // SIA001 if Consume expects a non-Customer tag
+// id flows — copy is Customer
+var copy = source;
+
+// SIA001 if Consume expects a non-Customer id
+Consume(copy);
 
 var fresh = Guid.NewGuid();
-Consume(fresh);            // unknown — initializer resolves to Unknown
+
+// unknown — initializer resolves to Unknown
+Consume(fresh);
 ```
 
-Reassignments aren't tracked — only the declarator's initializer is inspected. `var x = tagged; x = other;` still reports `x` as the initializer's tag on every read.
+Reassignments aren't tracked — only the declarator's initializer is inspected. `var x = tagged; x = other;` still reports `x` as the initializer's id on every read.
 
 ### Method invocations
 
-Untagged return values stay **unknown** — no noise on `Guid.NewGuid()` and friends. To flow a tag through a return value, annotate the method with `[return: Id("...")]` or `[return: UnionId("...", "...")]`. The tag is read from the method's own return attributes, plus any method it overrides or interface member it implements.
+Untagged return values stay **unknown** — no noise on `Guid.NewGuid()` and friends. To flow an id through a return value, annotate the method with `[return: Id("...")]` or `[return: UnionId("...", "...")]`. The id is read from the method's own return attributes, plus any method it overrides or interface member it implements.
 
 ```cs
 Guid GetOrderId() => Guid.NewGuid();
 
-Consume(GetOrderId());   // unknown — untagged return
-Consume(Guid.NewGuid()); // unknown — untagged return
+// unknown — untagged return
+Consume(GetOrderId());
+
+// unknown — untagged return
+Consume(Guid.NewGuid());
 
 [return: Id("Order")]
 Guid LoadOrderId() => Guid.NewGuid();
 
-Consume(LoadOrderId());  // OK — tag matches
+// OK — id matches
+Consume(LoadOrderId());
 ```
 
 ### `await` expressions
@@ -753,12 +777,14 @@ The analyzer unwraps `await` to the underlying operation, so `[return: Id]` on a
 ```cs
 Task<Guid> LoadOrderIdAsync() => Task.FromResult(Guid.NewGuid());
 
-Consume(await LoadOrderIdAsync()); // unknown — untagged async return
+// unknown — untagged async return
+Consume(await LoadOrderIdAsync());
 
 [return: Id("Order")]
 Task<Guid> LoadTaggedOrderIdAsync() => Task.FromResult(Guid.NewGuid());
 
-Consume(await LoadTaggedOrderIdAsync()); // OK — tag flows through await
+// OK — id flows through await
+Consume(await LoadTaggedOrderIdAsync());
 ```
 
 ### Compound expressions
@@ -769,15 +795,20 @@ Conditionals, casts, pattern results, null-coalescing, and any other expression 
 [Id("Order")]    Guid a = default;
 [Id("Customer")] Guid b = default;
 
-Consume(condition ? a : b); // unknown — ternary
-Consume((Guid)(object)a);   // unknown — cast chain
-Consume(a == Guid.Empty ? b : a); // unknown — conditional result
+// unknown — ternary
+Consume(condition ? a : b);
+
+// unknown — cast chain
+Consume((Guid)(object)a);
+
+// unknown — conditional result
+Consume(a == Guid.Empty ? b : a);
 ```
 
 
-## Tagged collections
+## Collections
 
-An `[Id(...)]` or `[UnionId(...)]` on a collection-typed member describes the elements inside the collection, not the collection itself. The analyzer threads those element tags through LINQ queries, `foreach` loops, and user-defined extensions — so tag flow works without attributes on every lambda parameter (which are illegal inside `IQueryable` expression trees anyway, per CS8972).
+An `[Id(...)]` or `[UnionId(...)]` on a collection-typed member describes the elements inside the collection, not the collection itself. The analyzer threads those element ids through LINQ queries, `foreach` loops, and user-defined extensions — so id flow works without attributes on every lambda parameter (which are illegal inside `IQueryable` expression trees anyway, per CS8972).
 
 The collection must be a **single-T enumerable**: an array, or a type that implements exactly one `IEnumerable<T>` construction. That covers `T[]`, `IEnumerable<T>`, `IReadOnlyList<T>`, `List<T>`, `HashSet<T>`, `IQueryable<T>`, and the various immutable/concurrent flavours.
 
@@ -807,27 +838,27 @@ public class OrderWriter
 <sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L355-L377' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionLinqLambda' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-Only **explicit** `[Id]` / `[UnionId]` attributes on a collection-typed declaration participate in element-tag flow. Naming-convention inference (`Id` / `XxxId`) is not applied to collection-typed members — the common case of a `List<Guid>` happening to be named `CustomerIds` would otherwise spuriously acquire a tag that no caller can change.
+Only **explicit** `[Id]` / `[UnionId]` attributes on a collection-typed declaration participate in element-id flow. Naming-convention inference (`Id` / `XxxId`) is not applied to collection-typed members — the common case of a `List<Guid>` happening to be named `CustomerIds` would otherwise spuriously acquire an id that no caller can change.
 
 
 ### LINQ
 
-Tags flow through three categories of call, classified by signature rather than by name:
+Ids flow through three categories of call, classified by signature rather than by name:
 
- * **Element-returning** — `First`, `FirstOrDefault`, `Single`, `SingleOrDefault`, `Last`, `LastOrDefault`, `ElementAt`, `ElementAtOrDefault`, `Min`, `Max`, `Aggregate` on `System.Linq.Enumerable`/`Queryable` surface the receiver's element tag as the result's scalar tag. The `*Async` counterparts from EF Core (`FirstAsync`, `SingleAsync`, …) are recognised by shape: any element-returning name + `Async` whose return type is `Task<T>` / `ValueTask<T>` over the receiver's element type flows the same way, so `await q.Select(_ => _.Tagged).SingleAsync()` is treated as a tagged scalar.
- * **Element-preserving** — `Where`, `OrderBy` / `OrderByDescending`, `ThenBy` / `ThenByDescending`, `Reverse`, `Take` / `TakeWhile` / `TakeLast`, `Skip` / `SkipWhile` / `SkipLast`, `Distinct` / `DistinctBy`, `Concat`, `Union` / `UnionBy`, `Intersect` / `IntersectBy`, `Except` / `ExceptBy`, `AsEnumerable`, `AsQueryable`, `ToArray`, `ToList`, `ToHashSet`, `Append`, `Prepend` pass the element tag through unchanged, so chains like `ids.Where(x => x != Guid.Empty).First()` work.
- * **`Select` / `SelectMany`** transform the element tag according to the selector:
-   * Identity lambda `x => x` keeps the receiver's element tag.
+ * **Element-returning** — `First`, `FirstOrDefault`, `Single`, `SingleOrDefault`, `Last`, `LastOrDefault`, `ElementAt`, `ElementAtOrDefault`, `Min`, `Max`, `Aggregate` on `System.Linq.Enumerable`/`Queryable` surface the receiver's element id as the result's scalar id. The `*Async` counterparts from EF Core (`FirstAsync`, `SingleAsync`, …) are recognised by shape: any element-returning name + `Async` whose return type is `Task<T>` / `ValueTask<T>` over the receiver's element type flows the same way, so `await q.Select(_ => _.Tagged).SingleAsync()` is treated as a tagged scalar.
+ * **Element-preserving** — `Where`, `OrderBy` / `OrderByDescending`, `ThenBy` / `ThenByDescending`, `Reverse`, `Take` / `TakeWhile` / `TakeLast`, `Skip` / `SkipWhile` / `SkipLast`, `Distinct` / `DistinctBy`, `Concat`, `Union` / `UnionBy`, `Intersect` / `IntersectBy`, `Except` / `ExceptBy`, `AsEnumerable`, `AsQueryable`, `ToArray`, `ToList`, `ToHashSet`, `Append`, `Prepend` pass the element id through unchanged, so chains like `ids.Where(x => x != Guid.Empty).First()` work.
+ * **`Select` / `SelectMany`** transform the element id according to the selector:
+   * Identity lambda `x => x` keeps the receiver's element id.
    * Method group `Select(Converter)` reads `[return: Id(...)]` on the target method.
-   * Expression-bodied lambda with a tagged body (`Select(x => GetTagged(x))`) adopts the body's resolved tag.
-   * Any other selector shape drops the tag.
+   * Expression-bodied lambda with a tagged body (`Select(x => GetTagged(x))`) adopts the body's resolved id.
+   * Any other selector shape drops the id.
 
-Lambda parameters in those calls inherit the receiver's element tag without an attribute, which is the mechanism that makes `IQueryable` predicates analyzable.
+Lambda parameters in those calls inherit the receiver's element id without an attribute, which is the mechanism that makes `IQueryable` predicates analyzable.
 
 
 ### `foreach`
 
-The loop variable inherits the collection's element tag for the body of the loop. Nested `foreach` works the same way — the inner loop sees the inner collection's element tag.
+The loop variable inherits the collection's element id for the body of the loop. Nested `foreach` works the same way — the inner loop sees the inner collection's element id.
 
 <!-- snippet: TaggedCollectionForEach -->
 <a id='snippet-TaggedCollectionForEach'></a>
@@ -855,7 +886,7 @@ public class CustomerScan
 
 ### User-defined LINQ-shape extensions
 
-An extension method whose first parameter is `IEnumerable<T>` or `T[]`, and whose return is an `IEnumerable<T>` over the same `T`, is treated as element-preserving by shape. MoreLINQ helpers, EF Core `IQueryable` extensions like `.Include`, and project-local paging helpers all propagate element tags without being on an allowlist.
+An extension method whose first parameter is `IEnumerable<T>` or `T[]`, and whose return is an `IEnumerable<T>` over the same `T`, is treated as element-preserving by shape. MoreLINQ helpers, EF Core `IQueryable` extensions like `.Include`, and project-local paging helpers all propagate element ids without being on an allowlist.
 
 <!-- snippet: TaggedCollectionUserExtension -->
 <a id='snippet-TaggedCollectionUserExtension'></a>
@@ -885,14 +916,14 @@ public class PagedReader
 <sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L400-L424' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionUserExtension' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-Lambda-parameter binding applies to any extension method on `IEnumerable<T>` regardless of its return type — so `Action<T>` callbacks and void-returning helpers flow tags the same way.
+Lambda-parameter binding applies to any extension method on `IEnumerable<T>` regardless of its return type — so `Action<T>` callbacks and void-returning helpers flow ids the same way.
 
 Element-returning inference (`.First()` and friends) stays closed to the `System.Linq.Enumerable`/`Queryable` allowlist — a third-party method named `First` could have different semantics, and the element-returning category depends on the semantics, not the signature.
 
 
 ### Tagging from a generic type parameter
 
-Generic container types — lookup tables, well-known-id registries, per-domain helpers — can declare the Id tag at the type-parameter level via `[IdTag]`. Collection-typed members of such a container pick up the substituted type argument's short name as an implicit element tag at each use site, so LINQ chains and foreach loops bind their element variables to the right tag without a per-member attribute.
+Generic container types — lookup tables, well-known-id registries, per-domain helpers — can declare the Id at the type-parameter level via `[IdTag]`. Collection-typed members of such a container pick up the substituted type argument's short name as an implicit element id at each use site, so LINQ chains and foreach loops bind their element variables to the right id without a per-member attribute.
 
 <!-- snippet: IdTagTypeParameter -->
 <a id='snippet-IdTagTypeParameter'></a>
@@ -901,9 +932,9 @@ public class Operation;
 
 public static class WellKnownId<[IdTag] T>
 {
-    // [IdTag] on the type parameter marks it as an Id tag source. Members of the
+    // [IdTag] on the type parameter marks it as an Id source. Members of the
     // containing type implicitly carry the substituted type argument's short name
-    // as an Id tag at every use site — so WellKnownId<Customer>.Guids is treated
+    // as an Id at every use site — so WellKnownId<Customer>.Guids is treated
     // as a Customer-tagged collection without a per-member attribute.
     public static IEnumerable<Guid> Guids { get; } = [];
 }
@@ -926,7 +957,7 @@ public class OperationIndex
 <sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L426-L454' title='Snippet source file'>snippet source</a> | <a href='#snippet-IdTagTypeParameter' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
-The implicit flow is deliberately scoped to collection elements. Scalar members — method returns, properties, parameters — still need explicit `[Id]` / `[UnionId]`; otherwise a factory like `WellKnownId<T>.MakeGuid(int)` would silently tag every call site, forcing every receiving field and variable onto the attribute to avoid SIA003. Open-generic references (where the type parameter is still unsubstituted, e.g. member accesses from inside `WellKnownId<T>` itself) produce no implicit tag. Multiple `[IdTag]` parameters on the same type contribute a union: a collection declared on `Cross<[IdTag] T1, [IdTag] T2>` carries both tag names. Nested types inherit the outer type's `[IdTag]` parameters.
+The implicit flow is deliberately scoped to collection elements. Scalar members — method returns, properties, parameters — still need explicit `[Id]` / `[UnionId]`; otherwise a factory like `WellKnownId<T>.MakeGuid(int)` would silently id every call site, forcing every receiving field and variable onto the attribute to avoid SIA003. Open-generic references (where the type parameter is still unsubstituted, e.g. member accesses from inside `WellKnownId<T>` itself) produce no implicit id. Multiple `[IdTag]` parameters on the same type contribute a union: a collection declared on `Cross<[IdTag] T1, [IdTag] T2>` carries both id names. Nested types inherit the outer type's `[IdTag]` parameters.
 
 
 ### What is not supported
@@ -938,8 +969,8 @@ Multi-type-parameter containers — `Dictionary<K,V>`, `KeyValuePair<K,V>`, `ILo
 ```cs
 public class CustomerOrderMap
 {
-    // [Id] on a Dictionary/KeyValuePair/tuple/grouping carries no element tag —
-    // the analyzer can't tell whether the tag applies to K, V, or both. Flows
+    // [Id] on a Dictionary/KeyValuePair/tuple/grouping carries no element id —
+    // the analyzer can't tell whether the id applies to K, V, or both. Flows
     // through these containers stay "unknown" and produce no diagnostics.
     [Id("Customer")]
     public Dictionary<Guid, string> OrdersByCustomer { get; set; } = [];

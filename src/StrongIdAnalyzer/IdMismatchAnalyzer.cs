@@ -1479,8 +1479,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var resultType = invocation.Type;
         if (isAsync)
         {
-            if (resultType is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } task &&
-                task.Name is "Task" or "ValueTask")
+            if (resultType is INamedTypeSymbol
+                {
+                    IsGenericType: true,
+                    TypeArguments.Length: 1,
+                    Name: "Task" or "ValueTask"
+                } task)
             {
                 resultType = task.TypeArguments[0];
             }
@@ -1646,7 +1650,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         {
             IDelegateCreationOperation creation => creation.Target.Unwrap(),
             IAnonymousFunctionOperation or IMethodReferenceOperation => selector,
-            _ => (IOperation?)null
+            _ => null
         };
 
         if (target is IMethodReferenceOperation methodRef)

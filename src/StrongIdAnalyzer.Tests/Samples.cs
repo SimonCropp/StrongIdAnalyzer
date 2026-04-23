@@ -429,9 +429,9 @@ public class Operation;
 
 public static class WellKnownId<[IdTag] T>
 {
-    // [IdTag] on the type parameter marks it as an Id tag source. Members of the
+    // [IdTag] on the type parameter marks it as an Id source. Members of the
     // containing type implicitly carry the substituted type argument's short name
-    // as an Id tag at every use site — so WellKnownId<Customer>.Guids is treated
+    // as an Id at every use site — so WellKnownId<Customer>.Guids is treated
     // as a Customer-tagged collection without a per-member attribute.
     public static IEnumerable<Guid> Guids { get; } = [];
 }
@@ -457,8 +457,8 @@ public class OperationIndex
 
 public class CustomerOrderMap
 {
-    // [Id] on a Dictionary/KeyValuePair/tuple/grouping carries no element tag —
-    // the analyzer can't tell whether the tag applies to K, V, or both. Flows
+    // [Id] on a Dictionary/KeyValuePair/tuple/grouping carries no element id —
+    // the analyzer can't tell whether the id applies to K, V, or both. Flows
     // through these containers stay "unknown" and produce no diagnostics.
     [Id("Customer")]
     public Dictionary<Guid, string> OrdersByCustomer { get; set; } = [];
