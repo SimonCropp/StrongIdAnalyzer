@@ -1406,6 +1406,113 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task ConstructedGenericWithOpenTypeParameter_DoesNotFireSIA003()
+    {
+        // Generic wrappers like `TestEntity<T>` are container helpers — the parameter
+        // can't carry a meaningful [Id] because T is open at the declaration. A tagged
+        // source flowing into the wrapper-typed parameter must not fire SIA003.
+        var source =
+            """
+            using System;
+
+            public class TestEntity<T> where T : class
+            {
+                public Guid Id { get; }
+            }
+
+            public static class Verifier
+            {
+                public static void Verify<T>(TestEntity<T> entity) where T : class { }
+            }
+
+            public class Dataset { }
+
+            public static class TestData
+            {
+                [Id("Dataset")]
+                public static TestEntity<Dataset> Published { get; } = null!;
+            }
+
+            public class Consumer
+            {
+                public void Use() => Verifier.Verify(TestData.Published);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task ConstructedGenericArrayWithOpenTypeParameter_DoesNotFireSIA003()
+    {
+        // Same shape, array of T — should also suppress; `T[]` is just another open
+        // container.
+        var source =
+            """
+            using System;
+
+            public static class Helper
+            {
+                public static void Consume<T>(T[] values) { }
+            }
+
+            public class Holder
+            {
+                [Id("Order")]
+                public Guid[] Ids { get; set; } = [];
+
+                public void Use() => Helper.Consume(Ids);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task ClosedGenericTarget_StillFiresSIA003()
+    {
+        // Closing the type argument at the declaration (no open T anywhere) means the
+        // user can apply [Id] to the parameter — SIA003 should still fire so the fixer
+        // can offer to add it.
+        var source =
+            """
+            using System;
+
+            public class TestEntity<T> where T : class
+            {
+                public Guid Id { get; }
+            }
+
+            public class Dataset { }
+
+            public static class Verifier
+            {
+                public static void Verify(TestEntity<Dataset> entity) { }
+            }
+
+            public static class TestData
+            {
+                [Id("Dataset")]
+                public static TestEntity<Dataset> Published { get; } = null!;
+            }
+
+            public class Consumer
+            {
+                public void Use() => Verifier.Verify(TestData.Published);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA003");
+    }
+
+    [Test]
     public async Task SuppressedNamespace_DefaultSystem_NoSIA003()
     {
         // User-declared class in a `System.*` namespace lives in source, so the metadata
