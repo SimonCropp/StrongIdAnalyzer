@@ -52,7 +52,7 @@ SIA001/002/003 fire when the source expression is a **property / field / paramet
 
 ### SIA002/003 suppression
 
-SIA003 is suppressed when the target is: library metadata (BCL/third-party), `object`, an unconstrained generic `T`, or in a namespace matching `strongidanalyzer.suppressed_namespaces` (`.editorconfig`, defaults `System*,Microsoft*`). Trailing `*` = prefix match. Empty value disables namespace suppression but keeps the other suppressions. SIA002 is similarly suppressed when the source lives in referenced metadata.
+SIA003 is suppressed when the target is: library metadata (BCL/third-party), `object`, a type that still contains an open type parameter (bare `T`, `List<T>`, `TestEntity<T>`, `Dictionary<Guid,T>`, `T[]`), or in a namespace matching `strongidanalyzer.suppressed_namespaces` (`.editorconfig`, defaults `System*,Microsoft*`). Trailing `*` = prefix match. Empty value disables namespace suppression but keeps the other suppressions. SIA002 is similarly suppressed when the source lives in referenced metadata.
 
 ## Notes
 

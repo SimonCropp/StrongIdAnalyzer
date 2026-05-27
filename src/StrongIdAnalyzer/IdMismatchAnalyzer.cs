@@ -2749,10 +2749,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
 
             // Skip when the target's declared type can't meaningfully carry a tag —
-            // `object` parameters/props (logging, serialization) and unconstrained
-            // generics (`T`). Adding [Id] to these wouldn't express intent, and the
-            // common case (passing a tagged id into an ILogger-like helper with an
-            // `object` or `T` arg) would otherwise produce constant noise.
+            // `object` parameters/props (logging, serialization) and any shape still
+            // holding an open type parameter (`T`, `List<T>`, `TestEntity<T>`, `T[]`).
+            // Adding [Id] to these wouldn't express intent, and the common case
+            // (passing a tagged id into an ILogger-like helper or a generic wrapper)
+            // would otherwise produce constant noise.
             if (IsBoundaryTarget(targetSymbol))
             {
                 return;
@@ -2802,8 +2803,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         //
         // For parameters on a generic method, `.Type` is already substituted at the call
         // site (T → Guid). Inspect the original definition so the type-parameter check
-        // actually catches `T`. Properties/fields don't have this issue since their
-        // declared type is fixed.
+        // actually catches `T`. Properties/fields declared inside a generic type carry
+        // the unsubstituted type parameter on `.Type` directly, so no original-definition
+        // hop is needed for them.
         var type = target switch
         {
             IParameterSymbol parameter => parameter.OriginalDefinition.Type,
@@ -2817,8 +2819,44 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
+        // A bare `T`, plus any constructed type that still has an open type parameter
+        // anywhere in its type arguments (`TestEntity<T>`, `List<T>`, `Dictionary<Guid,T>`).
+        // The target can't meaningfully carry a domain tag while T is unbound — the user
+        // would have to know in advance every closing T at every call site, which defeats
+        // the purpose of writing a generic helper. `object` is suppressed for the same
+        // reason: it erases identity at the boundary.
         return type.SpecialType == SpecialType.System_Object ||
-               type.TypeKind == TypeKind.TypeParameter;
+               ContainsOpenTypeParameter(type);
+    }
+
+    // Walks the type and any constructed-generic type arguments / element types looking
+    // for an unsubstituted `ITypeParameterSymbol`. Used by `IsBoundaryTarget` to suppress
+    // SIA003 when the target's declared shape still has a type parameter — bare `T`,
+    // `TestEntity<T>`, `List<T>`, `Dictionary<Guid, T>`, `T[]`, etc.
+    static bool ContainsOpenTypeParameter(ITypeSymbol type)
+    {
+        switch (type.TypeKind)
+        {
+            case TypeKind.TypeParameter:
+                return true;
+            case TypeKind.Array:
+                return ContainsOpenTypeParameter(((IArrayTypeSymbol)type).ElementType);
+            case TypeKind.Pointer:
+                return ContainsOpenTypeParameter(((IPointerTypeSymbol)type).PointedAtType);
+        }
+
+        if (type is INamedTypeSymbol named)
+        {
+            foreach (var arg in named.TypeArguments)
+            {
+                if (ContainsOpenTypeParameter(arg))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     static Diagnostic CreateFixableDiagnostic(

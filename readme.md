@@ -451,7 +451,7 @@ SIA003 is suppressed when the id can't meaningfully survive:
 
  * **Library metadata targets** — BCL and third-party members (`Dictionary<Guid, T>.this[Guid]`, `Guid.Equals(Guid)`, `object.Equals(object)`). Library authors can't apply `[Id]`.
  * **`object` parameters / properties / fields** — logging, serialization, message buses. The id is erased through `object` anyway.
- * **Unconstrained generic type parameters (`T`)** — identity methods, container helpers. Generics carry no domain intent.
+ * **Unconstrained generic type parameters (`T`), and constructed generics still containing one (`TestEntity<T>`, `List<T>`, `Dictionary<Guid, T>`, `T[]`)** — identity methods, container helpers, generic wrappers. The target can't carry a domain tag while T is unbound, so SIA003 would have no place to land a fix.
  * **Targets in a suppressed namespace** — by default `System*` and `Microsoft*` (see below).
  * **Equality comparisons** — `==` / `!=` operands are symmetric, so only SIA001 / SIA002 apply.
 
