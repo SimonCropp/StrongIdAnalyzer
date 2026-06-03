@@ -5120,6 +5120,130 @@ public class IdMismatchAnalyzerTests
         await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
     }
 
+    [Test]
+    public async Task AnonymousType_ProjectedIdMember_FlowsSourceTag_NoDiagnostic()
+    {
+        // The exact shape that previously tripped SIA002: project an entity's `Id` into an
+        // anonymous type, materialise it, then read `.Id` back. The member is literally
+        // named `Id` (the `Id` convention is disabled on anon types), so the tag can only
+        // come from tracing the projection initializer `_.Id` back to Dataset.Id — through
+        // the Where (element-preserving) and SingleOrDefaultAsync (element-returning).
+        var source =
+            """
+            using System;
+            using System.Linq;
+            using System.Threading.Tasks;
+
+            public static class AsyncLinq
+            {
+                public static Task<T> SingleOrDefaultAsync<T>(this IQueryable<T> source) => Task.FromResult(default(T)!);
+            }
+
+            public class Dataset
+            {
+                public Guid Id { get; set; }
+                public string Title { get; set; } = "";
+            }
+
+            public class Holder
+            {
+                public IQueryable<Dataset> Datasets { get; set; } = null!;
+
+                public void Consume([Id("Dataset")] Guid value) { }
+
+                public async Task Use()
+                {
+                    var dataset = await Datasets
+                        .Where(_ => _.Title.Length > 0)
+                        .Select(_ => new { _.Id, _.Title })
+                        .SingleOrDefaultAsync();
+                    Consume(dataset.Id);
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task AnonymousType_ProjectedIdMember_MismatchedTarget_FiresSIA001()
+    {
+        // Same projection, but the consumer expects an Order id. The traced "Dataset" tag
+        // is disjoint from the "Order" target, so the now-recovered tag surfaces the
+        // mismatch the projection previously hid.
+        var source =
+            """
+            using System;
+            using System.Linq;
+            using System.Threading.Tasks;
+
+            public static class AsyncLinq
+            {
+                public static Task<T> SingleOrDefaultAsync<T>(this IQueryable<T> source) => Task.FromResult(default(T)!);
+            }
+
+            public class Dataset
+            {
+                public Guid Id { get; set; }
+                public string Title { get; set; } = "";
+            }
+
+            public class Holder
+            {
+                public IQueryable<Dataset> Datasets { get; set; } = null!;
+
+                public void Consume([Id("Order")] Guid value) { }
+
+                public async Task Use()
+                {
+                    var dataset = await Datasets
+                        .Select(_ => new { _.Id, _.Title })
+                        .SingleOrDefaultAsync();
+                    Consume(dataset.Id);
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
+    [Test]
+    public async Task AnonymousType_LocalCreationIdMember_FlowsInitializerTag()
+    {
+        // Direct local bound to a `new { Id = ... }` — the literally-named `Id` member
+        // traces to its tagged initializer even without a projection chain. The "Customer"
+        // source flowing into an "Order" target is the mismatch; previously the anon `Id`
+        // resolved to no tag and nothing fired.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public Guid CustomerRef { get; set; }
+
+                public void Consume([Id("Order")] Guid value) { }
+
+                public void Use()
+                {
+                    var anon = new { Id = CustomerRef };
+                    Consume(anon.Id);
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
     static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string messagesSource,
         string consumerSource) =>
