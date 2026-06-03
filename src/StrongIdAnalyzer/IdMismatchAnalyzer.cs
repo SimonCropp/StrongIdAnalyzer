@@ -1218,6 +1218,19 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         switch (operation)
         {
             case IPropertyReferenceOperation prop:
+                // A member read off an anonymous type carries no attribute and at most a
+                // name-based convention tag. When the value was projected from a tagged
+                // source (`q.Select(_ => new { _.Id }).Single().Id`, or a local bound to a
+                // `new { ... }`), trace the member's initializer in the creation and use its
+                // tag — strictly more precise than the property name, and the only way a
+                // member literally named `Id` recovers a tag at all (its `Id` convention is
+                // disabled on anon types). Falls through to the convention path when the
+                // initializer can't be traced or is itself untagged.
+                if (TryResolveAnonymousMember(prop, config, out var anonInfo))
+                {
+                    return anonInfo;
+                }
+
                 return SuppressCollectionTag(
                     prop.Property.Type,
                     GetMemberAccessInfo(prop.Property, prop.Instance?.Type, config));
@@ -1733,6 +1746,207 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var parameters = lambda.Symbol.Parameters;
         return parameters.Length > 0 &&
                SymbolEqualityComparer.Default.Equals(paramRef.Parameter, parameters[0]);
+    }
+
+    // Reading a member off an anonymous-type instance: recover the tag from the
+    // expression that initialised that member in the `new { ... }` creation. Two shapes
+    // reach the creation — a local bound directly to it (`var a = new { Id = x }; a.Id`)
+    // or a value materialised from a Select projection
+    // (`q.Select(_ => new { _.Id }).Single().Id`). From the creation the member's
+    // initializer resolves like any other source, so the tag on `x` / `_.Id` flows
+    // through unchanged. Returns false — caller falls back to the convention path — when
+    // the instance can't be traced to a creation or the member's initializer is untagged.
+    static bool TryResolveAnonymousMember(
+        IPropertyReferenceOperation prop,
+        Config config,
+        out IdInfo info)
+    {
+        info = IdInfo.Unknown;
+
+        if (prop.Property.ContainingType is not { IsAnonymousType: true } ||
+            prop.Instance is null)
+        {
+            return false;
+        }
+
+        var creation = FindAnonymousCreation(prop.Instance, config);
+        if (creation is null)
+        {
+            return false;
+        }
+
+        var initializer = FindAnonymousMemberInitializer(creation, prop.Property.Name);
+        if (initializer is null)
+        {
+            return false;
+        }
+
+        var resolved = GetAccessInfo(initializer, config);
+        if (resolved.State != IdState.Present)
+        {
+            return false;
+        }
+
+        info = resolved;
+        return true;
+    }
+
+    // Resolve the anonymous-object creation behind an instance expression. The creation
+    // may appear directly, behind a local's initializer, or as the selector body of a
+    // Select that an element-returning call drew a single element from. Other shapes
+    // (member chains, parameters, opaque calls) return null.
+    static IAnonymousObjectCreationOperation? FindAnonymousCreation(IOperation instance, Config config)
+    {
+        instance = instance.Unwrap();
+        return instance switch
+        {
+            IAnonymousObjectCreationOperation creation => creation,
+            ILocalReferenceOperation local => FindAnonymousCreationFromLocal(local, config),
+            IInvocationOperation invocation => FindAnonymousCreationFromChain(invocation, config),
+            _ => null
+        };
+    }
+
+    // `var a = <expr>; a.Member` — trace the local to its declaration initializer and
+    // resolve the creation from there. Mirrors TryResolveLocalInitializer's syntax walk.
+    static IAnonymousObjectCreationOperation? FindAnonymousCreationFromLocal(
+        ILocalReferenceOperation localRef,
+        Config config)
+    {
+        var reference = localRef.Local.DeclaringSyntaxReferences.FirstOrDefault();
+        if (reference is null)
+        {
+            return null;
+        }
+
+        if (reference.GetSyntax() is not VariableDeclaratorSyntax
+            {
+                Initializer.Value: { } initializerSyntax
+            })
+        {
+            return null;
+        }
+
+        var semanticModel = localRef.SemanticModel;
+        if (semanticModel is null)
+        {
+            return null;
+        }
+
+        var initializerOp = semanticModel.GetOperation(initializerSyntax);
+        if (initializerOp is null)
+        {
+            return null;
+        }
+
+        return FindAnonymousCreation(initializerOp, config);
+    }
+
+    // Walk a LINQ chain backwards to the Select whose selector builds the anonymous type.
+    // Element-returning calls (Single/First/... and their `...Async` counterparts) and
+    // element-preserving calls (Where/OrderBy/...) keep the projected element type, so
+    // descend through them to their receiver; the Select yields the creation from its
+    // selector body.
+    static IAnonymousObjectCreationOperation? FindAnonymousCreationFromChain(
+        IInvocationOperation invocation,
+        Config config)
+    {
+        IOperation current = invocation;
+        while (true)
+        {
+            current = current.Unwrap();
+            if (current is not IInvocationOperation inv)
+            {
+                return null;
+            }
+
+            var method = inv.TargetMethod;
+            if (IsSelectCall(method))
+            {
+                return GetSelectorAnonymousCreation(inv);
+            }
+
+            if (!IsElementReturningInvocation(method) &&
+                !IsElementPreserving(method))
+            {
+                return null;
+            }
+
+            var next = GetLinqReceiver(inv);
+            if (next is null)
+            {
+                return null;
+            }
+
+            current = next;
+        }
+    }
+
+    // The anonymous creation a Select selector returns, when the selector is a single
+    // lambda whose body is a `new { ... }`. Method-group and non-anon selectors yield null.
+    static IAnonymousObjectCreationOperation? GetSelectorAnonymousCreation(IInvocationOperation selectInvocation)
+    {
+        var selector = FindSelectorArgument(selectInvocation);
+        if (selector is null)
+        {
+            return null;
+        }
+
+        selector = selector.Unwrap();
+        var target = selector switch
+        {
+            IDelegateCreationOperation creation => creation.Target.Unwrap(),
+            IAnonymousFunctionOperation => selector,
+            _ => null
+        };
+
+        if (target is not IAnonymousFunctionOperation lambda)
+        {
+            return null;
+        }
+
+        return GetSingleReturnExpression(lambda) as IAnonymousObjectCreationOperation;
+    }
+
+    // The initializer expression for `memberName` in an anonymous creation. Both shorthand
+    // (`new { _.Id }`) and explicit (`new { Id = _.Id }`) members surface as a simple
+    // assignment whose target is the anon property and whose value is the source.
+    static IOperation? FindAnonymousMemberInitializer(
+        IAnonymousObjectCreationOperation creation,
+        string memberName)
+    {
+        foreach (var initializer in creation.Initializers)
+        {
+            if (initializer.Unwrap() is ISimpleAssignmentOperation
+                {
+                    Target: IPropertyReferenceOperation target,
+                    Value: { } value
+                } &&
+                string.Equals(target.Property.Name, memberName, StringComparison.Ordinal))
+            {
+                return value.Unwrap();
+            }
+        }
+
+        return null;
+    }
+
+    // Element-returning recognition shared with TryResolveLinqElementReturn's async-aware
+    // resolution: a sync System.Linq element method, or its `...Async` counterpart (EF
+    // Core / IQueryable extensions). Used only to decide whether to descend a chain, so
+    // the looser async shape check (name only) is acceptable — a non-collection receiver
+    // simply fails to yield a Select.
+    static bool IsElementReturningInvocation(IMethodSymbol method)
+    {
+        var name = method.Name;
+        if (method.IsLinqMethod() && IsElementReturningLinq(name))
+        {
+            return true;
+        }
+
+        return name.Length > 5 &&
+               name.EndsWith("Async", StringComparison.Ordinal) &&
+               IsElementReturningLinq(name.Substring(0, name.Length - 5));
     }
 
     // Element preservation is accepted via two channels: the named-LINQ list (closed,
