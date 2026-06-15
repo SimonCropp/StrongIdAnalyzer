@@ -2,9 +2,9 @@
 <Project>
   <PropertyGroup>
     <NoWarn>CS1591;NU1608;NU1109</NoWarn>
-    <Version>1.2.10</Version>
+    <Version>1.2.11</Version>
     <LangVersion>preview</LangVersion>
-    <AssemblyVersion>1.0.0</AssemblyVersion>
+    <AssemblyVersion>$(Version)</AssemblyVersion>
     <Description>Roslyn analyzer that prevents primitive ID values from being crossed between domain types, using an `[Id("...")]` attribute and compile-time mismatch detection.</Description>
     <ResolveAssemblyReferencesSilent>true</ResolveAssemblyReferencesSilent>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
