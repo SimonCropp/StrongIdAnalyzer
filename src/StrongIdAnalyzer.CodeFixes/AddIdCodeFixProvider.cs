@@ -90,7 +90,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
     }
 
     static string? ReadProperty(Diagnostic diagnostic, string key) =>
-        diagnostic.Properties.TryGetValue(key, out var value) ? value : null;
+        diagnostic.Properties.GetValueOrDefault(key);
 
     static async Task TryRegisterSideFix(
         CodeFixContext context,
