@@ -10,7 +10,7 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.6.0" />
     <PackageVersion Include="MarkdownSnippets.MsBuild" Version="28.4.1" />
     <PackageVersion Include="Polyfill" Version="11.0.1" />
-    <PackageVersion Include="ProjectDefaults" Version="1.0.174" />
-    <PackageVersion Include="TUnit" Version="1.60.0" />
+    <PackageVersion Include="ProjectDefaults" Version="1.0.175" />
+    <PackageVersion Include="TUnit" Version="1.61.15" />
   </ItemGroup>
 </Project>
