@@ -11,6 +11,6 @@
     <PackageVersion Include="MarkdownSnippets.MsBuild" Version="28.4.1" />
     <PackageVersion Include="Polyfill" Version="11.0.1" />
     <PackageVersion Include="ProjectDefaults" Version="1.0.175" />
-    <PackageVersion Include="TUnit" Version="1.61.15" />
+    <PackageVersion Include="TUnit" Version="1.61.29" />
   </ItemGroup>
 </Project>
