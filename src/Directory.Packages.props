@@ -9,8 +9,8 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.6.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.6.0" />
     <PackageVersion Include="MarkdownSnippets.MsBuild" Version="28.4.2" />
-    <PackageVersion Include="Polyfill" Version="11.0.2" />
+    <PackageVersion Include="Polyfill" Version="11.2.0" />
     <PackageVersion Include="ProjectDefaults" Version="1.0.176" />
-    <PackageVersion Include="TUnit" Version="1.64.13" />
+    <PackageVersion Include="TUnit" Version="1.65.0" />
   </ItemGroup>
 </Project>
