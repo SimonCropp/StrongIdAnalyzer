@@ -5,8 +5,8 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.6.0" />
-    <PackageVersion Include="TUnit" Version="1.65.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+    <PackageVersion Include="TUnit" Version="1.65.38" />
     <PackageVersion Include="StrongIdAnalyzer" Version="$(Version)" />
   </ItemGroup>
 </Project>
