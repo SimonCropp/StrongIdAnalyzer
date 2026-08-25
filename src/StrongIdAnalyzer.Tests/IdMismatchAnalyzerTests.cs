@@ -5244,6 +5244,170 @@ public class IdMismatchAnalyzerTests
         await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
     }
 
+    [Test]
+    public async Task AnonymousType_ForEachOverAsyncProjectedList_FlowsInitializerTag()
+    {
+        // The EF-projection shape: project into an anonymous type, materialise with
+        // ToListAsync (Task<List<T>> — the Task layer must be transparent to the
+        // element-preserving shape rule), then foreach the result. The loop variable's
+        // declaring syntax is the ForEachStatement, so the anon-member trace goes
+        // loop var → collection expression → local → ToListAsync → Select → `_.Id`,
+        // recovering the "Dataset" tag. The target infers "Dataset" by convention, so
+        // the previously-firing SIA002 is now silent.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+            using System.Threading.Tasks;
+
+            public static class AsyncLinq
+            {
+                public static Task<List<T>> ToListAsync<T>(this IQueryable<T> source) => Task.FromResult(new List<T>());
+            }
+
+            public class Dataset
+            {
+                public Guid Id { get; set; }
+                public string Title { get; set; } = "";
+            }
+
+            public class Entry
+            {
+                public Guid DatasetId { get; set; }
+            }
+
+            public class Holder
+            {
+                public IQueryable<Dataset> Datasets { get; set; } = null!;
+
+                public async Task Use()
+                {
+                    var rows = await Datasets
+                        .Where(_ => _.Title.Length > 0)
+                        .OrderBy(_ => _.Title)
+                        .Select(_ => new { _.Id, _.Title })
+                        .ToListAsync();
+                    var entries = new List<Entry>();
+                    foreach (var row in rows)
+                    {
+                        entries.Add(new()
+                        {
+                            DatasetId = row.Id,
+                        });
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task AnonymousType_ForEachOverAsyncProjectedList_MismatchedTarget_FiresSIA001()
+    {
+        // Same materialised projection, but the loop body assigns the traced "Dataset"
+        // value into a conventional "Order" target. Before the foreach trace this was a
+        // vague SIA002 (source unknown); with the tag recovered it is a real mismatch.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+            using System.Threading.Tasks;
+
+            public static class AsyncLinq
+            {
+                public static Task<List<T>> ToListAsync<T>(this IQueryable<T> source) => Task.FromResult(new List<T>());
+            }
+
+            public class Dataset
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Entry
+            {
+                public Guid OrderId { get; set; }
+            }
+
+            public class Holder
+            {
+                public IQueryable<Dataset> Datasets { get; set; } = null!;
+
+                public async Task Use()
+                {
+                    var rows = await Datasets
+                        .Select(_ => new { _.Id })
+                        .ToListAsync();
+                    var entries = new List<Entry>();
+                    foreach (var row in rows)
+                    {
+                        entries.Add(new()
+                        {
+                            OrderId = row.Id,
+                        });
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
+    [Test]
+    public async Task AnonymousType_ForEachOverSyncProjectedList_FlowsInitializerTag()
+    {
+        // Sync counterpart — ToList is already on the element-preserving list, so this
+        // isolates the foreach-loop-variable half of the trace from the Task unwrap.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Dataset
+            {
+                public Guid Id { get; set; }
+                public string Title { get; set; } = "";
+            }
+
+            public class Entry
+            {
+                public Guid DatasetId { get; set; }
+            }
+
+            public class Holder
+            {
+                public IQueryable<Dataset> Datasets { get; set; } = null!;
+
+                public void Use()
+                {
+                    var rows = Datasets
+                        .Select(_ => new { _.Id, _.Title })
+                        .ToList();
+                    var entries = new List<Entry>();
+                    foreach (var row in rows)
+                    {
+                        entries.Add(new()
+                        {
+                            DatasetId = row.Id,
+                        });
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
     static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string messagesSource,
         string consumerSource) =>

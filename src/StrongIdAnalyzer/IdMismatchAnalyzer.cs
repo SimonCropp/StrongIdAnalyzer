@@ -1809,6 +1809,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     // `var a = <expr>; a.Member` — trace the local to its declaration initializer and
     // resolve the creation from there. Mirrors TryResolveLocalInitializer's syntax walk.
+    // A foreach loop variable (`foreach (var a in <collection>) { a.Member }`) traces
+    // through the collection expression instead — the chain walk descends its
+    // element-preserving / materializing calls to the projecting Select the same way.
     static IAnonymousObjectCreationOperation? FindAnonymousCreationFromLocal(
         ILocalReferenceOperation localRef,
         Config config)
@@ -1819,27 +1822,30 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return null;
         }
 
-        if (reference.GetSyntax() is not VariableDeclaratorSyntax
-            {
-                Initializer.Value: { } initializerSyntax
-            })
-        {
-            return null;
-        }
-
         var semanticModel = localRef.SemanticModel;
         if (semanticModel is null)
         {
             return null;
         }
 
-        var initializerOp = semanticModel.GetOperation(initializerSyntax);
-        if (initializerOp is null)
+        var sourceSyntax = reference.GetSyntax() switch
+        {
+            VariableDeclaratorSyntax { Initializer.Value: { } initializer } => initializer,
+            ForEachStatementSyntax forEach => forEach.Expression,
+            _ => null
+        };
+        if (sourceSyntax is null)
         {
             return null;
         }
 
-        return FindAnonymousCreation(initializerOp, config);
+        var sourceOp = semanticModel.GetOperation(sourceSyntax);
+        if (sourceOp is null)
+        {
+            return null;
+        }
+
+        return FindAnonymousCreation(sourceOp, config);
     }
 
     // Walk a LINQ chain backwards to the Select whose selector builds the anonymous type.
@@ -1978,10 +1984,29 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         var inputElement = definition.Parameters[0].Type.TryGetEnumerableElementType();
-        var outputElement = definition.ReturnType.TryGetEnumerableElementType();
+        var outputElement = UnwrapTaskType(definition.ReturnType).TryGetEnumerableElementType();
         return inputElement is not null &&
                outputElement is not null &&
                SymbolEqualityComparer.Default.Equals(inputElement, outputElement);
+    }
+
+    // Async materializers (EF Core's `ToListAsync`, `ToArrayAsync`, ...) return
+    // Task<List<T>> / ValueTask<T[]> — same element as the receiver, one wrapper deeper.
+    // Callers always reach these through an `await` that Unwrap has already peeled from
+    // the operation tree, so for shape purposes the Task layer is transparent.
+    static ITypeSymbol UnwrapTaskType(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol
+            {
+                IsGenericType: true,
+                TypeArguments.Length: 1,
+                Name: "Task" or "ValueTask"
+            } task)
+        {
+            return task.TypeArguments[0];
+        }
+
+        return type;
     }
 
     static bool IsSelectCall(IMethodSymbol method) =>
