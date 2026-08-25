@@ -5408,6 +5408,97 @@ public class IdMismatchAnalyzerTests
         await Assert.That(diagnostics.Length).IsEqualTo(0);
     }
 
+    [Test]
+    public async Task AnonymousType_SelectLambdaOverProjectedList_FlowsInitializerTag()
+    {
+        // The projection is consumed by a Select lambda rather than a foreach, so the
+        // anon-member trace has to cross the lambda parameter: `row.Id` -> `row` (the
+        // Select's TSource) -> the receiver `rows` -> ToListAsync -> Select -> `_.Id`,
+        // recovering "Dataset". A block-bodied lambda is the common shape because the
+        // body needs locals; the block must not stop the walk to the enclosing call.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+            using System.Threading.Tasks;
+
+            public static class AsyncLinq
+            {
+                public static Task<List<T>> ToListAsync<T>(this IQueryable<T> source) => Task.FromResult(new List<T>());
+            }
+
+            public class Dataset
+            {
+                public Guid Id { get; set; }
+                public string Title { get; set; } = "";
+            }
+
+            public record Entry(Guid DatasetId, string Title);
+
+            public class Holder
+            {
+                public IQueryable<Dataset> Datasets { get; set; } = null!;
+
+                public async Task<List<Entry>> Use()
+                {
+                    var rows = await Datasets
+                        .Select(_ => new { _.Id, _.Title })
+                        .ToListAsync();
+                    return rows
+                        .Select(row =>
+                        {
+                            var title = row.Title.Trim();
+                            return new Entry(row.Id, title);
+                        })
+                        .ToList();
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task AnonymousType_SelectLambdaOverProjectedList_MismatchedTarget_FiresSIA001()
+    {
+        // Same crossing, but the recovered "Dataset" tag lands in an "Order" target.
+        // Asserts the lambda-parameter hop recovers a real tag rather than merely
+        // silencing the diagnostic.
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Dataset
+            {
+                public Guid Id { get; set; }
+            }
+
+            public record Entry(Guid OrderId);
+
+            public class Holder
+            {
+                public IQueryable<Dataset> Datasets { get; set; } = null!;
+
+                public List<Entry> Use() =>
+                    Datasets
+                        .Select(_ => new { _.Id })
+                        .ToList()
+                        .Select(row => new Entry(row.Id))
+                        .ToList();
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
     static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string messagesSource,
         string consumerSource) =>

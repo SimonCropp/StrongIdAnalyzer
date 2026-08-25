@@ -3,74 +3,8 @@ namespace StrongIdAnalyzer;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public class IdMismatchAnalyzer : DiagnosticAnalyzer
 {
-    public const string ValueKey = "IdValue";
-
-    // SIA001 emits both sides' tags so the fixer can offer a fix for either side:
-    // TargetValueKey = tag to apply if the user fixes the target (= source's first tag).
-    // SourceValueKey = tag to apply if the user fixes the source (= target's first tag).
-    public const string TargetValueKey = "IdValueTarget";
-    public const string SourceValueKey = "IdValueSource";
-
-    static readonly DiagnosticDescriptor idMismatchRule = new(
-        id: "SIA001",
-        title: "Id type mismatch",
-        messageFormat: "Value with [Id(\"{0}\")] is assigned to a target with [Id(\"{1}\")]",
-        category: "IdAttribute.Usage",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
-
-    static readonly DiagnosticDescriptor missingSourceIdRule = new(
-        id: "SIA002",
-        title: "Source has no Id while target requires one",
-        messageFormat: "Value has no [Id] attribute but is assigned to a target with [Id(\"{0}\")]",
-        category: "IdAttribute.Usage",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
-
-    static readonly DiagnosticDescriptor droppedIdRule = new(
-        id: "SIA003",
-        title: "Source has Id while target has none",
-        messageFormat: "Value with [Id(\"{0}\")] is assigned to a target without an [Id] attribute",
-        category: "IdAttribute.Usage",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
-
-    static readonly DiagnosticDescriptor ambiguousConventionRule = new(
-        id: "SIA004",
-        title: "Ambiguous conventional Id name",
-        messageFormat: "Multiple declarations map to the conventional Id name \"{0}\"; add an explicit [Id(\"...\")] to at least one to disambiguate",
-        category: "IdAttribute.Usage",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true,
-        customTags: [WellKnownDiagnosticTags.CompilationEnd]);
-
-    static readonly DiagnosticDescriptor redundantIdRule = new(
-        id: "SIA005",
-        title: "Redundant [Id] attribute",
-        messageFormat: "[Id(\"{0}\")] is redundant because the naming convention already infers this value",
-        category: "IdAttribute.Usage",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true,
-        customTags: [WellKnownDiagnosticTags.CompilationEnd]);
-
-    public static readonly DiagnosticDescriptor singletonUnionRule = new(
-        id: "SIA006",
-        title: "[UnionId] with a single option should be [Id]",
-        messageFormat: "[UnionId(\"{0}\")] has only one option; use [Id(\"{0}\")] instead",
-        category: "IdAttribute.Usage",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
-
-    public static readonly DiagnosticDescriptor emptyTagRule = new(
-        id: "SIA007",
-        title: "Id tag must not be empty or whitespace",
-        messageFormat: "[{0}] tag must not be empty or whitespace",
-        category: "IdAttribute.Usage",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
-
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
-        [idMismatchRule, missingSourceIdRule, droppedIdRule, ambiguousConventionRule, redundantIdRule, singletonUnionRule, emptyTagRule];
+        Rules.All;
 
     public override void Initialize(AnalysisContext context)
     {
@@ -230,10 +164,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        context.ReportDiagnostic(Diagnostic.Create(
-            emptyTagRule,
-            Location.Create(reference.SyntaxTree, reference.Span),
-            attributeName));
+        Rules.ReportEmptyTag(context, reference.ToLocation(), attributeName);
     }
 
     static void AnalyzeSingletonUnion(SymbolAnalysisContext context)
@@ -261,13 +192,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            var singleValue = options[0];
-            var properties = ImmutableDictionary<string, string?>.Empty.Add(ValueKey, singleValue);
-            context.ReportDiagnostic(Diagnostic.Create(
-                singletonUnionRule,
-                Location.Create(reference.SyntaxTree, reference.Span),
-                properties: properties,
-                messageArgs: singleValue));
+            Rules.ReportSingletonUnion(context, reference.ToLocation(), options[0]);
             return;
         }
     }
@@ -368,10 +293,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             {
                 foreach (var reference in symbol.DeclaringSyntaxReferences)
                 {
-                    context.ReportDiagnostic(Diagnostic.Create(
-                        ambiguousConventionRule,
-                        Location.Create(reference.SyntaxTree, reference.Span),
-                        entry.Key));
+                    Rules.ReportAmbiguousConvention(context, reference.ToLocation(), entry.Key);
                 }
             }
         }
@@ -388,10 +310,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            context.ReportDiagnostic(Diagnostic.Create(
-                redundantIdRule,
-                Location.Create(candidate.Reference.SyntaxTree, candidate.Reference.Span),
-                candidate.Value));
+            Rules.ReportRedundant(context, candidate.Reference.ToLocation(), candidate.Value);
         }
     }
 
@@ -733,12 +652,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // Equality is symmetric so the left/right → source/target labelling is a
             // convention for the message; the fixer doesn't care which is which, it just
             // needs both declarations and both tags available.
-            context.ReportDiagnostic(Diagnostic.Create(
-                idMismatchRule,
+            Rules.ReportMismatch(
+                context,
                 operation.Syntax.GetLocation(),
-                additionalLocations: GetMismatchLocations(rightSymbol, leftSymbol),
-                properties: BuildMismatchProperties(leftInfo.FirstValue, rightInfo.FirstValue),
-                messageArgs: [leftInfo.Format(), rightInfo.Format()]));
+                leftSymbol,
+                leftInfo,
+                rightSymbol,
+                rightInfo);
             return;
         }
 
@@ -787,11 +707,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        context.ReportDiagnostic(CreateFixableDiagnostic(
-            missingSourceIdRule,
+        Rules.ReportMissingSource(
+            context,
             untaggedOperand.Syntax.GetLocation(),
             untaggedSymbol,
-            taggedInfo));
+            taggedInfo);
     }
 
     static void AnalyzeArgument(OperationAnalysisContext context, Config config)
@@ -1022,47 +942,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         info = IdInfo.Unknown;
 
-        if (param.Parameter.ContainingSymbol is not IMethodSymbol { MethodKind: MethodKind.LambdaMethod } lambdaMethod)
-        {
-            return false;
-        }
-
-        // Only bind the lambda's first parameter — TSource in every IEnumerable<T>
-        // extension shape. Index overloads (Select/Where with int) take the TSource as
-        // parameter 0 too, so this covers them. Multi-source shapes like Zip /
-        // SelectMany with an intermediate collection are not handled in this pass.
-        if (param.Parameter.Ordinal != 0 ||
-            lambdaMethod.Parameters.Length is 0 or > 2)
-        {
-            return false;
-        }
-
-        var anonymous = param.FindEnclosingAnonymousFunction();
-        if (anonymous is null)
-        {
-            return false;
-        }
-
-        var invocation = anonymous.FindEnclosingLinqInvocation();
-        if (invocation is null)
-        {
-            return false;
-        }
-
-        if (!invocation.TargetMethod.IsEnumerableShapeExtension())
-        {
-            return false;
-        }
-
-        var receiver = invocation.GetLinqReceiver();
+        var receiver = param.GetLinqLambdaReceiver();
         if (receiver is null)
-        {
-            return false;
-        }
-
-        var element = receiver.Type.TryGetEnumerableElementType();
-        if (element is null ||
-            !SymbolEqualityComparer.Default.Equals(element, param.Parameter.Type))
         {
             return false;
         }
@@ -1412,9 +1293,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     }
 
     // Resolve the anonymous-object creation behind an instance expression. The creation
-    // may appear directly, behind a local's initializer, or as the selector body of a
-    // Select that an element-returning call drew a single element from. Other shapes
-    // (member chains, parameters, opaque calls) return null.
+    // may appear directly, behind a local's initializer, behind the collection a LINQ
+    // lambda parameter iterates, or as the selector body of a Select that an
+    // element-returning call drew a single element from. Other shapes (member chains,
+    // non-lambda parameters, opaque calls) return null.
     static IAnonymousObjectCreationOperation? FindAnonymousCreation(IOperation instance, Config config)
     {
         instance = instance.Unwrap();
@@ -1422,9 +1304,29 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         {
             IAnonymousObjectCreationOperation creation => creation,
             ILocalReferenceOperation local => FindAnonymousCreationFromLocal(local, config),
+            IParameterReferenceOperation param => FindAnonymousCreationFromLambdaParameter(param, config),
             IInvocationOperation invocation => FindAnonymousCreationFromChain(invocation),
             _ => null
         };
+    }
+
+    // `rows.Select(row => ... row.Member ...)` — the lambda parameter stands for one
+    // element of the receiver, so the creation behind the receiver is the creation behind
+    // the parameter. Following the receiver rather than stopping at the parameter is what
+    // lets a projection be consumed by a Select/Where lambda instead of a foreach. The
+    // recursion terminates because the receiver is a sibling of the lambda, never inside
+    // it, so each hop moves strictly outward.
+    static IAnonymousObjectCreationOperation? FindAnonymousCreationFromLambdaParameter(
+        IParameterReferenceOperation param,
+        Config config)
+    {
+        var receiver = param.GetLinqLambdaReceiver();
+        if (receiver is null)
+        {
+            return null;
+        }
+
+        return FindAnonymousCreation(receiver, config);
     }
 
     // `var a = <expr>; a.Member` — trace the local to its declaration initializer and
@@ -2209,12 +2111,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 // Attach both declarations as additional locations so the code fix can
                 // offer to fix either side. Slot 0 is always the target; slot 1 is the
                 // source (when user-owned; library refs are reported as null sentinel).
-                context.ReportDiagnostic(Diagnostic.Create(
-                    idMismatchRule,
+                Rules.ReportMismatch(
+                    context,
                     location,
-                    additionalLocations: GetMismatchLocations(targetSymbol, sourceSymbol),
-                    properties: BuildMismatchProperties(source.FirstValue, target.FirstValue),
-                    messageArgs: [source.Format(), target.Format()]));
+                    sourceSymbol,
+                    source,
+                    targetSymbol,
+                    target);
             }
 
             return;
@@ -2258,11 +2161,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // Fix site is the source symbol's declaration (add Id matching target). The
             // codefix splits the pipe-delimited tags and offers one fix per option plus a
             // combined [UnionId(...)] when the target is multi-tag.
-            context.ReportDiagnostic(CreateFixableDiagnostic(
-                missingSourceIdRule,
-                location,
-                sourceSymbol,
-                target));
+            Rules.ReportMissingSource(context, location, sourceSymbol, target);
             return;
         }
 
@@ -2295,11 +2194,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
 
             // Fix site is the target symbol's declaration (add Id matching source).
-            context.ReportDiagnostic(CreateFixableDiagnostic(
-                droppedIdRule,
-                location,
-                targetSymbol,
-                source));
+            Rules.ReportDropped(context, location, targetSymbol, source);
         }
     }
 
@@ -2362,64 +2257,5 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // reason: it erases identity at the boundary.
         return type.SpecialType == SpecialType.System_Object ||
                type.ContainsOpenTypeParameter();
-    }
-
-    static Diagnostic CreateFixableDiagnostic(
-        DiagnosticDescriptor rule,
-        Location location,
-        ISymbol? fixTarget,
-        IdInfo info)
-    {
-        // Pipe-delimited so a UnionId source can drive multiple codefix options (one
-        // [Id(x)] per tag + one combined [UnionId(...)]). Pipe is the same separator
-        // used in the rendered message — safe because tag values are identifier-like.
-        //
-        // When the tagged side carries any explicit [Id]/[UnionId] tags we offer ONLY
-        // those as fix suggestions — convention-derived tags (member name, receiver
-        // type) on the same side are inferences, not declarations, and proposing them
-        // as add-fixes would override the deliberate annotation that's already there.
-        // The diagnostic message still shows the full effective tag set so the reader
-        // sees what the analyzer matched against.
-        var fixTags = info.ExplicitTags.IsDefaultOrEmpty ? info.Tags : info.ExplicitTags;
-        var joined = fixTags.IsDefaultOrEmpty ? "" : string.Join("|", fixTags);
-        var displayJoined = info.Tags.IsDefaultOrEmpty ? "" : string.Join("|", info.Tags);
-        return Diagnostic.Create(
-            rule,
-            location,
-            additionalLocations: GetAdditionalLocations(fixTarget),
-            properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, joined),
-            messageArgs: displayJoined);
-    }
-
-    static Location[]? GetAdditionalLocations(ISymbol? fixTarget)
-    {
-        var declaration = fixTarget?.DeclaringSyntaxReferences.FirstOrDefault();
-        if (declaration is null)
-        {
-            return null;
-        }
-
-        return [Location.Create(declaration.SyntaxTree, declaration.Span)];
-    }
-
-    // Build a positional [target, source] location array for SIA001. Slots without a
-    // user-owned declaration (library refs, locals, etc.) use Location.None as a
-    // sentinel so the slot index stays stable — the fixer checks IsInSource before
-    // offering a fix for either side.
-    static Location[] GetMismatchLocations(ISymbol? targetSymbol, ISymbol? sourceSymbol) =>
-    [
-        targetSymbol.ResolveDeclarationLocation(),
-        sourceSymbol.ResolveDeclarationLocation()
-    ];
-
-    static ImmutableDictionary<string, string?> BuildMismatchProperties(string? sourceValue, string? targetValue)
-    {
-        var properties = ImmutableDictionary<string, string?>.Empty
-            // Kept for backward-compat: older fixer versions read IdValue and apply it
-            // to AdditionalLocations[0] (the target). New fixer prefers the typed keys.
-            .Add(ValueKey, sourceValue)
-            .Add(TargetValueKey, sourceValue)
-            .Add(SourceValueKey, targetValue);
-        return properties;
     }
 }
