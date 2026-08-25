@@ -254,6 +254,65 @@ static class LinqExtensions
         return null;
     }
 
+    // The collection a LINQ-style lambda's element parameter is bound to. `param` must be
+    // the lambda's first parameter — TSource in every IEnumerable<T> extension shape.
+    // Index overloads (Select/Where with an int) take TSource as parameter 0 too, so they
+    // are covered; multi-source shapes like Zip / SelectMany with an intermediate
+    // collection are not handled in this pass.
+    //
+    // The gate is shape-based rather than name-based: any extension whose first parameter
+    // is an IEnumerable<T> / array participates, so third-party helpers like
+    // MoreLINQ.ForEach or custom paging extensions bind the same way built-in LINQ does.
+    //
+    // Both the tag path (a receiver carrying an element tag) and the anonymous-creation
+    // path (a receiver projected from `new { ... }`) enter through here, so a lambda
+    // parameter resolves against exactly one definition of "what am I iterating".
+    public static IOperation? GetLinqLambdaReceiver(this IParameterReferenceOperation param)
+    {
+        if (param.Parameter.ContainingSymbol is not IMethodSymbol { MethodKind: MethodKind.LambdaMethod } lambdaMethod)
+        {
+            return null;
+        }
+
+        if (param.Parameter.Ordinal != 0 ||
+            lambdaMethod.Parameters.Length is 0 or > 2)
+        {
+            return null;
+        }
+
+        var anonymous = param.FindEnclosingAnonymousFunction();
+        if (anonymous is null)
+        {
+            return null;
+        }
+
+        var invocation = anonymous.FindEnclosingLinqInvocation();
+        if (invocation is null)
+        {
+            return null;
+        }
+
+        if (!invocation.TargetMethod.IsEnumerableShapeExtension())
+        {
+            return null;
+        }
+
+        var receiver = invocation.GetLinqReceiver();
+        if (receiver is null)
+        {
+            return null;
+        }
+
+        var element = receiver.Type.TryGetEnumerableElementType();
+        if (element is null ||
+            !SymbolEqualityComparer.Default.Equals(element, param.Parameter.Type))
+        {
+            return null;
+        }
+
+        return receiver;
+    }
+
     public static bool IsElementReturningLinq(string methodName) =>
         methodName is
             "First" or "FirstOrDefault" or

@@ -206,6 +206,9 @@ static class Extensions
         return false;
     }
 
+    public static Location ToLocation(this SyntaxReference reference) =>
+        Location.Create(reference.SyntaxTree, reference.Span);
+
     public static Location ResolveDeclarationLocation(this ISymbol? symbol)
     {
         var declaration = symbol?.DeclaringSyntaxReferences.FirstOrDefault();
@@ -214,6 +217,6 @@ static class Extensions
             return Location.None;
         }
 
-        return Location.Create(declaration.SyntaxTree, declaration.Span);
+        return declaration.ToLocation();
     }
 }
