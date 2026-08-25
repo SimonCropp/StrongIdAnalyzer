@@ -91,7 +91,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             var inferSuffixTags = SuffixInference.Read(
                 start.Options.AnalyzerConfigOptionsProvider,
                 start.Compilation);
-            var config = new Config(suppressedNamespaces, inferSuffixTags, start.Compilation);
+            var config = new Config(
+                suppressedNamespaces,
+                inferSuffixTags,
+                start.Compilation,
+                new(() => CollectKnownTags(start.Compilation, suppressedNamespaces)));
 
             start.RegisterOperationAction(
                 _ => AnalyzeArgument(_, config),
@@ -171,7 +175,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static void CheckEmptyTag(SymbolAnalysisContext context, AttributeData attribute)
     {
-        if (IsAttributeNamed(attribute, idMetadataName))
+        if (attribute.IsNamed(IdAttributeExtensions.IdMetadataName))
         {
             // Generic `[Id<T>]` can't have an empty tag — the type argument binds
             // at compile time. Only the string-arg constructor needs checking.
@@ -184,7 +188,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (!IsAttributeNamed(attribute, unionIdMetadataName))
+        if (!attribute.IsNamed(IdAttributeExtensions.UnionIdMetadataName))
         {
             return;
         }
@@ -236,12 +240,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         foreach (var attribute in context.Symbol.GetAttributes())
         {
-            if (!IsAttributeNamed(attribute, unionIdMetadataName))
+            if (!attribute.IsNamed(IdAttributeExtensions.UnionIdMetadataName))
             {
                 continue;
             }
 
-            var options = ExtractUnionOptions(attribute);
+            var options = attribute.ExtractUnionOptions();
             // Only the exact singleton case is redundant. Empty `[UnionId()]`
             // is a different shape of user error — "has only one option" would
             // lie, and the codefix would emit `[Id("")]`, which is worse than
@@ -298,8 +302,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var explicitAttribute = GetExplicitIdAttribute(symbol);
-        var hasAnyIdFamily = HasAnyIdFamilyAttribute(symbol);
+        var explicitAttribute = symbol.GetExplicitIdAttribute();
+        var hasAnyIdFamily = symbol.HasAnyIdFamilyAttribute();
 
         // Only the containing-type-named rule (`public Guid Id`) feeds ambiguity tracking.
         // Any explicit Id-family attribute ([Id] or [UnionId]) opts out — it resolves the
@@ -316,7 +320,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var explicitValue = GetAttributeValue(explicitAttribute);
+        var explicitValue = explicitAttribute.GetValue();
         if (!string.Equals(explicitValue, conventionName, StringComparison.Ordinal))
         {
             return;
@@ -491,105 +495,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static bool TryGetConventionName(ISymbol symbol, out string conventionName) =>
         TryGetConventionName(symbol, out conventionName, out _);
-
-    // Returns the symbol's [Id] attribute specifically — not [UnionId]. Used by the
-    // SIA005 "redundant" check, which only applies to single-tag [Id("X")] values that
-    // happen to equal what the convention would infer.
-    static AttributeData? GetExplicitIdAttribute(ISymbol symbol)
-    {
-        foreach (var attribute in symbol.GetAttributes())
-        {
-            if (IsAnyIdAttribute(attribute))
-            {
-                return attribute;
-            }
-        }
-
-        return null;
-    }
-
-    // True when the symbol carries any Id-family attribute — [Id] or [UnionId]. Used by
-    // SIA004 ambiguity tracking so explicitly-tagged declarations drop out of the pool
-    // that convention alone would have collided.
-    static bool HasAnyIdFamilyAttribute(ISymbol symbol)
-    {
-        if (HasIdFamilyAttribute(symbol.GetAttributes()))
-        {
-            return true;
-        }
-
-        // A record primary-ctor parameter with [Id] / [UnionId] counts for the
-        // synthesized property too — the attribute is physically on the parameter
-        // (its default target) but the user means it to apply to both.
-        if (symbol is IPropertySymbol property &&
-            FindRecordPrimaryParameter(property) is { } parameter)
-        {
-            return HasIdFamilyAttribute(parameter.GetAttributes());
-        }
-
-        return false;
-    }
-
-    static bool HasIdFamilyAttribute(ImmutableArray<AttributeData> attributes)
-    {
-        foreach (var attribute in attributes)
-        {
-            if (IsAnyIdAttribute(attribute) ||
-                IsAnyUnionIdAttribute(attribute))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    // Records: a property synthesized from a primary-ctor parameter carries the
-    // parameter's [Id] / [UnionId] (the compiler leaves such attributes on the
-    // parameter, which is their default target). Returns the parameter so callers
-    // can read its attributes as if they were on the property.
-    static IParameterSymbol? FindRecordPrimaryParameter(IPropertySymbol property)
-    {
-        var type = property.ContainingType;
-        if (type is null || !type.IsRecord)
-        {
-            return null;
-        }
-
-        foreach (var constructor in type.InstanceConstructors)
-        {
-            foreach (var parameter in constructor.Parameters)
-            {
-                if (parameter.Name == property.Name &&
-                    SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type))
-                {
-                    return parameter;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    static string? GetAttributeValue(AttributeData attribute)
-    {
-        if (attribute.ConstructorArguments.Length > 0 &&
-            attribute.ConstructorArguments[0].Value is string { Length: > 0 } value)
-        {
-            return value;
-        }
-
-        if (TryGetGenericIdTag(attribute, out var genericTag))
-        {
-            return genericTag;
-        }
-
-        return null;
-    }
-
-    const string idMetadataName = "IdAttribute";
-    const string unionIdMetadataName = "UnionIdAttribute";
-    const string idTagMetadataName = "IdTagAttribute";
     const string indexAttributeMetadataName = "StrongIdIndexAttribute";
 
     // Looks up pre-resolved tags for `symbol` in the containing-assembly index, if one
@@ -626,7 +531,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         foreach (var attribute in assembly.GetAttributes())
         {
-            if (!IsAttributeNamed(attribute, indexAttributeMetadataName))
+            if (!attribute.IsNamed(indexAttributeMetadataName))
             {
                 continue;
             }
@@ -697,231 +602,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         return null;
     }
-    const string idNamespace = "StrongIdAnalyzer";
-    const string idGenericMetadataName = "IdAttribute`1";
-    const string unionIdGenericMetadataPrefix = "UnionIdAttribute`";
-    const int unionIdMaxGenericArity = 5;
-
-    readonly struct Config(
-        ImmutableArray<NamespacePattern> suppressedNamespaces,
-        bool inferSuffixTags,
-        Compilation compilation)
-    {
-        public ImmutableArray<NamespacePattern> SuppressedNamespaces { get; } = suppressedNamespaces;
-        public bool InferSuffixTags { get; } = inferSuffixTags;
-        public Compilation Compilation { get; } = compilation;
-
-        // Lazy index of every tag observed in the source compilation — convention-derived
-        // and explicit. Populated on first parameter-suffix inference attempt and shared
-        // for the rest of the compilation. Thread-safe via Lazy<T>'s default publication
-        // mode.
-        public Lazy<ImmutableHashSet<string>> KnownTags { get; } =
-            new(() => CollectKnownTags(compilation, suppressedNamespaces));
-
-        // Tag-to-ancestor-name cache. Keyed by a tag string; value is the union of base-type
-        // and interface names for every type in the compilation whose simple name equals
-        // the tag. Computed lazily and shared across all comparisons in the same compilation.
-        public ConcurrentDictionary<string, ImmutableArray<string>> AncestorTagCache { get; } =
-            new(StringComparer.Ordinal);
-
-        // Per-assembly tag index loaded lazily from [assembly: StrongIdIndex(...)].
-        // When a referenced assembly ships an index, per-symbol tag lookups skip the
-        // inheritance walk entirely — a hit returns the pre-resolved tag set directly.
-        // Null entries mean "this assembly has no index, fall back to the walk".
-        public ConcurrentDictionary<IAssemblySymbol, Dictionary<ISymbol, ImmutableArray<string>>?> IndexCache { get; } =
-            new(SymbolEqualityComparer.Default);
-
-        // Foreach loop variable → element tags, populated by the loop analysis action and
-        // consulted in GetAccessInfo for ILocalReferenceOperation. Separate from the
-        // normal symbol resolution path because locals don't support attributes in C#,
-        // so the tag is inferred from the collection being iterated.
-        public ConcurrentDictionary<ILocalSymbol, ImmutableArray<string>> LocalBindings { get; } =
-            new(SymbolEqualityComparer.Default);
-    }
-
-    // Matches by comparing the attribute class's short metadata name and walking its
-    // containing namespace chain — avoids the string allocation of ToDisplayString.
-    // Works across assembly boundaries where each assembly has its own internal copy
-    // of the generated attribute.
-    static bool IsAttributeNamed(AttributeData attribute, string typeName)
-    {
-        var attributeClass = attribute.AttributeClass;
-        return attributeClass is not null &&
-               attributeClass.MetadataName == typeName &&
-               IsInIdNamespace(attributeClass.ContainingNamespace);
-    }
-
-    // Returns true when `ns` is the single-segment root namespace `StrongIdAnalyzer`.
-    static bool IsInIdNamespace(INamespaceSymbol? ns) =>
-        ns is { Name: idNamespace, ContainingNamespace.IsGlobalNamespace: true};
-
-    // Matches `[Id<T>]` — the generic counterpart of `[Id("T")]`. Reads the tag from the
-    // type argument's short name, mirroring `nameof(T)`. Open/error type arguments and
-    // unresolved type parameters are rejected so malformed usages don't leak a tag.
-    static bool TryGetGenericIdTag(AttributeData attribute, out string tag)
-    {
-        tag = "";
-        var attributeClass = attribute.AttributeClass;
-        if (attributeClass is null || attributeClass.Arity != 1)
-        {
-            return false;
-        }
-
-        var original = attributeClass.OriginalDefinition;
-        if (original.MetadataName != idGenericMetadataName ||
-            !IsInIdNamespace(original.ContainingNamespace))
-        {
-            return false;
-        }
-
-        var typeArgument = attributeClass.TypeArguments[0];
-        if (typeArgument.TypeKind is TypeKind.Error or TypeKind.TypeParameter)
-        {
-            return false;
-        }
-
-        var name = typeArgument.Name;
-        if (string.IsNullOrEmpty(name))
-        {
-            return false;
-        }
-
-        tag = name;
-        return true;
-    }
-
-    static bool IsAnyIdAttribute(AttributeData attribute) =>
-        IsAttributeNamed(attribute, idMetadataName) ||
-        TryGetGenericIdTag(attribute, out _);
-
-    // Walk the containing-type chain of `symbol` and collect substituted type-argument
-    // short names for every original-definition type parameter marked [IdTag]. The
-    // attribute is opt-in at the type-parameter declaration, so this produces a tag set
-    // only when the author explicitly marked a generic as an Id-tag source.
-    //
-    // Scope: only wired into the collection-element path (GetExplicitCollectionTags) so
-    // `WellKnownId<Customer>.Guids` flows a tag through LINQ chains. Scalar members
-    // (method returns, properties, parameters) still need explicit [Id] / [UnionId] —
-    // otherwise every factory method inside a `[IdTag]`-annotated type would surface
-    // SIA003 against callers storing the result into an untagged field.
-    //
-    // Skipped when the type argument is still a type parameter (open-generic reference
-    // from inside the declaring type itself) or an error type — same guard TryGetGenericIdTag
-    // uses, for the same reason: no real tag name is available yet.
-    static ImmutableArray<string> GetImplicitTagsFromContainingGenerics(ISymbol symbol)
-    {
-        ImmutableArray<string>.Builder? builder = null;
-        HashSet<string>? seen = null;
-        var containing = symbol.ContainingType;
-        while (containing is not null)
-        {
-            var originalParams = containing.OriginalDefinition.TypeParameters;
-            var constructedArgs = containing.TypeArguments;
-            var count = Math.Min(originalParams.Length, constructedArgs.Length);
-            for (var i = 0; i < count; i++)
-            {
-                if (!HasIdTagAttribute(originalParams[i]))
-                {
-                    continue;
-                }
-
-                var arg = constructedArgs[i];
-                if (arg.TypeKind is TypeKind.Error or TypeKind.TypeParameter)
-                {
-                    continue;
-                }
-
-                var name = arg.Name;
-                if (string.IsNullOrEmpty(name))
-                {
-                    continue;
-                }
-
-                seen ??= [with(StringComparer.Ordinal)];
-                if (!seen.Add(name))
-                {
-                    continue;
-                }
-
-                builder ??= ImmutableArray.CreateBuilder<string>();
-                builder.Add(name);
-            }
-
-            containing = containing.ContainingType;
-        }
-
-        return builder?.ToImmutable() ?? [];
-    }
-
-    static bool HasIdTagAttribute(ITypeParameterSymbol parameter)
-    {
-        foreach (var attribute in parameter.GetAttributes())
-        {
-            if (IsAttributeNamed(attribute, idTagMetadataName))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    // Matches `[UnionId<T1, T2, ...>]` (arities 2..5). Each type argument contributes its
-    // short name as a tag, mirroring `[UnionId(nameof(T1), nameof(T2), ...)]`.
-    static bool TryGetGenericUnionIdTags(AttributeData attribute, out ImmutableArray<string> tags)
-    {
-        tags = [];
-        var attributeClass = attribute.AttributeClass;
-        if (attributeClass is null)
-        {
-            return false;
-        }
-
-        var arity = attributeClass.Arity;
-        if (arity is < 2 or > unionIdMaxGenericArity)
-        {
-            return false;
-        }
-
-        var original = attributeClass.OriginalDefinition;
-        if (!IsInIdNamespace(original.ContainingNamespace) ||
-            !IsUnionIdGenericMetadataName(original.MetadataName, arity))
-        {
-            return false;
-        }
-
-        var builder = ImmutableArray.CreateBuilder<string>(arity);
-        foreach (var typeArgument in attributeClass.TypeArguments)
-        {
-            if (typeArgument.TypeKind is TypeKind.Error or TypeKind.TypeParameter)
-            {
-                return false;
-            }
-
-            var name = typeArgument.Name;
-            if (string.IsNullOrEmpty(name))
-            {
-                return false;
-            }
-
-            builder.Add(name);
-        }
-
-        tags = builder.ToImmutable();
-        return true;
-    }
-
-    static bool IsAnyUnionIdAttribute(AttributeData attribute) =>
-        IsAttributeNamed(attribute, unionIdMetadataName) ||
-        TryGetGenericUnionIdTags(attribute, out _);
-
-    // Allocation-free equivalent of `metadataName == "UnionIdAttribute`" + arity` for the
-    // single-digit arities we support (2..unionIdMaxGenericArity).
-    static bool IsUnionIdGenericMetadataName(string metadataName, int arity) =>
-        metadataName.Length == unionIdGenericMetadataPrefix.Length + 1 &&
-        metadataName[^1] == (char)('0' + arity) &&
-        metadataName.StartsWith(unionIdGenericMetadataPrefix, StringComparison.Ordinal);
-
     // Widens a source tag set to include ancestor type names. For every tag that resolves
     // to one or more types in the compilation, adds the names of all base classes (up to
     // but not including System.Object) and all implemented interfaces. Tags that don't
@@ -1313,7 +993,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var loopVar = ExtractLoopLocal(forEach.LoopControlVariable);
+        var loopVar = forEach.LoopControlVariable.ExtractLoopLocal();
         if (loopVar is null)
         {
             return;
@@ -1321,14 +1001,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         config.LocalBindings.TryAdd(loopVar, tags.Tags);
     }
-
-    static ILocalSymbol? ExtractLoopLocal(IOperation? controlVariable) =>
-        controlVariable switch
-        {
-            IVariableDeclaratorOperation decl => decl.Symbol,
-            ILocalReferenceOperation localRef => localRef.Local,
-            _ => null
-        };
 
     // If `param` is a single-parameter LINQ-style lambda (e.g. `Where`, `Select`, `Any`
     // body, or any extension method on IEnumerable<T> accepting a Func<T,...>), and the
@@ -1365,24 +1037,24 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        var anonymous = FindEnclosingAnonymousFunction(param);
+        var anonymous = param.FindEnclosingAnonymousFunction();
         if (anonymous is null)
         {
             return false;
         }
 
-        var invocation = FindEnclosingLinqInvocation(anonymous);
+        var invocation = anonymous.FindEnclosingLinqInvocation();
         if (invocation is null)
         {
             return false;
         }
 
-        if (!IsEnumerableShapeExtension(invocation.TargetMethod))
+        if (!invocation.TargetMethod.IsEnumerableShapeExtension())
         {
             return false;
         }
 
-        var receiver = GetLinqReceiver(invocation);
+        var receiver = invocation.GetLinqReceiver();
         if (receiver is null)
         {
             return false;
@@ -1465,13 +1137,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var name = targetMethod.Name;
         var isAsync = false;
 
-        if (targetMethod.IsLinqMethod() && IsElementReturningLinq(name))
+        if (targetMethod.IsLinqMethod() && LinqExtensions.IsElementReturningLinq(name))
         {
             // sync System.Linq variant
         }
         else if (name.Length > 5 &&
                  name.EndsWith("Async", StringComparison.Ordinal) &&
-                 IsElementReturningLinq(name.Substring(0, name.Length - 5)))
+                 LinqExtensions.IsElementReturningLinq(name.Substring(0, name.Length - 5)))
         {
             // EF Core / IQueryable async extensions participate by shape:
             // element-returning name + "Async" returning Task<T> / ValueTask<T>
@@ -1483,7 +1155,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        var receiver = GetLinqReceiver(invocation);
+        var receiver = invocation.GetLinqReceiver();
         if (receiver is null)
         {
             return false;
@@ -1545,14 +1217,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             {
                 var targetMethod = inv.TargetMethod;
 
-                if (IsSelectCall(targetMethod))
+                if (targetMethod.IsSelectCall())
                 {
                     return GetSelectElementTags(inv, config);
                 }
 
-                if (IsElementPreserving(targetMethod))
+                if (targetMethod.IsElementPreserving())
                 {
-                    var next = GetLinqReceiver(inv);
+                    var next = inv.GetLinqReceiver();
                     if (next is null)
                     {
                         return IdInfo.Unknown;
@@ -1611,7 +1283,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return inherited;
             }
 
-            if (FindRecordPrimaryParameter(property) is { } recordParameter)
+            if (property.FindRecordPrimaryParameter() is { } recordParameter)
             {
                 var fromParameter = GetIdFromAttributes(recordParameter.GetAttributes());
                 if (fromParameter.State == IdState.Present)
@@ -1629,7 +1301,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        var implicitTags = GetImplicitTagsFromContainingGenerics(symbol);
+        var implicitTags = symbol.GetImplicitTagsFromContainingGenerics();
         if (!implicitTags.IsDefaultOrEmpty)
         {
             return IdInfo.PresentExplicit(implicitTags);
@@ -1646,7 +1318,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // Other selector shapes (multi-statement lambdas, untagged expressions) drop the tag.
     static IdInfo GetSelectElementTags(IInvocationOperation invocation, Config config)
     {
-        var selector = FindSelectorArgument(invocation);
+        var selector = invocation.FindSelectorArgument();
         if (selector is null)
         {
             return IdInfo.Unknown;
@@ -1673,15 +1345,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         if (target is IAnonymousFunctionOperation lambda)
         {
-            var body = GetSingleReturnExpression(lambda);
+            var body = lambda.GetSingleReturnExpression();
             if (body is null)
             {
                 return IdInfo.Unknown;
             }
 
-            if (IsIdentityReference(body, lambda))
+            if (body.IsIdentityReference(lambda))
             {
-                var next = GetLinqReceiver(invocation);
+                var next = invocation.GetLinqReceiver();
                 if (next is null)
                 {
                     return IdInfo.Unknown;
@@ -1694,58 +1366,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         return IdInfo.Unknown;
-    }
-
-    // The selector sits after the source in Enumerable/Queryable.Select; for extension
-    // calls the source is Arguments[0] and the selector Arguments[1]. For instance-form
-    // Select (custom providers), Instance is the source and Arguments[0] is the selector.
-    static IOperation? FindSelectorArgument(IInvocationOperation invocation)
-    {
-        if (invocation.Instance is not null)
-        {
-            return invocation.Arguments.Length > 0 ? invocation.Arguments[0].Value : null;
-        }
-
-        if (invocation.TargetMethod.IsExtensionMethod &&
-            invocation.Arguments.Length > 1)
-        {
-            return invocation.Arguments[1].Value;
-        }
-
-        return null;
-    }
-
-    // Lambda bodies surface as a synthesised block with a single return — both for
-    // expression-bodied and brace-bodied single-return lambdas. Anything with more than
-    // one statement we treat as opaque (the last statement isn't reliably the result).
-    static IOperation? GetSingleReturnExpression(IAnonymousFunctionOperation lambda)
-    {
-        var block = lambda.Body;
-        if (block.Operations.Length != 1)
-        {
-            return null;
-        }
-
-        if (block.Operations[0] is IReturnOperation { ReturnedValue: { } value })
-        {
-            return value.Unwrap();
-        }
-
-        return null;
-    }
-
-    // Identity projection: the body references the lambda's single input parameter
-    // unchanged. This is what makes `.Select(x => x)` a no-op for tag tracking.
-    static bool IsIdentityReference(IOperation body, IAnonymousFunctionOperation lambda)
-    {
-        if (body is not IParameterReferenceOperation paramRef)
-        {
-            return false;
-        }
-
-        var parameters = lambda.Symbol.Parameters;
-        return parameters.Length > 0 &&
-               SymbolEqualityComparer.Default.Equals(paramRef.Parameter, parameters[0]);
     }
 
     // Reading a member off an anonymous-type instance: recover the tag from the
@@ -1866,18 +1486,18 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
 
             var method = inv.TargetMethod;
-            if (IsSelectCall(method))
+            if (method.IsSelectCall())
             {
                 return GetSelectorAnonymousCreation(inv);
             }
 
-            if (!IsElementReturningInvocation(method) &&
-                !IsElementPreserving(method))
+            if (!method.IsElementReturningInvocation() &&
+                !method.IsElementPreserving())
             {
                 return null;
             }
 
-            var next = GetLinqReceiver(inv);
+            var next = inv.GetLinqReceiver();
             if (next is null)
             {
                 return null;
@@ -1891,7 +1511,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // lambda whose body is a `new { ... }`. Method-group and non-anon selectors yield null.
     static IAnonymousObjectCreationOperation? GetSelectorAnonymousCreation(IInvocationOperation selectInvocation)
     {
-        var selector = FindSelectorArgument(selectInvocation);
+        var selector = selectInvocation.FindSelectorArgument();
         if (selector is null)
         {
             return null;
@@ -1910,7 +1530,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return null;
         }
 
-        return GetSingleReturnExpression(lambda) as IAnonymousObjectCreationOperation;
+        return lambda.GetSingleReturnExpression() as IAnonymousObjectCreationOperation;
     }
 
     // The initializer expression for `memberName` in an anonymous creation. Both shorthand
@@ -1935,197 +1555,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         return null;
     }
-
-    // Element-returning recognition shared with TryResolveLinqElementReturn's async-aware
-    // resolution: a sync System.Linq element method, or its `...Async` counterpart (EF
-    // Core / IQueryable extensions). Used only to decide whether to descend a chain, so
-    // the looser async shape check (name only) is acceptable — a non-collection receiver
-    // simply fails to yield a Select.
-    static bool IsElementReturningInvocation(IMethodSymbol method)
-    {
-        var name = method.Name;
-        if (method.IsLinqMethod() && IsElementReturningLinq(name))
-        {
-            return true;
-        }
-
-        return name.Length > 5 &&
-               name.EndsWith("Async", StringComparison.Ordinal) &&
-               IsElementReturningLinq(name.Substring(0, name.Length - 5));
-    }
-
-    // Element preservation is accepted via two channels: the named-LINQ list (closed,
-    // covers every System.Linq.Enumerable/Queryable method whose signature matches
-    // IEnumerable<T> → IEnumerable<T>), and a shape-based rule that lets third-party
-    // extensions with the same signature participate — MoreLINQ, EF `.Include`,
-    // custom paging helpers, etc. The shape rule requires the method to be an extension
-    // on IEnumerable<T> whose return is also IEnumerable<T> with the same element T.
-    //
-    // Comparison runs on OriginalDefinition so that generic methods declared as
-    // `T Foo<T>(IEnumerable<T>) → IEnumerable<T>` match — without OriginalDefinition
-    // the input type parameter and return type parameter are distinct symbols after
-    // construction, which would defeat the check.
-    static bool IsElementPreserving(IMethodSymbol method)
-    {
-        if (method.IsLinqMethod() && IsElementPreservingLinq(method.Name))
-        {
-            return true;
-        }
-
-        if (!method.IsExtensionMethod)
-        {
-            return false;
-        }
-
-        var definition = (method.ReducedFrom ?? method).OriginalDefinition;
-        if (definition.Parameters.Length == 0)
-        {
-            return false;
-        }
-
-        var inputElement = definition.Parameters[0].Type.TryGetEnumerableElementType();
-        var outputElement = UnwrapTaskType(definition.ReturnType).TryGetEnumerableElementType();
-        return inputElement is not null &&
-               outputElement is not null &&
-               SymbolEqualityComparer.Default.Equals(inputElement, outputElement);
-    }
-
-    // Async materializers (EF Core's `ToListAsync`, `ToArrayAsync`, ...) return
-    // Task<List<T>> / ValueTask<T[]> — same element as the receiver, one wrapper deeper.
-    // Callers always reach these through an `await` that Unwrap has already peeled from
-    // the operation tree, so for shape purposes the Task layer is transparent.
-    static ITypeSymbol UnwrapTaskType(ITypeSymbol type)
-    {
-        if (type is INamedTypeSymbol
-            {
-                IsGenericType: true,
-                TypeArguments.Length: 1,
-                Name: "Task" or "ValueTask"
-            } task)
-        {
-            return task.TypeArguments[0];
-        }
-
-        return type;
-    }
-
-    static bool IsSelectCall(IMethodSymbol method) =>
-        method.IsLinqMethod() &&
-        method.Name is "Select" or "SelectMany";
-
-    // An extension method whose receiver carries a discoverable element type.
-    // This is the gate for LINQ-shaped recognition — it lets `static T[] Custom<T>(this
-    // IEnumerable<T> src, Func<T,bool> f)` flow tags without hardcoding the method name.
-    static bool IsEnumerableShapeExtension(IMethodSymbol method) =>
-        GetExtensionReceiverType(method) is { } receiverType &&
-        receiverType.TryGetEnumerableElementType() is not null;
-
-    // For a reduced extension-method call (`x.Ext(...)`), `method.Parameters` excludes
-    // the receiver — the "this" parameter only appears on the unreduced symbol, which
-    // ReducedFrom surfaces. For calls written in static form (`Ext(x, ...)`) the method
-    // is already unreduced, so ReducedFrom is null and Parameters[0] is the receiver.
-    static ITypeSymbol? GetExtensionReceiverType(IMethodSymbol method)
-    {
-        if (!method.IsExtensionMethod)
-        {
-            return null;
-        }
-
-        var full = method.ReducedFrom ?? method;
-        if (full.Parameters.Length == 0)
-        {
-            return null;
-        }
-
-        return full.Parameters[0].Type;
-    }
-
-
-    static IOperation? FindEnclosingAnonymousFunction(IOperation operation)
-    {
-        var current = operation.Parent;
-        while (current is not null)
-        {
-            if (current is IAnonymousFunctionOperation)
-            {
-                return current;
-            }
-
-            current = current.Parent;
-        }
-
-        return null;
-    }
-
-    static IInvocationOperation? FindEnclosingLinqInvocation(IOperation lambda)
-    {
-        var current = lambda.Parent;
-        while (current is not null)
-        {
-            if (current is IInvocationOperation invocation)
-            {
-                return invocation;
-            }
-
-            // Walk through delegate creation, conversion, argument wrappers that the
-            // compiler threads between the lambda and the invocation. An unrelated
-            // enclosing operation (e.g. a different invocation body) means the lambda
-            // isn't a direct argument of the LINQ call we care about.
-            if (current is IDelegateCreationOperation or IConversionOperation or IArgumentOperation)
-            {
-                current = current.Parent;
-                continue;
-            }
-
-            return null;
-        }
-
-        return null;
-    }
-
-    // Extension-method invocations of LINQ put the receiver in Arguments[0] and leave
-    // Instance null. Instance-method LINQ (rare but e.g. Queryable instance forms on
-    // custom providers) uses Instance. Handle both so both shapes propagate.
-    static IOperation? GetLinqReceiver(IInvocationOperation invocation)
-    {
-        if (invocation.Instance is not null)
-        {
-            return invocation.Instance;
-        }
-
-        if (invocation.TargetMethod.IsExtensionMethod &&
-            invocation.Arguments.Length > 0)
-        {
-            return invocation.Arguments[0].Value;
-        }
-
-        return null;
-    }
-
-    static bool IsElementReturningLinq(string methodName) =>
-        methodName is
-            "First" or "FirstOrDefault" or
-            "Single" or "SingleOrDefault" or
-            "Last" or "LastOrDefault" or
-            "ElementAt" or "ElementAtOrDefault" or
-            "Min" or "Max" or
-            "Aggregate";
-
-    static bool IsElementPreservingLinq(string methodName) =>
-        methodName is
-            "Where" or
-            "OrderBy" or "OrderByDescending" or
-            "ThenBy" or "ThenByDescending" or
-            "Reverse" or
-            "Take" or "TakeWhile" or "TakeLast" or
-            "Skip" or "SkipWhile" or "SkipLast" or
-            "Distinct" or "DistinctBy" or
-            "Concat" or "Union" or "UnionBy" or
-            "Intersect" or "IntersectBy" or
-            "Except" or "ExceptBy" or
-            "AsEnumerable" or "AsQueryable" or
-            "ToArray" or "ToList" or "ToHashSet" or
-            "Append" or "Prepend";
 
     // Resolve tags on a method's return value. `[return: Id("Order")]` / `[return: UnionId(...)]`
     // on the method itself, or on any method it overrides / interface member it implements.
@@ -2215,7 +1644,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         //    tag for that level (type name for `Id`, prefix for `XxxId`). Explicit and
         //    convention tags merge into one set; users who want to broaden a convention
         //    tag stack explicit [Id]s on base / override members.
-        foreach (var level in EnumerateMemberChain(member))
+        foreach (var level in member.EnumerateMemberChain())
         {
             if (level.ContainingType is { } ct)
             {
@@ -2245,7 +1674,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // parameter itself, not the synthesized property. Treat those tags as if
             // they lived on the property so receiver-chain walking sees them.
             if (level is IPropertySymbol recordProperty &&
-                FindRecordPrimaryParameter(recordProperty) is { } recordParameter)
+                recordProperty.FindRecordPrimaryParameter() is { } recordParameter)
             {
                 var parameterInfo = GetIdFromAttributes(recordParameter.GetAttributes());
                 if (parameterInfo.State == IdState.Present)
@@ -2354,50 +1783,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return IdInfo.Present([.. receiverTags, .. memberTags], explicitTags.ToImmutable());
     }
 
-    // Yields the member and then every override/interface-impl target reachable from it.
-    // `new`-hide is NOT followed (OverriddenProperty returns null for it) — the hidden
-    // declaration is a fresh member that the user has explicitly disconnected from the
-    // base. Parameters are single-tag today and don't pass through this enumerator.
-    static IEnumerable<ISymbol> EnumerateMemberChain(ISymbol member)
-    {
-        yield return member;
-
-        if (member is not IPropertySymbol property)
-        {
-            yield break;
-        }
-
-        var overridden = property.OverriddenProperty;
-        while (overridden is not null)
-        {
-            yield return overridden;
-            overridden = overridden.OverriddenProperty;
-        }
-
-        foreach (var ifaceMember in property.ExplicitInterfaceImplementations)
-        {
-            yield return ifaceMember;
-        }
-
-        var containingType = property.ContainingType;
-        if (containingType is null)
-        {
-            yield break;
-        }
-
-        foreach (var iface in containingType.AllInterfaces)
-        {
-            foreach (var ifaceMember in iface.GetMembers(property.Name).OfType<IPropertySymbol>())
-            {
-                var impl = containingType.FindImplementationForInterfaceMember(ifaceMember);
-                if (SymbolEqualityComparer.Default.Equals(impl, property))
-                {
-                    yield return ifaceMember;
-                }
-            }
-        }
-    }
-
     // Reads the [Id] attribute off a symbol, walking override / interface-impl chains
     // for properties so a derived class inherits the base's tag without having to
     // repeat the attribute. `new`-hide is NOT walked — `new` declares a fresh property
@@ -2429,7 +1814,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return inherited;
             }
 
-            if (FindRecordPrimaryParameter(property) is { } recordParameter)
+            if (property.FindRecordPrimaryParameter() is { } recordParameter)
             {
                 var fromParameter = GetIdFromAttributes(recordParameter.GetAttributes());
                 if (fromParameter.State == IdState.Present)
@@ -2508,13 +1893,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         foreach (var type in EnumerateAccessibleTypes(compilation.GlobalNamespace, suppressedNamespaces))
         {
-            if (type.Name.Length > 0 && HasIdMemberInChain(type))
+            if (type.Name.Length > 0 && type.HasIdMemberInChain())
             {
                 builder.Add(type.Name);
             }
         }
 
-        foreach (var type in EnumerateSourceTypes(compilation.Assembly.GlobalNamespace))
+        foreach (var type in TypeEnumeration.EnumerateAll(compilation.Assembly.GlobalNamespace))
         {
             foreach (var member in type.GetMembers())
             {
@@ -2575,7 +1960,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     }
 
                     yield return type;
-                    foreach (var nested in EnumerateNestedTypes(type))
+                    foreach (var nested in TypeEnumeration.EnumerateNested(type))
                     {
                         yield return nested;
                     }
@@ -2588,64 +1973,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     }
 
                     break;
-            }
-        }
-    }
-
-    static bool HasIdMemberInChain(INamedTypeSymbol type)
-    {
-        for (var current = type; current is not null; current = current.BaseType)
-        {
-            if (current.SpecialType == SpecialType.System_Object)
-            {
-                return false;
-            }
-
-            foreach (var member in current.GetMembers("Id"))
-            {
-                if (member is IPropertySymbol { IsIndexer: false } or IFieldSymbol { IsImplicitlyDeclared: false })
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    static IEnumerable<INamedTypeSymbol> EnumerateSourceTypes(INamespaceSymbol ns)
-    {
-        foreach (var member in ns.GetMembers())
-        {
-            switch (member)
-            {
-                case INamedTypeSymbol type:
-                    yield return type;
-                    foreach (var nested in EnumerateNestedTypes(type))
-                    {
-                        yield return nested;
-                    }
-
-                    break;
-                case INamespaceSymbol child:
-                    foreach (var t in EnumerateSourceTypes(child))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-            }
-        }
-    }
-
-    static IEnumerable<INamedTypeSymbol> EnumerateNestedTypes(INamedTypeSymbol type)
-    {
-        foreach (var nested in type.GetTypeMembers())
-        {
-            yield return nested;
-            foreach (var deeper in EnumerateNestedTypes(nested))
-            {
-                yield return deeper;
             }
         }
     }
@@ -2790,7 +2117,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         foreach (var attribute in attributes)
         {
-            if (IsAttributeNamed(attribute, idMetadataName))
+            if (attribute.IsNamed(IdAttributeExtensions.IdMetadataName))
             {
                 if (attribute.ConstructorArguments.Length > 0 &&
                     attribute.ConstructorArguments[0].Value is string { Length: > 0 } s &&
@@ -2802,7 +2129,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            if (TryGetGenericIdTag(attribute, out var genericTag))
+            if (attribute.TryGetGenericIdTag(out var genericTag))
             {
                 if (seen.Add(genericTag))
                 {
@@ -2812,9 +2139,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            if (IsAttributeNamed(attribute, unionIdMetadataName))
+            if (attribute.IsNamed(IdAttributeExtensions.UnionIdMetadataName))
             {
-                foreach (var option in ExtractUnionOptions(attribute))
+                foreach (var option in attribute.ExtractUnionOptions())
                 {
                     if (seen.Add(option))
                     {
@@ -2825,7 +2152,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            if (TryGetGenericUnionIdTags(attribute, out var genericUnionTags))
+            if (attribute.TryGetGenericUnionIdTags(out var genericUnionTags))
             {
                 foreach (var option in genericUnionTags)
                 {
@@ -2840,36 +2167,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return tags.Count == 0
             ? IdInfo.NotPresent
             : IdInfo.PresentExplicit(tags.ToImmutable());
-    }
-
-    // Reads `[UnionId(params string[] options)]`'s constructor argument. Roslyn surfaces
-    // the `params string[]` as a single Array TypedConstant whose Values are the items.
-    static ImmutableArray<string> ExtractUnionOptions(AttributeData attribute)
-    {
-        if (attribute.ConstructorArguments.Length == 0)
-        {
-            return [];
-        }
-
-        var first = attribute.ConstructorArguments[0];
-        if (first.Kind != TypedConstantKind.Array)
-        {
-            return [];
-        }
-
-        var builder = ImmutableArray.CreateBuilder<string>(first.Values.Length);
-        foreach (var element in first.Values)
-        {
-            // Empty tags are dropped here — [Id("")] is never a valid shape, so
-            // letting one through would propagate into diagnostics/codefixes that
-            // round-trip the tag back into [Id("")] / [UnionId("", ...)] output.
-            if (element.Value is string { Length: > 0 } s)
-            {
-                builder.Add(s);
-            }
-        }
-
-        return builder.ToImmutable();
     }
 
     static void Report(
@@ -3064,37 +2361,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // the purpose of writing a generic helper. `object` is suppressed for the same
         // reason: it erases identity at the boundary.
         return type.SpecialType == SpecialType.System_Object ||
-               ContainsOpenTypeParameter(type);
-    }
-
-    // Walks the type and any constructed-generic type arguments / element types looking
-    // for an unsubstituted `ITypeParameterSymbol`. Used by `IsBoundaryTarget` to suppress
-    // SIA003 when the target's declared shape still has a type parameter — bare `T`,
-    // `TestEntity<T>`, `List<T>`, `Dictionary<Guid, T>`, `T[]`, etc.
-    static bool ContainsOpenTypeParameter(ITypeSymbol type)
-    {
-        switch (type.TypeKind)
-        {
-            case TypeKind.TypeParameter:
-                return true;
-            case TypeKind.Array:
-                return ContainsOpenTypeParameter(((IArrayTypeSymbol)type).ElementType);
-            case TypeKind.Pointer:
-                return ContainsOpenTypeParameter(((IPointerTypeSymbol)type).PointedAtType);
-        }
-
-        if (type is INamedTypeSymbol named)
-        {
-            foreach (var arg in named.TypeArguments)
-            {
-                if (ContainsOpenTypeParameter(arg))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+               type.ContainsOpenTypeParameter();
     }
 
     static Diagnostic CreateFixableDiagnostic(
@@ -3141,20 +2408,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // offering a fix for either side.
     static Location[] GetMismatchLocations(ISymbol? targetSymbol, ISymbol? sourceSymbol) =>
     [
-        ResolveDeclarationLocation(targetSymbol),
-        ResolveDeclarationLocation(sourceSymbol)
+        targetSymbol.ResolveDeclarationLocation(),
+        sourceSymbol.ResolveDeclarationLocation()
     ];
-
-    static Location ResolveDeclarationLocation(ISymbol? symbol)
-    {
-        var declaration = symbol?.DeclaringSyntaxReferences.FirstOrDefault();
-        if (declaration is null)
-        {
-            return Location.None;
-        }
-
-        return Location.Create(declaration.SyntaxTree, declaration.Span);
-    }
 
     static ImmutableDictionary<string, string?> BuildMismatchProperties(string? sourceValue, string? targetValue)
     {
@@ -3165,82 +2421,5 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             .Add(TargetValueKey, sourceValue)
             .Add(SourceValueKey, targetValue);
         return properties;
-    }
-
-    enum IdState
-    {
-        Unknown,
-        NotPresent,
-        Present
-    }
-
-    // A value's Id info is a set of tags. Empty-with-state-Present is not allowed —
-    // use NotPresent instead. Multi-tag sets arise from receiver-type walking at
-    // access sites: `child1.Id` where `Id` is declared on Base carries both
-    // "Child1" and "Base", so it satisfies parameters tagged either way.
-    readonly struct IdInfo
-    {
-        public IdState State { get; }
-        public ImmutableArray<string> Tags { get; }
-
-        // Subset of Tags that came from explicit [Id]/[UnionId] attributes (as opposed
-        // to convention inference from member name or receiver type). When non-empty,
-        // SIA002/SIA003 fixes propose only these tags — guessing convention names onto
-        // the untagged side would override the deliberate annotation on the tagged side.
-        public ImmutableArray<string> ExplicitTags { get; }
-
-        IdInfo(IdState state, ImmutableArray<string> tags, ImmutableArray<string> explicitTags)
-        {
-            State = state;
-            Tags = tags;
-            ExplicitTags = explicitTags;
-        }
-
-        public static IdInfo Unknown { get; } = new(IdState.Unknown, ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
-        public static IdInfo NotPresent { get; } = new(IdState.NotPresent, ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
-
-        public static IdInfo Present(string tag) =>
-            new(IdState.Present, [tag], ImmutableArray<string>.Empty);
-
-        public static IdInfo Present(ImmutableArray<string> tags) =>
-            tags.IsDefaultOrEmpty
-                ? NotPresent
-                : new(IdState.Present, tags, ImmutableArray<string>.Empty);
-
-        public static IdInfo Present(ImmutableArray<string> tags, ImmutableArray<string> explicitTags) =>
-            tags.IsDefaultOrEmpty
-                ? NotPresent
-                : new(IdState.Present, tags, explicitTags.IsDefault ? ImmutableArray<string>.Empty : explicitTags);
-
-        public static IdInfo PresentExplicit(ImmutableArray<string> tags) =>
-            tags.IsDefaultOrEmpty
-                ? NotPresent
-                : new(IdState.Present, tags, tags);
-
-        // Single-value accessor for the fixer (which needs one string to write back).
-        // Picks the first tag — callers that care about multi-tag must use Tags directly.
-        public string? FirstValue => Tags.IsDefaultOrEmpty ? null : Tags[0];
-
-        // Set intersection — the source and target are compatible if they share at least
-        // one tag. This is the natural rule for both covariant sources (receiver walk:
-        // `child1.Id` carries {"Child1","Base"} so it matches a `[Id("Base")]` or
-        // `[Id("Child1")]` parameter) and contravariant targets (`[UnionId("A","B")]`
-        // accepts anything tagged "A" or "B").
-        public bool IntersectsWith(IdInfo other)
-        {
-            foreach (var tag in Tags)
-            {
-                if (other.Tags.Contains(tag))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        // Flat representation for diagnostic messages. Multi-tag sets use "/" as a
-        // separator so a reader sees the full set at once: [Id("Child1/Base")].
-        public string Format() =>
-            Tags.IsDefaultOrEmpty ? "" : string.Join("/", Tags);
     }
 }

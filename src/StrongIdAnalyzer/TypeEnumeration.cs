@@ -33,7 +33,8 @@ static class TypeEnumeration
         }
     }
 
-    static IEnumerable<INamedTypeSymbol> EnumerateAll(INamespaceSymbol ns)
+    // Every type declared under `ns`, including nested types at any depth.
+    public static IEnumerable<INamedTypeSymbol> EnumerateAll(INamespaceSymbol ns)
     {
         foreach (var member in ns.GetMembers())
         {
@@ -58,7 +59,7 @@ static class TypeEnumeration
         }
     }
 
-    static IEnumerable<INamedTypeSymbol> EnumerateNested(INamedTypeSymbol type)
+    public static IEnumerable<INamedTypeSymbol> EnumerateNested(INamedTypeSymbol type)
     {
         foreach (var nested in type.GetTypeMembers())
         {
