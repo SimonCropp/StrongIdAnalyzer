@@ -19,7 +19,7 @@ public class IndexedCrossAssemblyAnalyzerBenchmarks
         var tpaReferences = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
             .Where(_ => _.Length > 0)
-            .Select(_ => (MetadataReference)MetadataReference.CreateFromFile(_))
+            .Select(MetadataReference (_) => MetadataReference.CreateFromFile(_))
             .ToArray();
 
         // Two syntax trees so the assembly-attribute tree can legally place its

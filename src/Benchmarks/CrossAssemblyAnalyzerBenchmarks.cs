@@ -21,7 +21,7 @@ public class CrossAssemblyAnalyzerBenchmarks
         var tpaReferences = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
             .Where(_ => _.Length > 0)
-            .Select(_ => (MetadataReference)MetadataReference.CreateFromFile(_))
+            .Select(MetadataReference (_) => MetadataReference.CreateFromFile(_))
             .ToArray();
 
         var libraryTree = CSharpSyntaxTree.ParseText(SourceBuilder.LibrarySource);

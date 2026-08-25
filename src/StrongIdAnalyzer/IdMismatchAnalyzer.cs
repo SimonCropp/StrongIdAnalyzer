@@ -350,7 +350,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // original containing types collide. If all entries share one containing
             // type (partials / duplicate notifications), there is no conflict.
             var distinctTypes = distinct
-                .Select(_ => (ISymbol?)_.ContainingType?.OriginalDefinition)
+                .Select(ISymbol? (_) => _.ContainingType?.OriginalDefinition)
                 .Where(_ => _ is not null)
                 .Select(_ => _!)
                 .Distinct(SymbolEqualityComparer.Default)
@@ -837,7 +837,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     continue;
                 }
 
-                seen ??= new(StringComparer.Ordinal);
+                seen ??= [with(StringComparer.Ordinal)];
                 if (!seen.Add(name))
                 {
                     continue;
@@ -953,7 +953,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (additions is null)
             {
                 additions = ImmutableArray.CreateBuilder<string>();
-                seen = new(info.Tags, StringComparer.Ordinal);
+                seen = [with(info.Tags, StringComparer.Ordinal)];
             }
 
             foreach (var ancestor in ancestors)
@@ -1802,7 +1802,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         {
             IAnonymousObjectCreationOperation creation => creation,
             ILocalReferenceOperation local => FindAnonymousCreationFromLocal(local, config),
-            IInvocationOperation invocation => FindAnonymousCreationFromChain(invocation, config),
+            IInvocationOperation invocation => FindAnonymousCreationFromChain(invocation),
             _ => null
         };
     }
@@ -1848,8 +1848,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // descend through them to their receiver; the Select yields the creation from its
     // selector body.
     static IAnonymousObjectCreationOperation? FindAnonymousCreationFromChain(
-        IInvocationOperation invocation,
-        Config config)
+        IInvocationOperation invocation)
     {
         IOperation current = invocation;
         while (true)
