@@ -153,6 +153,43 @@ static class Extensions
         }
     }
 
+    // The name a symbol is matched against by the naming-convention rules. Fields
+    // conventionally carry an underscore prefix (`_id`, `_customerId`, occasionally
+    // `__id`), which is punctuation rather than part of the name, so it is stripped.
+    // What follows the prefix is camelCase by that same convention, so the first
+    // character is upper-cased — `_id` reads as `Id` (the containing-type rule) and
+    // `_customerId` as `CustomerId` (the `XxxId` rule). An all-underscore name (`_`)
+    // has nothing to strip and is returned as-is. Other symbol kinds are returned
+    // unchanged: a leading underscore has no established meaning on a property, and on
+    // a parameter it marks a discard rather than an id.
+    public static string ConventionName(this ISymbol symbol)
+    {
+        var name = symbol.Name;
+        if (symbol is not IFieldSymbol || name.Length == 0 || name[0] != '_')
+        {
+            return name;
+        }
+
+        var start = 1;
+        while (start < name.Length && name[start] == '_')
+        {
+            start++;
+        }
+
+        if (start == name.Length)
+        {
+            return name;
+        }
+
+        var trimmed = name.Substring(start);
+        if (char.IsLower(trimmed[0]))
+        {
+            return char.ToUpperInvariant(trimmed[0]) + trimmed.Substring(1);
+        }
+
+        return trimmed;
+    }
+
     public static bool HasIdMemberInChain(this INamedTypeSymbol type)
     {
         for (var current = type; current is not null; current = current.BaseType)
@@ -162,9 +199,14 @@ static class Extensions
                 return false;
             }
 
-            foreach (var member in current.GetMembers("Id"))
+            // Scans every member rather than looking up "Id" directly: an underscore-
+            // prefixed field (`_id`) reads as `Id` under the convention, so the match has
+            // to run through ConventionName. Roslyn materializes the full member list for
+            // a name lookup anyway, so this costs an iteration, not extra symbol loading.
+            foreach (var member in current.GetMembers())
             {
-                if (member is IPropertySymbol { IsIndexer: false } or IFieldSymbol { IsImplicitlyDeclared: false })
+                if (member is IPropertySymbol { IsIndexer: false } or IFieldSymbol { IsImplicitlyDeclared: false } &&
+                    member.ConventionName() == "Id")
                 {
                     return true;
                 }

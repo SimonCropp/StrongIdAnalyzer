@@ -328,6 +328,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     //   - property/field named "Id"       -> containing type's metadata name (ignoring namespace and parent)
     //   - property/field/parameter named "<Xxx>Id" -> "<Xxx>" (first char uppercased, so
     //     camelCase parameters like `orderId` match the PascalCase tag of `OrderId`)
+    // Field names run through ConventionName first, so the underscore prefix a field
+    // conventionally carries is not part of what either rule sees — `_id` behaves as
+    // `Id`, `_customerId` as `CustomerId`.
     // The `Id` rule does not apply to parameters — a bare `id` has no containing-type
     // equivalent, and this keeps method signatures' inferred tags purely name-driven.
     // `fromContainingType` is true only when the `Id` rule fired; that's the one that can
@@ -373,7 +376,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     return false;
                 }
 
-                name = field.Name;
+                name = field.ConventionName();
                 containingType = field.ContainingType;
                 break;
             case IParameterSymbol parameter:
@@ -1617,7 +1620,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // GetIdWithInheritance for parameter references.
             if (config.InferSuffixTags &&
                 level is IPropertySymbol or IFieldSymbol &&
-                SuffixInference.TryMatch(level.Name, config.KnownTags.Value, out var suffixTag))
+                SuffixInference.TryMatch(level.ConventionName(), config.KnownTags.Value, out var suffixTag))
             {
                 if (seen.Add(suffixTag))
                 {
@@ -1643,7 +1646,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         //    Only the `Id` rule applies here; `XxxId` is name-based and already captured.
         //    Stop at System.Object so "Object" never leaks into the tag set — relevant
         //    when the declaring type is an interface and `.BaseType` walks past it.
-        if (member is { Name: "Id", ContainingType: { } memberContaining } &&
+        if (member.ConventionName() == "Id" &&
+            member.ContainingType is { } memberContaining &&
             receiverType is INamedTypeSymbol rt)
         {
             var boundary = memberContaining.OriginalDefinition;
@@ -1750,7 +1754,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // unchanged for names that don't match a known suffix.
             if (config.InferSuffixTags &&
                 symbol is IPropertySymbol or IFieldSymbol or IParameterSymbol &&
-                SuffixInference.TryMatch(symbol.Name, config.KnownTags.Value, out var suffixTag))
+                SuffixInference.TryMatch(symbol.ConventionName(), config.KnownTags.Value, out var suffixTag))
             {
                 return IdInfo.Present(suffixTag);
             }

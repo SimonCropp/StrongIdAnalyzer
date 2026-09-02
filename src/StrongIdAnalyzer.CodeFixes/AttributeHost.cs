@@ -88,10 +88,13 @@ static class AttributeHost
 
     // Rename heuristic: produce `<tag>Id`, matching the first-character case of the
     // current identifier (camelCase for parameters like `id`, PascalCase for a property
-    // like `Value`). Skips property/field named exactly "Id" — its convention tag is
-    // the containing type's name, so `<tag>Id` would require moving the declaration
-    // to a different type. Parameters named `id` are fine to rename since they have
-    // no containing-type convention.
+    // like `Value`). A field's underscore prefix is punctuation, not part of the name —
+    // it is carried through untouched and the casing decision is made on what follows it
+    // (`_bidId` → `_treasuryBidId`). Skips property/field named exactly "Id" — its
+    // convention tag is the containing type's name, so `<tag>Id` would require moving the
+    // declaration to a different type; the same holds for its underscore-prefixed field
+    // form (`_id`). Parameters named `id` are fine to rename since they have no
+    // containing-type convention.
     public static bool TryGetRenameTarget(SyntaxNode host, string tag, out string newName)
     {
         newName = "";
@@ -114,17 +117,36 @@ static class AttributeHost
             return false;
         }
 
+        var prefixLength = 0;
+        if (host is FieldDeclarationSyntax)
+        {
+            while (prefixLength < currentName.Length && currentName[prefixLength] == '_')
+            {
+                prefixLength++;
+            }
+
+            // An all-underscore name (`_`) has no body to case-adjust — leave it whole
+            // and let the normal `<tag>Id` rename apply.
+            if (prefixLength == currentName.Length)
+            {
+                prefixLength = 0;
+            }
+        }
+
+        var prefix = currentName.Substring(0, prefixLength);
+        var bareName = currentName.Substring(prefixLength);
+
         if (host is not ParameterSyntax &&
-            string.Equals(currentName, "Id", StringComparison.OrdinalIgnoreCase))
+            string.Equals(bareName, "Id", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        var firstIsLower = char.IsLower(currentName[0]);
+        var firstIsLower = char.IsLower(bareName[0]);
         var adjusted = firstIsLower
             ? char.ToLowerInvariant(tag[0]) + tag.Substring(1)
             : char.ToUpperInvariant(tag[0]) + tag.Substring(1);
-        newName = adjusted + "Id";
+        newName = prefix + adjusted + "Id";
         return newName != currentName;
     }
 }
