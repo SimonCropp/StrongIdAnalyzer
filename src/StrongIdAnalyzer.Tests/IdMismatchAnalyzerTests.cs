@@ -1899,6 +1899,39 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task Convention_InheritedUnderscoreIdField_CarriesReceiverTag()
+    {
+        // `_id` reads as `Id`, so the covariant receiver-type walk applies to it too:
+        // `child._id` carries {"Base", "Child"} even though the field is declared on Base
+        // and never redeclared. Without the receiver contribution the set is {"Base"}
+        // alone and this call fires SIA001.
+        var source =
+            """
+            using System;
+
+            public class Base
+            {
+                public Guid _id;
+            }
+
+            public class Child : Base
+            {
+            }
+
+            public class Holder
+            {
+                public void Consume([Id("Child")] Guid value) { }
+
+                public void Use(Child child) => Consume(child._id);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task Convention_UnderscoreOnlyField_NoConvention()
     {
         // Nothing left after the prefix — no name to match, so no tag (SIA002 rather
@@ -2822,25 +2855,27 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task SuffixInference_Enabled_OnUnderscoreField()
     {
-        // Two underscore trims in one shape: `Product._id` reads as `Id`, which is what
-        // makes "Product" a known tag, and `_sourceProductId` descends to that tag.
+        // Two underscore trims in one shape: `Wigwam._id` reads as `Id`, which is what
+        // makes "Wigwam" a known tag, and `_sourceWigwamId` descends to that tag. The
+        // domain name is deliberately one no referenced assembly can also define — a
+        // common name would let a stray library type supply the known tag instead.
         var source =
             """
             using System;
 
-            public class Product
+            public class Wigwam
             {
                 public Guid _id;
             }
 
             public class Slot
             {
-                public Guid _sourceProductId;
+                public Guid _sourceWigwamId;
             }
 
             public class Caller
             {
-                public void Fill(Product product, Slot slot) => slot._sourceProductId = product._id;
+                public void Fill(Wigwam wigwam, Slot slot) => slot._sourceWigwamId = wigwam._id;
             }
             """;
 
@@ -2852,6 +2887,95 @@ public class IdMismatchAnalyzerTests
             });
 
         await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_WholePrefixWinsOverInnerWord_OnUnderscoreField()
+    {
+        // The underscore trim is what creates the whole-prefix candidate: `_accessGroupId`
+        // reads as `AccessGroupId`, so "AccessGroup" is tried (and wins) before the inner
+        // word "Group". Untrimmed, `_accessGroup` matches nothing and resolution falls
+        // through to "Group" — which would make this assignment silently clean.
+        var source =
+            """
+            using System;
+
+            public class Group
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class AccessGroup
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class AccessRule
+            {
+                public Guid _accessGroupId;
+            }
+
+            public class Holder
+            {
+                public void AssignFromGroup(AccessRule rule, Group group) =>
+                    rule._accessGroupId = group.Id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        await Assert.That(diagnostics[0].GetMessage()).IsEqualTo(
+            """Value with [Id("Group")] is assigned to a target with [Id("AccessGroup")]""");
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_UnderscoreFieldInitializer()
+    {
+        // Same resolution over the field-initializer path, which reaches the tag through
+        // GetIdWithInheritance rather than the member-access walk.
+        var source =
+            """
+            using System;
+
+            public class Group
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class AccessGroup
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public static Group Group = new();
+            }
+
+            public class AccessRule
+            {
+                Guid _accessGroupId = Holder.Group.Id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        await Assert.That(diagnostics[0].GetMessage()).IsEqualTo(
+            """Value with [Id("Group")] is assigned to a target with [Id("AccessGroup")]""");
     }
 
     [Test]
