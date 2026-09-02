@@ -526,6 +526,63 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA001_RenamesUnderscorePrefixedField()
+    {
+        // The underscore prefix is carried through untouched and the camelCase of the
+        // name after it is preserved: `_bidId` → `_treasuryBidId`.
+        var source =
+            """
+            using System;
+
+            public class Target
+            {
+                public Guid _bidId;
+            }
+
+            public class Bid
+            {
+                [Id("TreasuryBid")]
+                public Guid Id { get; set; }
+
+                public void Use(Target target) => target._bidId = Id;
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA001", "Rename");
+
+        await Contains(fixedSource, "public Guid _treasuryBidId;");
+        await Contains(fixedSource, "target._treasuryBidId = Id");
+    }
+
+    [Test]
+    public async Task SIA001_NoRenameOfferedForUnderscoreIdField()
+    {
+        // `_id` takes its tag from the containing type, same as `Id` — renaming it to
+        // `<tag>Id` would mean moving the declaration to another type, so no rename.
+        var source =
+            """
+            using System;
+
+            public class Target
+            {
+                public Guid _id;
+            }
+
+            public class Bid
+            {
+                [Id("TreasuryBid")]
+                public Guid Value { get; set; }
+
+                public void Use(Target target) => target._id = Value;
+            }
+            """;
+
+        var titles = (await GetCodeActions(source)).Select(_ => _.Title).ToArray();
+
+        await Assert.That(titles.Any(_ => _.StartsWith("Rename", StringComparison.Ordinal))).IsFalse();
+    }
+
+    [Test]
     public async Task SIA003_RenamesRecordPrimaryCtorIdParameter()
     {
         var source =

@@ -228,6 +228,23 @@ Most declarations don't need an explicit `[Id("...")]` — the analyzer infers a
 
     The prefix is the whole identifier minus the trailing `Id` — `OldCustomerId` resolves to `"OldCustomer"`, not `"Customer"`.
 
+### Field underscore prefixes
+
+A field's leading underscores are punctuation, not part of its name, so they are stripped before either rule runs. What follows the prefix is camelCase by that same convention, so its first character is upper-cased.
+
+```cs
+public class Customer
+{
+    // id: "Customer" — `_id` reads as `Id` under rule 1
+    Guid _id;
+
+    // id: "Order" — `_orderId` reads as `OrderId` under rule 2
+    Guid _orderId;
+}
+```
+
+This applies to fields only: a leading underscore has no established meaning on a property, and on a parameter it marks a discard. A field with nothing but underscores (`_`) has no name left to match and gets no id.
+
 ### What does *not* get a convention id
 
 - **Parameters named exactly `id`** — rule 1 doesn't apply to parameters (a bare `id` has no containing-type equivalent, and parameters should be name-driven so method signatures read cleanly). Write `orderId`, or add `[Id("Order")]` explicitly.
@@ -389,7 +406,7 @@ For flow-style mismatches (argument, assignment, property/field initializer) the
 
  * **Change attribute on `<kind> '<name>'` to `[Id("<source id>")]`** — when the target already carries an explicit `[Id]` / `[UnionId]`, replaces it with the source's id.
  * **Add `[Id("<source id>")]` to `<kind> '<name>'`** — when the target is untagged (its current id came from naming convention), adds the attribute.
- * **Rename `<kind> '<name>'` to `<sourceTag>Id`** — when the target has no explicit attribute and its name matches the `XxxId` convention. First-character case is preserved (`bidId` → `treasuryBidId`, `BidId` → `TreasuryBidId`). Works for parameters, properties, and single-declarator fields.
+ * **Rename `<kind> '<name>'` to `<sourceTag>Id`** — when the target has no explicit attribute and its name matches the `XxxId` convention. First-character case is preserved (`bidId` → `treasuryBidId`, `BidId` → `TreasuryBidId`), as is a field's underscore prefix (`_bidId` → `_treasuryBidId`). Works for parameters, properties, and single-declarator fields.
 
 The `<source id>` is the receiver's static type, not the declaring type of the `Id` member. For `treasuryBid.Id` where `Id` is inherited from `BaseEntity`, the fix suggests `TreasuryBid` — what reads locally at the call site — rather than `BaseEntity`.
 

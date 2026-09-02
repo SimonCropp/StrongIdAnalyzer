@@ -1797,6 +1797,133 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task Convention_UnderscoreField_Applies()
+    {
+        // The underscore prefix a field conventionally carries isn't part of the name,
+        // so `_orderId` reads as `OrderId` — tag "Order".
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                Guid _orderId;
+
+                public void Consume([Id("Customer")] Guid value) { }
+
+                public void Use() => Consume(_orderId);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        await Assert.That(diagnostics[0].GetMessage().Contains("Order")).IsTrue();
+    }
+
+    [Test]
+    public async Task Convention_UnderscoreField_MatchingTag_NoDiagnostic()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                Guid _customerId;
+
+                public void Consume([Id("Customer")] Guid value) { }
+
+                public void Use() => Consume(_customerId);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Convention_DoubleUnderscoreField_Applies()
+    {
+        // Every leading underscore is stripped, not just the first.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                Guid __orderId;
+
+                public void Consume([Id("Customer")] Guid value) { }
+
+                public void Use() => Consume(__orderId);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        await Assert.That(diagnostics[0].GetMessage().Contains("Order")).IsTrue();
+    }
+
+    [Test]
+    public async Task Convention_UnderscoreIdField_UsesContainingType()
+    {
+        // `_id` is the underscore-prefixed camelCase form of `Id`, so rule 1 applies and
+        // the tag comes from the containing type.
+        var source =
+            """
+            using System;
+
+            public class Customer
+            {
+                public Guid _id;
+            }
+
+            public class Holder
+            {
+                public void Consume([Id("Order")] Guid value) { }
+
+                public void Use(Customer customer) => Consume(customer._id);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        await Assert.That(diagnostics[0].GetMessage().Contains("Customer")).IsTrue();
+    }
+
+    [Test]
+    public async Task Convention_UnderscoreOnlyField_NoConvention()
+    {
+        // Nothing left after the prefix — no name to match, so no tag (SIA002 rather
+        // than SIA001).
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                Guid _;
+
+                public void Consume([Id("Order")] Guid value) { }
+
+                public void Use() => Consume(_);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA002");
+    }
+
+    [Test]
     public async Task Convention_NonIdName_NoConvention()
     {
         // "Value" isn't an Id-convention name, so no inferred tag — passing to an [Id]
@@ -2001,6 +2128,28 @@ public class IdMismatchAnalyzerTests
             {
                 [Id("Customer")]
                 public Guid CustomerId { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+
+        await Assert.That(sia005.Length).IsEqualTo(1);
+        await Assert.That(sia005[0].GetMessage().Contains("Customer")).IsTrue();
+    }
+
+    [Test]
+    public async Task SIA005_RedundantAttributeOnUnderscoreField_Fires()
+    {
+        // `_customerId` already infers "Customer", so the explicit attribute is redundant.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                Guid _customerId;
             }
             """;
 
@@ -2657,6 +2806,41 @@ public class IdMismatchAnalyzerTests
             public class Caller
             {
                 public void Fill(Product p, Slot s) => s.SourceProductId = p.Id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task SuffixInference_Enabled_OnUnderscoreField()
+    {
+        // Two underscore trims in one shape: `Product._id` reads as `Id`, which is what
+        // makes "Product" a known tag, and `_sourceProductId` descends to that tag.
+        var source =
+            """
+            using System;
+
+            public class Product
+            {
+                public Guid _id;
+            }
+
+            public class Slot
+            {
+                public Guid _sourceProductId;
+            }
+
+            public class Caller
+            {
+                public void Fill(Product product, Slot slot) => slot._sourceProductId = product._id;
             }
             """;
 

@@ -40,6 +40,8 @@ Two sources of tags on a primitive ID member:
 1. **Explicit** `[Id("x")]` / `[UnionId("x","y")]` on the property/field/parameter (or on a base property / interface member it overrides/implements).
 2. **Naming convention** — a public member named `Id` or `XxxId` infers the tag from the declaring type (`Id` on `Customer` ⇒ `"Customer"`; `CustomerId` ⇒ `"Customer"`).
 
+Field names run through `Extensions.ConventionName` before any name check: leading underscores are stripped and the first remaining character is upper-cased, so `_id` behaves as `Id` and `_customerId` as `CustomerId`. Field-only — properties and parameters keep their name verbatim. Every name check goes through it (`TryGetConventionName`, both `SuffixInference.TryMatch` call sites, the receiver-type walk's `Id` test, and `HasIdMemberInChain`, which is why that one scans members instead of doing a `GetMembers("Id")` lookup). The code fix has its own copy in `AttributeHost.TryGetRenameTarget` — the two projects share no code.
+
 For inherited `Id` members, the effective tag set is the **union** of explicit tags plus convention tags from every type in the receiver's static-type chain between the receiver and the declaring type. Matching uses **set containment**: a single-tag target is satisfied if its tag appears anywhere in the source's set. See the "Inheritance and covariant Id tagging" section of `readme.md` for the four canonical shapes.
 
 Record primary-constructor parameters: `[Id]` on the parameter is bridged onto the synthesized property (the compiler leaves it on the parameter by default). Explicit `[property: Id(...)]` still wins.
