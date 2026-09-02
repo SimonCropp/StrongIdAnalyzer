@@ -270,7 +270,7 @@ At access sites (`child.Id`), covariant receiver-type walking unions the current
 ### Interaction with diagnostics
 
 - **SIA004** only fires for rule 1 collisions — two `public Guid Id` declarations on different types both claiming the same type name. Rule 2 collisions across types are the *intended* matching behavior (`Order.CustomerId` and `Invoice.CustomerId` both referring to "Customer").
-- **SIA005** (redundant `[Id]`) fires only when an explicit `[Id("X")]` exactly equals what the convention would infer. It ships a fixer that removes the attribute.
+- **SIA005** (redundant `[Id]`) fires only when an explicit `[Id("X")]` exactly equals what the convention would infer — including the suffix rule when it is enabled, and never when the attribute is what makes the inference land on `"X"` in the first place (see "Suffix inference and SIA005"). It ships a fixer that removes the attribute.
 
 ### Overriding the convention
 
@@ -356,6 +356,31 @@ The known-id constraint is deliberate — without it, every `hashedId`, `rawId`,
 | `HashedId`                 | `"Hashed"`               | `"Hashed"` (no prefix; rule 2)   | `"Hashed"`              |
 
 Explicit `[Id("...")]` / `[UnionId(...)]` on the member still wins over the suffix rule — same precedence as the other naming-convention rules.
+
+#### Suffix inference and SIA005
+
+SIA005 asks one question: *would deleting this attribute leave the same id behind?* With the flag on, that has to be answered against the suffix rule too, and an explicit attribute is itself part of the known-id set — so the check evaluates the id as if the attribute were already gone.
+
+```cs
+public class Product
+{
+    public Guid Id { get; set; }
+}
+
+public class Slot
+{
+    // SIA005: the suffix rule already infers "Product" here.
+    [Id("Product")]
+    Guid _sourceProductId;
+
+    // No diagnostic: "SourceProduct" is known ONLY because of this attribute.
+    // Remove it and the id descends to "Product" — the attribute is load-bearing.
+    [Id("SourceProduct")]
+    Guid _otherProductId;
+}
+```
+
+The second case flips to SIA005 as soon as something else vouches for `"SourceProduct"` — a `SourceProduct` type with an `Id` member, or another declaration carrying the same explicit id — because then the whole-prefix candidate survives the attribute's removal.
 
 #### What the flag does not change
 

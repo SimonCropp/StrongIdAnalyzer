@@ -63,7 +63,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 (ISymbol Symbol, string Value, SyntaxReference Reference)>();
 
             start.RegisterSymbolAction(
-                _ => CollectConvention(_, ambiguity, redundantCandidates),
+                _ => CollectConvention(_, config, ambiguity, redundantCandidates),
                 SymbolKind.Property,
                 SymbolKind.Field,
                 SymbolKind.Parameter);
@@ -199,6 +199,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static void CollectConvention(
         SymbolAnalysisContext context,
+        Config config,
         ConcurrentDictionary<string, ConcurrentBag<ISymbol>> ambiguity,
         ConcurrentBag<(ISymbol Symbol, string Value, SyntaxReference Reference)> redundantCandidates)
     {
@@ -246,7 +247,27 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         var explicitValue = explicitAttribute.GetValue();
-        if (!string.Equals(explicitValue, conventionName, StringComparison.Ordinal))
+        if (explicitValue is null)
+        {
+            return;
+        }
+
+        // SIA005 means "deleting this attribute leaves the same tag behind", so the
+        // comparison has to run the same precedence the resolver does — opt-in suffix
+        // inference first, then the whole-name rule. Matching against the index directly
+        // would compare the attribute with a candidate it is itself supplying, so the
+        // probe set drops the tag unless something else vouches for it.
+        var effective = conventionName;
+        if (config.InferSuffixTags &&
+            SuffixInference.TryMatch(
+                symbol.ConventionName(),
+                config.KnownTags.Value.Without(explicitValue),
+                out var suffixTag))
+        {
+            effective = suffixTag;
+        }
+
+        if (!string.Equals(explicitValue, effective, StringComparison.Ordinal))
         {
             return;
         }
@@ -257,7 +278,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        redundantCandidates.Add((symbol, conventionName, syntaxRef));
+        redundantCandidates.Add((symbol, effective, syntaxRef));
     }
 
     static void ReportConventionDiagnostics(
@@ -1620,7 +1641,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // GetIdWithInheritance for parameter references.
             if (config.InferSuffixTags &&
                 level is IPropertySymbol or IFieldSymbol &&
-                SuffixInference.TryMatch(level.ConventionName(), config.KnownTags.Value, out var suffixTag))
+                SuffixInference.TryMatch(level.ConventionName(), config.KnownTags.Value.All, out var suffixTag))
             {
                 if (seen.Add(suffixTag))
                 {
@@ -1754,7 +1775,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // unchanged for names that don't match a known suffix.
             if (config.InferSuffixTags &&
                 symbol is IPropertySymbol or IFieldSymbol or IParameterSymbol &&
-                SuffixInference.TryMatch(symbol.ConventionName(), config.KnownTags.Value, out var suffixTag))
+                SuffixInference.TryMatch(symbol.ConventionName(), config.KnownTags.Value.All, out var suffixTag))
             {
                 return IdInfo.Present(suffixTag);
             }
@@ -1791,17 +1812,18 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // then immediately match itself, defeating the descent to "Product". Domain-ness
     // needs an independent signal — a type or an explicit attribute — not the same
     // member name we're trying to classify.
-    static ImmutableHashSet<string> CollectKnownTags(
+    static TagIndex CollectKnownTags(
         Compilation compilation,
         ImmutableArray<NamespacePattern> suppressedNamespaces)
     {
-        var builder = ImmutableHashSet.CreateBuilder(StringComparer.Ordinal);
+        var typeTags = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
+        var explicitCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var type in EnumerateAccessibleTypes(compilation.GlobalNamespace, suppressedNamespaces))
         {
             if (type.Name.Length > 0 && type.HasIdMemberInChain())
             {
-                builder.Add(type.Name);
+                typeTags.Add(type.Name);
             }
         }
 
@@ -1809,42 +1831,42 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         {
             foreach (var member in type.GetMembers())
             {
-                var explicitInfo = GetIdFromAttributes(member.GetAttributes());
-                if (explicitInfo.State == IdState.Present)
-                {
-                    foreach (var t in explicitInfo.Tags)
-                    {
-                        builder.Add(t);
-                    }
-                }
+                CountExplicitTags(explicitCounts, GetIdFromAttributes(member.GetAttributes()));
 
                 if (member is IMethodSymbol method)
                 {
-                    var returnInfo = GetIdFromAttributes(method.GetReturnTypeAttributes());
-                    if (returnInfo.State == IdState.Present)
-                    {
-                        foreach (var t in returnInfo.Tags)
-                        {
-                            builder.Add(t);
-                        }
-                    }
+                    CountExplicitTags(
+                        explicitCounts,
+                        GetIdFromAttributes(method.GetReturnTypeAttributes()));
 
                     foreach (var parameter in method.Parameters)
                     {
-                        var paramInfo = GetIdFromAttributes(parameter.GetAttributes());
-                        if (paramInfo.State == IdState.Present)
-                        {
-                            foreach (var t in paramInfo.Tags)
-                            {
-                                builder.Add(t);
-                            }
-                        }
+                        CountExplicitTags(
+                            explicitCounts,
+                            GetIdFromAttributes(parameter.GetAttributes()));
                     }
                 }
             }
         }
 
-        return builder.ToImmutable();
+        var types = typeTags.ToImmutable();
+        return new(types.Union(explicitCounts.Keys), types, explicitCounts);
+    }
+
+    // Counts declarations per tag rather than just collecting the tag: SIA005 needs to
+    // tell "only this declaration says so" from "something else says so too".
+    static void CountExplicitTags(Dictionary<string, int> counts, IdInfo info)
+    {
+        if (info.State != IdState.Present)
+        {
+            return;
+        }
+
+        foreach (var tag in info.Tags)
+        {
+            counts.TryGetValue(tag, out var count);
+            counts[tag] = count + 1;
+        }
     }
 
     // Walks the merged global namespace (source + references) yielding types whose
