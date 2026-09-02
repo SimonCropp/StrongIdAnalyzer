@@ -2194,6 +2194,170 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task SIA005_RedundantAttributeOnCamelCaseField_Fires()
+    {
+        // Rule 2 upper-cases the prefix, so a camelCase field infers "Order" just like
+        // `OrderId` and `_orderId` do.
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("Order")]
+                Guid orderId;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+
+        await Assert.That(sia005.Length).IsEqualTo(1);
+        await Assert.That(sia005[0].GetMessage().Contains("Order")).IsTrue();
+    }
+
+    [Test]
+    public async Task SIA005_SuffixInference_MatchesInferredTag_Fires()
+    {
+        // With inference on, `_sourceWigwamId` infers "Wigwam" — so spelling that out is
+        // redundant. The whole-name rule alone would infer "SourceWigwam" and stay silent.
+        var source =
+            """
+            using System;
+
+            public class Wigwam
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                [Id("Wigwam")]
+                Guid _sourceWigwamId;
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+
+        await Assert.That(sia005.Length).IsEqualTo(1);
+        await Assert.That(sia005[0].GetMessage().Contains("Wigwam")).IsTrue();
+    }
+
+    [Test]
+    public async Task SIA005_SuffixInference_AttributeCarriesTheTag_NoDiagnostic()
+    {
+        // The attribute is the only thing that makes "SourceWigwam" a known tag, so it is
+        // not redundant: delete it and inference descends to "Wigwam" instead. Comparing
+        // against the raw known-tag set would match the candidate the attribute itself
+        // supplies and offer a fix that silently retags the field.
+        var source =
+            """
+            using System;
+
+            public class Wigwam
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                [Id("SourceWigwam")]
+                Guid sourceWigwamId;
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+
+        await Assert.That(diagnostics.Count(_ => _.Id == "SIA005")).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task SIA005_SuffixInference_TagKnownFromType_Fires()
+    {
+        // Same shape, but a `SourceWigwam` type with an `Id` member vouches for the tag
+        // independently — the whole-prefix candidate survives the attribute's removal, so
+        // the attribute really is redundant.
+        var source =
+            """
+            using System;
+
+            public class Wigwam
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class SourceWigwam
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                [Id("SourceWigwam")]
+                Guid sourceWigwamId;
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+
+        await Assert.That(sia005.Length).IsEqualTo(1);
+        await Assert.That(sia005[0].GetMessage().Contains("SourceWigwam")).IsTrue();
+    }
+
+    [Test]
+    public async Task SIA005_SuffixInference_TagKnownFromAnotherDeclaration_Fires()
+    {
+        // A second declaration spelling out the same tag keeps it known, so removing this
+        // one leaves the inferred tag unchanged.
+        var source =
+            """
+            using System;
+
+            public class Wigwam
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                [Id("SourceWigwam")]
+                Guid sourceWigwamId;
+
+                [Id("SourceWigwam")]
+                Guid other;
+            }
+            """;
+
+        var diagnostics = await GetDiagnosticsWithOptions(
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.infer_suffix_ids"] = "true"
+            });
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+
+        await Assert.That(sia005.Length).IsEqualTo(1);
+        await Assert.That(sia005[0].GetMessage().Contains("SourceWigwam")).IsTrue();
+    }
+
+    [Test]
     public async Task Convention_InheritedId_CarriesBaseAndDerivedTags_Match()
     {
         // child1.Id carries the set {"Child1", "Base"} — both parameters are satisfied.
@@ -3244,7 +3408,14 @@ public class IdMismatchAnalyzerTests
                 ["strongidanalyzer.infer_suffix_ids"] = "true"
             });
 
-        await Assert.That(diagnostics.Length).IsEqualTo(0);
+        await Assert.That(diagnostics.Count(_ => _.Id == "SIA001")).IsEqualTo(0);
+
+        // The anchor field draws SIA005: with inference on, `SomeGroupId` descends to the
+        // inner word "Group" on its own — "Group" stays known through the upstream type
+        // once the attribute is gone — so `[Id<Group>]` really is redundant here.
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+        await Assert.That(sia005.Length).IsEqualTo(1);
+        await Assert.That(sia005[0].GetMessage().Contains("Group")).IsTrue();
     }
 
     [Test]

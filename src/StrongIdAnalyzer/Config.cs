@@ -10,7 +10,7 @@ readonly struct Config(
     ImmutableArray<NamespacePattern> suppressedNamespaces,
     bool inferSuffixTags,
     Compilation compilation,
-    Lazy<ImmutableHashSet<string>> knownTags)
+    Lazy<TagIndex> knownTags)
 {
     public ImmutableArray<NamespacePattern> SuppressedNamespaces { get; } = suppressedNamespaces;
     public bool InferSuffixTags { get; } = inferSuffixTags;
@@ -19,7 +19,7 @@ readonly struct Config(
     // Every tag observed in the source compilation — convention-derived and explicit.
     // Computed on the first suffix-inference attempt and shared for the rest of the
     // compilation. Thread-safe via Lazy<T>'s default publication mode.
-    public Lazy<ImmutableHashSet<string>> KnownTags { get; } = knownTags;
+    public Lazy<TagIndex> KnownTags { get; } = knownTags;
 
     // Tag-to-ancestor-name cache. Keyed by a tag string; value is the union of base-type
     // and interface names for every type in the compilation whose simple name equals
