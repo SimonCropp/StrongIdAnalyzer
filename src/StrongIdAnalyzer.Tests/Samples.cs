@@ -6,6 +6,7 @@
 // ReSharper disable UnusedParameter.Global
 // ReSharper disable ClassNeverInstantiated.Global
 // ReSharper disable MemberCanBePrivate.Global
+// ReSharper disable UnusedVariable
 #pragma warning disable CS0414
 #pragma warning disable CA1822
 #pragma warning disable CA1002
@@ -466,4 +467,48 @@ public class CustomerOrderMap
 
 #endregion
 
+}
+
+namespace WrapperIdSamples
+{
+    #region WrapperIds
+
+    // Assumes `strongidanalyzer.infer_wrapper_ids = true` in .editorconfig.
+    public readonly record struct UserId(Guid Value);
+
+    public class Customer
+    {
+        public Guid Id { get; set; }
+    }
+
+    public class Parents
+    {
+        public UserId momUserId;
+        public UserId dadUserId;
+
+        // No diagnostic: both fields are UserId, so both carry the "User" id —
+        // the role prefixes in their names no longer matter.
+        public void Swap() => momUserId = dadUserId;
+    }
+
+    public class Registration
+    {
+        public Guid Raw { get; set; }
+
+        public static void Consume([Id("Order")] Guid value) { }
+
+        public void Use(Customer customer, UserId userId)
+        {
+            // SIA001: a Customer id is being wrapped as a User id.
+            var wrong = new UserId(customer.Id);
+
+            // SIA001: a User id is unwrapped into an Order-tagged parameter.
+            Consume(userId.Value);
+
+            // SIA002: an untagged Guid is being wrapped — the fix adds [Id("User")] to Raw.
+            var untagged = new UserId(Raw);
+        }
+    }
+
+    #endregion
 }

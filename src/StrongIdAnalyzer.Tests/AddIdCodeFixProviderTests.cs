@@ -1229,6 +1229,147 @@ public class AddIdCodeFixProviderTests
         await Assert.That(titles.Any(_ => _ == "Change attribute on property 'Id' to [Id<Bid>]")).IsTrue();
     }
 
+    // Opt-in wrapper types: fixes land on the primitive side of the seam, never on the
+    // wrapper's own Value member or constructor parameter.
+    const string wrapperScaffolding =
+        """
+        using System;
+
+        public readonly record struct UserId(Guid Value);
+
+        public class Dto
+        {
+            public Guid Raw { get; set; }
+        }
+
+        public class Holder
+        {
+            public UserId User { get; set; }
+        }
+        """;
+
+    static readonly Dictionary<string, string> wrapperOn = new()
+    {
+        ["strongidanalyzer.infer_wrapper_ids"] = "true"
+    };
+
+    [Test]
+    public async Task WrapperIds_SIA002_Constructor_AddsAttributeToUntaggedSourceProperty()
+    {
+        var source = wrapperScaffolding +
+            """
+
+            public class Use
+            {
+                public UserId Run(Dto dto) => new UserId(dto.Raw);
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA002", "Add", wrapperOn);
+
+        await Contains(fixedSource, "[Id(\"User\")]");
+        await Contains(fixedSource, "public Guid Raw");
+        await DoesNotContain(fixedSource, "[Id(\"User\")] Guid Value");
+    }
+
+    [Test]
+    public async Task WrapperIds_SIA003_ValueMember_AddsAttributeToUntaggedParameter()
+    {
+        var source = wrapperScaffolding +
+            """
+
+            public static class Sink
+            {
+                public static void Consume(Guid value)
+                {
+                }
+            }
+
+            public class Use
+            {
+                public void Run(Holder holder) => Sink.Consume(holder.User.Value);
+            }
+            """;
+
+        var titles = (await GetCodeActions(source, "SIA003", wrapperOn)).Select(_ => _.Title).ToArray();
+        await Assert.That(titles).Contains("Add [Id(\"User\")] to parameter 'value'");
+        await Assert.That(titles).Contains("Rename parameter 'value' to 'userId'");
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Add", wrapperOn);
+        await Contains(fixedSource, "[Id(\"User\")] Guid value");
+    }
+
+    [Test]
+    public async Task WrapperIds_SIA001_ValueMemberSource_OffersOnlyTargetSideFix()
+    {
+        var source = wrapperScaffolding +
+            """
+
+            public static class Sink
+            {
+                public static void Consume([Id("Order")] Guid value)
+                {
+                }
+            }
+
+            public class Use
+            {
+                public void Run(Holder holder) => Sink.Consume(holder.User.Value);
+            }
+            """;
+
+        var titles = (await GetCodeActions(source, "SIA001", wrapperOn)).Select(_ => _.Title).ToArray();
+
+        await Assert.That(titles).IsEquivalentTo(["Change attribute on parameter 'value' to [Id(\"User\")]"]);
+    }
+
+    [Test]
+    public async Task WrapperIds_SIA001_ConstructorTarget_OffersOnlySourceSideFix()
+    {
+        var source = wrapperScaffolding +
+            """
+
+            public class Order
+            {
+                [Id("Order")]
+                public Guid Reference { get; set; }
+            }
+
+            public class Use
+            {
+                public UserId Run(Order order) => new UserId(order.Reference);
+            }
+            """;
+
+        var titles = (await GetCodeActions(source, "SIA001", wrapperOn)).Select(_ => _.Title).ToArray();
+
+        await Assert.That(titles).IsEquivalentTo(["Change attribute on property 'Reference' to [Id(\"User\")]"]);
+    }
+
+    [Test]
+    public async Task WrapperIds_SIA001_ExplicitWrapperTypedTarget_OffersOnlyTargetSideFix()
+    {
+        var source = wrapperScaffolding +
+            """
+
+            public class Membership
+            {
+                [Id("Product")]
+                public UserId Product;
+            }
+
+            public class Use
+            {
+                public void Run(Membership membership, Holder holder) =>
+                    membership.Product = holder.User;
+            }
+            """;
+
+        var titles = (await GetCodeActions(source, "SIA001", wrapperOn)).Select(_ => _.Title).ToArray();
+
+        await Assert.That(titles).IsEquivalentTo(["Change attribute on field 'Product' to [Id(\"User\")]"]);
+    }
+
     static async Task Contains(string actual, string expected) =>
         await Assert.That(actual).Contains(expected);
 
@@ -1255,9 +1396,13 @@ public class AddIdCodeFixProviderTests
         return await ApplyAction(action, document.Id);
     }
 
-    static async Task<string> ApplyFixByTitlePrefix(string source, string id, string titlePrefix)
+    static async Task<string> ApplyFixByTitlePrefix(
+        string source,
+        string id,
+        string titlePrefix,
+        IDictionary<string, string>? options = null)
     {
-        var (document, diagnostic) = await PrepareFixAsync(source, id);
+        var (document, diagnostic) = await PrepareFixAsync(source, id, options);
 
         var actions = ImmutableArray.CreateBuilder<CodeAction>();
         var context = new CodeFixContext(
@@ -1284,9 +1429,15 @@ public class AddIdCodeFixProviderTests
         return text.ToString();
     }
 
-    static async Task<ImmutableArray<CodeAction>> GetCodeActions(string source)
+    static Task<ImmutableArray<CodeAction>> GetCodeActions(string source) =>
+        GetCodeActions(source, id: null, options: null);
+
+    static async Task<ImmutableArray<CodeAction>> GetCodeActions(
+        string source,
+        string? id,
+        IDictionary<string, string>? options)
     {
-        var (document, diagnostic) = await PrepareFixAsync(source);
+        var (document, diagnostic) = await PrepareFixAsync(source, id, options);
 
         var actions = ImmutableArray.CreateBuilder<CodeAction>();
         var context = new CodeFixContext(
@@ -1304,7 +1455,8 @@ public class AddIdCodeFixProviderTests
 
     static async Task<(Document Document, Diagnostic Diagnostic)> PrepareFixAsync(
         string source,
-        string? id)
+        string? id,
+        IDictionary<string, string>? options = null)
     {
         var workspace = new AdhocWorkspace();
         var projectInfo = ProjectInfo.Create(
@@ -1325,8 +1477,11 @@ public class AddIdCodeFixProviderTests
 
         var document = solution.GetDocument(documentId)!;
         var compilation = (await document.Project.GetCompilationAsync())!;
+        var analyzerOptions = options is null
+            ? null
+            : new AnalyzerOptions([], new TestAnalyzerConfigOptionsProvider(options));
         var diagnostics = await compilation
-            .WithAnalyzers([new IdMismatchAnalyzer()])
+            .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
             .GetAnalyzerDiagnosticsAsync();
 
         var diagnostic = id is null

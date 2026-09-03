@@ -47,7 +47,7 @@ public static class BuggyUsage
         service.GetOrderAmount(order.CustomerId);
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L18-L50' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L19-L51' title='Snippet source file'>snippet source</a> | <a href='#snippet-BuggyExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The bug is the call to `service.GetOrderAmount(order.CustomerId)` — a customer's `Guid` is passed into a method expecting an order's `Guid`. Both are `Guid`, so the compiler is happy; at runtime the caller gets a `KeyNotFoundException`, or worse, if the `Guid` coincidentally hits a populated dictionary, silently wrong data.
@@ -87,7 +87,7 @@ public class EntityLookup
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L52-L83' title='Snippet source file'>snippet source</a> | <a href='#snippet-SilentMismatch' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L53-L84' title='Snippet source file'>snippet source</a> | <a href='#snippet-SilentMismatch' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -131,7 +131,7 @@ public static class FixedUsage
         service.GetOrderAmount(order.CustomerId);
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L85-L120' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L86-L121' title='Snippet source file'>snippet source</a> | <a href='#snippet-FixedExample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The `IdAttribute` is source-generated into the consuming compilation — no runtime dependency on any attributes assembly. Install the analyzer package and start tagging.
@@ -193,7 +193,7 @@ C# 12 `using CustomerId = System.Guid;` at file scope, or generic `Id<Customer>`
 | Existing project, want compile-time catch without touching serialization/ORM/transport | **this** |
 | Documentation only, no real enforcement | #3 |
 
-This analyzer is deliberately complementary to families #1 and #2 — not a replacement. Projects already running `StronglyTypedId` or `Vogen` don't need it. For teams that have evaluated the cost of introducing wrapper types across a large existing codebase and decided it isn't worth paying, this is the alternative that provides most of the catch without the migration.
+This analyzer is deliberately complementary to families #1 and #2 — not a replacement. For teams that have evaluated the cost of introducing wrapper types across a large existing codebase and decided it isn't worth paying, this is the alternative that provides most of the catch without the migration. Projects already running wrapper types (hand-rolled, `StronglyTypedId`, `StrongTypedId`, `Vogen`) can opt in to [wrapper-type support](#wrapper-types-opt-in) so the analyzer treats each wrapper as an id and checks the seams where wrappers meet primitives — useful while migrating in either direction, and when the wrappers live in an assembly that cannot change.
 
 
 ## Naming conventions
@@ -262,7 +262,8 @@ When resolving a symbol's id set, the analyzer consults these sources in order a
 1. **Explicit `[Id]` / `[UnionId]`** directly on the symbol.
 2. **Inherited explicit attribute** via the property's override / interface-implementation chain, or the parameter's matching slot on overridden / implemented methods.
 3. **Record primary-constructor parameter attribute** bridged onto the synthesized property (see "Record primary-constructor parameters" below).
-4. **Naming convention** (rules 1 and 2 above).
+4. **Wrapper type** (opt-in, see "Wrapper types" below) — the symbol's declared type is a recognised wrapper, it is a wrapper's value member, or it is a wrapper's constructor / factory parameter.
+5. **Naming convention** (rules 1 and 2 above).
 
 At access sites (`child.Id`), covariant receiver-type walking unions the current level's ids with every parent-type id between the receiver type and the declaring type — see "Inheritance and covariant Id tagging".
 
@@ -421,7 +422,7 @@ public class SIA001Sample
         ProcessOrder(CustomerId);
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L122-L136' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA001Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L123-L137' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA001Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -460,7 +461,7 @@ public class SIA002Sample
         ProcessOrder(Raw);
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L138-L153' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA002Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L139-L154' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA002Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Suppressed when the untagged source lives in referenced metadata (e.g. `Guid.Empty`, a third-party property) — library authors can't apply `[Id]`, so the warning would offer no actionable fix.
@@ -486,7 +487,7 @@ public class SIA003Sample
         Consume(OrderId);
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L155-L170' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L156-L171' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 SIA003 is suppressed when the id can't meaningfully survive:
@@ -573,7 +574,7 @@ namespace InheritanceAbstractClassExplicit
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L172-L213' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassExplicit' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L173-L214' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassExplicit' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### Abstract class + naming convention only
@@ -618,7 +619,7 @@ namespace InheritanceAbstractClassConvention
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L215-L254' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassConvention' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L216-L255' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceAbstractClassConvention' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### Interface + explicit `[Id]` on every level
@@ -663,7 +664,7 @@ namespace InheritanceInterfaceExplicit
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L256-L295' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceExplicit' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L257-L296' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceExplicit' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 ### Interface + naming convention only
@@ -707,7 +708,7 @@ namespace InheritanceInterfaceConvention
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L297-L335' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceConvention' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L298-L336' title='Snippet source file'>snippet source</a> | <a href='#snippet-InheritanceInterfaceConvention' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -758,6 +759,7 @@ The source of a value is resolved when it is one of:
  * A property reference (`obj.Prop`)
  * A field reference (`obj._field`)
  * A parameter reference (method argument, lambda parameter, etc.)
+ * Any expression whose static type is a recognised wrapper type, when [wrapper types](#wrapper-types-opt-in) are opted in
 
 Other sources are treated as **unknown** and suppress all three diagnostics. This avoids noise on every `Guid.NewGuid()`, every local variable, and every primitive that happens to pass through an expression.
 
@@ -881,7 +883,7 @@ public class OrderWriter
         list.Ids.Select(id => { Consume(id); return id; }).ToList();
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L355-L377' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionLinqLambda' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L356-L378' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionLinqLambda' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Only **explicit** `[Id]` / `[UnionId]` attributes on a collection-typed declaration participate in element-id flow. Naming-convention inference (`Id` / `XxxId`) is not applied to collection-typed members — the common case of a `List<Guid>` happening to be named `CustomerIds` would otherwise spuriously acquire an id that no caller can change.
@@ -949,7 +951,7 @@ public class CustomerScan
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L379-L398' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionForEach' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L380-L399' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionForEach' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 
@@ -982,7 +984,7 @@ public class PagedReader
     public void Copy() => LatestId = Ids.TakePage(0, 10).First();
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L400-L424' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionUserExtension' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L401-L425' title='Snippet source file'>snippet source</a> | <a href='#snippet-TaggedCollectionUserExtension' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Lambda-parameter binding applies to any extension method on `IEnumerable<T>` regardless of its return type — so `Action<T>` callbacks and void-returning helpers flow ids the same way.
@@ -1023,7 +1025,7 @@ public class OperationIndex
         LatestCustomerId = WellKnownId<Operation>.Guids.Except(blocked).First();
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L426-L454' title='Snippet source file'>snippet source</a> | <a href='#snippet-IdTagTypeParameter' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L427-L455' title='Snippet source file'>snippet source</a> | <a href='#snippet-IdTagTypeParameter' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 The implicit flow is deliberately scoped to collection elements. Scalar members — method returns, properties, parameters — still need explicit `[Id]` / `[UnionId]`; otherwise a factory like `WellKnownId<T>.MakeGuid(int)` would silently id every call site, forcing every receiving field and variable onto the attribute to avoid SIA003. Open-generic references (where the type parameter is still unsubstituted, e.g. member accesses from inside `WellKnownId<T>` itself) produce no implicit id. Multiple `[IdTag]` parameters on the same type contribute a union: a collection declared on `Cross<[IdTag] T1, [IdTag] T2>` carries both id names. Nested types inherit the outer type's `[IdTag]` parameters.
@@ -1045,7 +1047,7 @@ public class CustomerOrderMap
     public Dictionary<Guid, string> OrdersByCustomer { get; set; } = [];
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L456-L467' title='Snippet source file'>snippet source</a> | <a href='#snippet-UnsupportedMultiTCollection' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L457-L468' title='Snippet source file'>snippet source</a> | <a href='#snippet-UnsupportedMultiTCollection' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 Distinct attributes for the key and value positions, plus tuple-field-level tagging, are on the roadmap but will require a dedicated design pass.
@@ -1069,10 +1071,101 @@ public static class RecordUsage
         Consume(holder.Value);
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L337-L350' title='Snippet source file'>snippet source</a> | <a href='#snippet-RecordPrimaryCtorParameter' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L338-L351' title='Snippet source file'>snippet source</a> | <a href='#snippet-RecordPrimaryCtorParameter' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 An explicit `[property: Id(...)]` on the property still wins — if both targets are attributed, the property's own attribute is used. Naming-convention inference (for properties named `Id` or `XxxId`) is only consulted after both the property's and the parameter's explicit attributes come up empty.
+
+
+## Wrapper types (opt-in)
+
+Many codebases already wrap the primitive in a type instead of tagging it — a hand-rolled `readonly record struct UserId(Guid Value)`, or a generated one from [`StronglyTypedId`](https://github.com/andrewlock/StronglyTypedId), [`StrongTypedId`](https://github.com/steffenskov/StrongTypedId) or [`Vogen`](https://github.com/SteveDunn/Vogen). Out of the box the analyzer never looks at a member's declared type, so a wrapper-typed member is tagged from its *name* like any primitive: `UserId momUserId` and `UserId dadUserId` read as two different ids and assigning one to the other is reported, although the type system already proves both are a `UserId`.
+
+Opt in to have the analyzer treat **a recognised wrapper type as an id**:
+
+```editorconfig
+[*.cs]
+strongidanalyzer.infer_wrapper_ids = true
+```
+
+The key must sit under a section header such as `[*.cs]` — a key placed before the first section of an `.editorconfig` is a global property that Roslyn ignores.
+
+With the flag on, three things carry the wrapper's id:
+
+ * **Anything typed as the wrapper** — properties, fields, parameters, and expressions such as `UserId.New()` or a local of type `UserId`. Naming rules no longer apply to wrapper-typed members, so role prefixes like `momUserId` / `sourceUserId` stop mattering, and `class Order { UserId Id }` reads as a `User` id.
+ * **The unwrap** — the member that exposes the primitive (`userId.Value`, `customerId.PrimitiveValue`).
+ * **The wrap** — the primitive-typed parameter of the wrapper's constructor, or of a static factory declared on the wrapper (or a base it is built from) that returns it: `new UserId(g)`, `UserId.From(g)`, `CustomerId.Create(g)`.
+
+<!-- snippet: WrapperIds -->
+<a id='snippet-WrapperIds'></a>
+```cs
+// Assumes `strongidanalyzer.infer_wrapper_ids = true` in .editorconfig.
+public readonly record struct UserId(Guid Value);
+
+public class Customer
+{
+    public Guid Id { get; set; }
+}
+
+public class Parents
+{
+    public UserId momUserId;
+    public UserId dadUserId;
+
+    // No diagnostic: both fields are UserId, so both carry the "User" id —
+    // the role prefixes in their names no longer matter.
+    public void Swap() => momUserId = dadUserId;
+}
+
+public class Registration
+{
+    public Guid Raw { get; set; }
+
+    public static void Consume([Id("Order")] Guid value) { }
+
+    public void Use(Customer customer, UserId userId)
+    {
+        // SIA001: a Customer id is being wrapped as a User id.
+        var wrong = new UserId(customer.Id);
+
+        // SIA001: a User id is unwrapped into an Order-tagged parameter.
+        Consume(userId.Value);
+
+        // SIA002: an untagged Guid is being wrapped — the fix adds [Id("User")] to Raw.
+        var untagged = new UserId(Raw);
+    }
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L474-L513' title='Snippet source file'>snippet source</a> | <a href='#snippet-WrapperIds' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+Two wrappers flowing into each other never produce a diagnostic — the compiler already enforces that. A wrapper passed *as itself* into a base class, an interface it implements, `object`, or a generic `T` leaks no primitive and is silent too. The diagnostics fire at the seams: SIA001 when a differently-tagged primitive is wrapped or an unwrapped value lands on a differently-tagged target (including through a hand-rolled implicit conversion operator); SIA002 when an untagged primitive is wrapped; SIA003 when an unwrapped value lands on an untagged parameter. Code fixes always target the primitive side — never the wrapper's own `Value` member or constructor parameter.
+
+### What is recognised
+
+A struct or class is a wrapper when its name ends in `Id` (or it carries one of the library markers below) and it exposes exactly one public instance property or field of a primitive shape — a value type or `string`, `bool` excluded so helpers like `IsEmpty` don't get in the way. When several such members exist, the one named `Value` or `PrimitiveValue` is taken. Inherited members count, so the value member may live on a base class. Types in a [suppressed namespace](#suppressing-namespaces) are never recognised.
+
+| Shape | Recognised by | Id |
+| --- | --- | --- |
+| `readonly record struct UserId(Guid Value)` | name suffix + single value member | `User` |
+| `[StronglyTypedId] partial struct CustomerId` (StronglyTypedId) | name suffix; also the `[StronglyTypedId]` attribute in source and the `[GeneratedCode("StronglyTypedId", …)]` stamp in metadata, which admit names without the suffix | `Customer` |
+| `class CustomerId : StrongTypedGuid<CustomerId>` (StrongTypedId) | name suffix; also the `IStrongTypedId` marker interface — `PrimitiveValue` on the generic base is the value member, `Create(...)` on the base is a factory | `Customer` |
+| `[ValueObject<Guid>] partial struct ProductCode` (Vogen) | the `[ValueObject]` attribute; `From(...)` is a factory | `ProductCode` (whole name when there is no suffix) |
+| `readonly record struct Id<T>(Guid Value)` used as `Id<User>`, or `EntityId<User>` | generic wrapper named `Id` / `XxxId` | the type argument's name, `User` |
+| `abstract class EntityId { Guid Value }` with `class UserId : EntityId` | both are wrappers; a CRTP base such as `StrongTypedGuid<CustomerId>` takes the id of the wrapper it is parameterised with | `Entity` / `User` |
+
+Not recognised: a non-generic type named exactly `Id` (including a nested `Customer.Id`), `Id<Guid>`-style generics whose only type argument is the primitive itself, types with several primitive members and no `Value` / `PrimitiveValue`, a wrapper whose value member is itself a wrapper, and anything enumerable.
+
+Recognition is structural, so wrappers in a referenced assembly or NuGet package participate with no attribute of any kind — the case where the wrapper types cannot be migrated.
+
+### Interaction with the other rules
+
+ * An explicit `[Id]` / `[UnionId]` still wins. `[Id("Product")] UserId x` is a `Product`, and a `UserId` flowing into it is SIA001; `[Id("User")] UserId x`, `record struct UserId([Id("User")] Guid Value)` and `UserId([Id("User")] Guid value)` are SIA005-redundant. An explicit id on the receiver also wins for the unwrap: `[Id("Payer")] UserId Payer; Take(Payer.Value)` carries `Payer`.
+ * Wrapper ids join the known-id set used by [suffix inference](#suffix-inference-opt-in), so `Guid sourceUserId` in a half-migrated codebase resolves to `User` while the `UserId` wrapper still exists.
+ * A wrapper-typed `Id` member does not feed SIA004 — its id comes from the type, not from the containing type's name.
+ * `record struct CustomerId(Guid Id)` now reads its `Id` member as `Customer`; without the flag rule 1 makes it `CustomerId`.
+ * Parameters declared on a wrapper that are not the wrap boundary (`Parse(string input)`, `TryFormat(...)`) are neither tagged nor untagged, so nothing is ever reported against them.
+ * Diagnostic messages render a wrapper's id the same way as an explicit one, `[Id("User")]`.
 
 
 ## Icon
