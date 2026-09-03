@@ -29,6 +29,10 @@ Three source projects, all in `src/`:
 
 `IntegrationTests/` is a separate solution with its own `nuget.config` pointing at `../nugets/` to consume the just-built package rather than project references.
 
+### Diagnostic messages and docs
+
+Messages are the only part of a diagnostic that reaches build output, so `Rules.cs` writes them for a reader with nothing else: each names both symbols (`Rules.Describe` — `property 'Order.CustomerId'`, `parameter 'x' of 'Type.Method'`; SIA004 uses the namespace-qualified form because that is the rule where unqualified names collide), spells out the attribute to write (`FormatAttribute`: one tag → `[Id("X")]`, several → `[UnionId("X", "Y")]`, always the *fix* tags, i.e. explicit tags when the tagged side has any), and gives the fix-site location (`Site`: `(line N)` in the same file, `(path:N)` otherwise, nothing for metadata). `MessageTests.cs` pins every rule's exact text — a wording change is a contract change, update it there. Every descriptor carries `helpLinkUri` = `https://github.com/SimonCropp/StrongIdAnalyzer/blob/main/docs/<ID>.md` and a `description`; the Roslyn analyzer-authoring rules (RS1032/RS1033) require messages that end in a period when multi-sentence and descriptions that end in punctuation. `docs/SIA00x.md` is the per-rule page (cause, message anatomy, every fix, suppressions); `readme.md`'s Diagnostics section is only the table plus "Reading a diagnostic", and links there. Snippets in the docs are mdsnippets-managed like the readme.
+
 ### Diagnostic release tracking
 
 `src/StrongIdAnalyzer/AnalyzerReleases.Shipped.md` and `AnalyzerReleases.Unshipped.md` are `AdditionalFiles` — Roslyn's release-tracking analyzer will fail the build if a new diagnostic ID is added to `SupportedDiagnostics` without a corresponding entry in `Unshipped.md`.

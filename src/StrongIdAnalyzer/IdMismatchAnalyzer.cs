@@ -326,9 +326,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
             foreach (var symbol in distinct)
             {
+                var others = distinct.Where(_ => !SymbolEqualityComparer.Default.Equals(_, symbol));
                 foreach (var reference in symbol.DeclaringSyntaxReferences)
                 {
-                    Rules.ReportAmbiguousConvention(context, reference.ToLocation(), entry.Key);
+                    Rules.ReportAmbiguousConvention(context, reference.ToLocation(), symbol, others, entry.Key);
                 }
             }
         }
@@ -345,7 +346,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            Rules.ReportRedundant(context, candidate.Reference.ToLocation(), candidate.Value);
+            Rules.ReportRedundant(context, candidate.Reference.ToLocation(), candidate.Symbol, candidate.Value);
         }
     }
 
@@ -703,10 +704,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             Rules.ReportMismatch(
                 context,
                 operation.Syntax.GetLocation(),
+                leftSymbol,
                 FixSite(leftSymbol, leftInfo, config),
                 leftInfo,
+                rightSymbol,
                 FixSite(rightSymbol, rightInfo, config),
-                rightInfo);
+                rightInfo,
+                relation: "is compared with");
             return;
         }
 
@@ -717,14 +721,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (leftInfo.State == IdState.Present &&
             rightInfo.State == IdState.NotPresent)
         {
-            ReportMissingOnBinarySide(context, operation.RightOperand, rightSymbol, leftInfo, config);
+            ReportMissingOnBinarySide(context, operation.RightOperand, rightSymbol, leftSymbol, leftInfo, config);
             return;
         }
 
         if (leftInfo.State == IdState.NotPresent &&
             rightInfo.State == IdState.Present)
         {
-            ReportMissingOnBinarySide(context, operation.LeftOperand, leftSymbol, rightInfo, config);
+            ReportMissingOnBinarySide(context, operation.LeftOperand, leftSymbol, rightSymbol, rightInfo, config);
         }
     }
 
@@ -732,6 +736,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         OperationAnalysisContext context,
         IOperation untaggedOperand,
         ISymbol? untaggedSymbol,
+        ISymbol? taggedSymbol,
         IdInfo taggedInfo,
         Config config)
     {
@@ -759,7 +764,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             context,
             untaggedOperand.Syntax.GetLocation(),
             untaggedSymbol,
-            taggedInfo);
+            taggedSymbol,
+            taggedInfo,
+            relation: "is compared with");
     }
 
     static void AnalyzeArgument(OperationAnalysisContext context, Config config)
@@ -2328,8 +2335,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 Rules.ReportMismatch(
                     context,
                     location,
+                    sourceSymbol,
                     FixSite(sourceSymbol, source, config),
                     source,
+                    targetSymbol,
                     FixSite(targetSymbol, target, config),
                     target);
             }
@@ -2375,7 +2384,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // Fix site is the source symbol's declaration (add Id matching target). The
             // codefix splits the pipe-delimited tags and offers one fix per option plus a
             // combined [UnionId(...)] when the target is multi-tag.
-            Rules.ReportMissingSource(context, location, sourceSymbol, target);
+            Rules.ReportMissingSource(context, location, sourceSymbol, targetSymbol, target);
             return;
         }
 
@@ -2413,7 +2422,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
 
             // Fix site is the target symbol's declaration (add Id matching source).
-            Rules.ReportDropped(context, location, targetSymbol, source);
+            Rules.ReportDropped(context, location, sourceSymbol, source, targetSymbol);
         }
     }
 
