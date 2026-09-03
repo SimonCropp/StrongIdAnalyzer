@@ -425,6 +425,46 @@ dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006
 SIA001 is left out on purpose: it has two competing fixes (retag the target, or pass a different value) and only a human can tell which one is the bug. See [SIA001](docs/SIA001.md).
 
 
+### Using with AI coding agents
+
+The messages and the per-rule pages are written so an agent reading a build log can act without further context. The failure mode to guard against is an agent making a warning disappear rather than fixing the bug it reports: suppressing with `#pragma`, deleting the `[Id]` from the tagged side, or widening to `[UnionId]`. The block below is ready to paste into a consumer repository's `AGENTS.md` or `CLAUDE.md` to head that off:
+
+```md
+## StrongIdAnalyzer (SIA001–SIA007)
+
+This project uses StrongIdAnalyzer to stop primitive ids (Guid/int/string) from
+being mixed between domains. Ids are tagged with `[Id("Customer")]` or inferred
+from names: a member named `Id` takes its declaring type's name, `CustomerId`
+takes `Customer`. Each warning names both declarations, ends with a `Fix:`
+clause giving the attribute to write and the line to write it on, and links to
+https://github.com/SimonCropp/StrongIdAnalyzer/blob/main/docs/<ID>.md.
+
+- SIA001 (mismatch): a value tagged one domain flows into a target tagged
+  another. Decide which side is wrong. Either retag/rename the target, or pass
+  the right value. This is the analyzer catching a real bug; never suppress it
+  and never remove the source's tag to silence it.
+- SIA002 (source untagged): add the attribute from the `Fix:` clause to the
+  source declaration, or rename it to `<Domain>Id`.
+- SIA003 (target untagged): add the attribute from the `Fix:` clause to the
+  target declaration, or rename it to `<Domain>Id`. Do not remove the source's
+  tag.
+- SIA004 (two `Id` members on same-named types): add an explicit `[Id("...")]`
+  with a distinct value to one of them.
+- SIA005 (redundant `[Id]`): delete the attribute.
+- SIA006 (single-option `[UnionId]`): replace with `[Id]`.
+- SIA007 (empty tag): supply the domain name.
+
+Apply the mechanical fixes without an IDE:
+
+    dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006
+
+Literals, locals, and untagged method results (`Guid.NewGuid()`, `Guid.Empty`)
+are deliberately not tracked; do not add tags to make them tracked.
+`[UnionId("A", "B")]` is for members that accept several domains, not a way to
+make a mismatch pass.
+```
+
+
 ## `[UnionId(...)]`
 
 Sometimes a member legitimately accepts any one of several domain types — a generic lookup helper, a cache key that can be either a Customer or a Product. The package ships `[UnionId("Customer", "Product")]` for that case.
