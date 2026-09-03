@@ -72,8 +72,7 @@ sealed class WrapperTypes(bool enabled, ImmutableArray<NamespacePattern> suppres
         }
 
         if (named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
-            named.TypeArguments.Length == 1 &&
-            named.TypeArguments[0] is INamedTypeSymbol inner)
+            named.TypeArguments is [INamedTypeSymbol inner])
         {
             return inner;
         }
@@ -119,7 +118,7 @@ sealed class WrapperTypes(bool enabled, ImmutableArray<NamespacePattern> suppres
         // Name check first: it is what lets the compilation-wide walk in CollectKnownTags
         // skip most types before touching their members or attributes.
         var hasSuffix = HasIdSuffix(type.Name);
-        var isGenericId = type.Name == idSuffix && type.IsGenericType;
+        var isGenericId = type is { Name: idSuffix, IsGenericType: true };
         if (!hasSuffix && !isGenericId && !HasLibraryMarker(type))
         {
             return null;
@@ -204,8 +203,7 @@ sealed class WrapperTypes(bool enabled, ImmutableArray<NamespacePattern> suppres
         ITypeSymbol memberType;
         switch (member)
         {
-            case IPropertySymbol { IsIndexer: false, GetMethod: not null } property
-                when property.ExplicitInterfaceImplementations.IsEmpty:
+            case IPropertySymbol { IsIndexer: false, GetMethod: not null, ExplicitInterfaceImplementations.IsEmpty: true } property:
                 memberType = property.Type;
                 break;
             case IFieldSymbol { IsConst: false } field:
@@ -260,7 +258,7 @@ sealed class WrapperTypes(bool enabled, ImmutableArray<NamespacePattern> suppres
 
         if (hasSuffix)
         {
-            return type.Name.Substring(0, type.Name.Length - idSuffix.Length);
+            return type.Name[..^idSuffix.Length];
         }
 
         return type.Name;
@@ -481,7 +479,13 @@ sealed class WrapperTypes(bool enabled, ImmutableArray<NamespacePattern> suppres
     public bool IsWrapperOwned(ISymbol symbol)
     {
         if (!Enabled ||
-            symbol is not IParameterSymbol { ContainingSymbol: IMethodSymbol { ContainingType: { } containing } })
+            symbol is not IParameterSymbol
+            {
+                ContainingSymbol: IMethodSymbol
+                {
+                    ContainingType: { } containing
+                }
+            })
         {
             return false;
         }
@@ -536,21 +540,24 @@ sealed class WrapperTypes(bool enabled, ImmutableArray<NamespacePattern> suppres
     // to report: the compiler already type-checked that flow. Anything that needs a
     // user-defined conversion (an implicit operator to Guid) is a real unwrap and is
     // deliberately not intact.
-    public bool TravelsIntact(ITypeSymbol? sourceType, ITypeSymbol? targetType, Compilation compilation)
+    public bool TravelsIntact(ITypeSymbol? source, ITypeSymbol? target, Compilation compilation)
     {
         if (!Enabled ||
-            sourceType is null ||
-            targetType is null ||
-            sourceType.TypeKind == TypeKind.Error ||
-            targetType.TypeKind == TypeKind.Error ||
-            !TryGet(sourceType, out _))
+            source is null ||
+            target is null ||
+            source.TypeKind == TypeKind.Error ||
+            target.TypeKind == TypeKind.Error ||
+            !TryGet(source, out _))
         {
             return false;
         }
 
-        var conversion = compilation.ClassifyCommonConversion(sourceType, targetType);
-        return conversion.Exists &&
-               conversion.IsImplicit &&
-               !conversion.IsUserDefined;
+        var conversion = compilation.ClassifyCommonConversion(source, target);
+        return conversion is
+        {
+            Exists: true,
+            IsImplicit: true,
+            IsUserDefined: false
+        };
     }
 }

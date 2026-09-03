@@ -541,8 +541,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return DocumentationCommentId.GetFirstSymbolForDeclarationId(key, compilation);
         }
 
-        var methodId = key.Substring(0, sep);
-        var paramName = key.Substring(sep + 2);
+        var methodId = key[..sep];
+        var paramName = key[(sep + 2)..];
         if (DocumentationCommentId.GetFirstSymbolForDeclarationId(methodId, compilation)
             is not IMethodSymbol method)
         {

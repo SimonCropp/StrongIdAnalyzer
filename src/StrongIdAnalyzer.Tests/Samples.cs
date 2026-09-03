@@ -6,6 +6,7 @@
 // ReSharper disable UnusedParameter.Global
 // ReSharper disable ClassNeverInstantiated.Global
 // ReSharper disable MemberCanBePrivate.Global
+// ReSharper disable UnusedVariable
 #pragma warning disable CS0414
 #pragma warning disable CA1822
 #pragma warning disable CA1002
