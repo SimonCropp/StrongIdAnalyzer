@@ -3096,7 +3096,7 @@ public class IdMismatchAnalyzerTests
         await Assert.That(diagnostics.Length).IsEqualTo(1);
         await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
         await Assert.That(diagnostics[0].GetMessage()).IsEqualTo(
-            """Value with [Id("Group")] is assigned to a target with [Id("AccessGroup")]""");
+            """property 'Group.Id' is [Id("Group")] and flows to field 'AccessRule._accessGroupId', which is [Id("AccessGroup")]. Fix: apply [Id("Group")] to field 'AccessRule._accessGroupId' (line 15), or pass a value tagged [Id("AccessGroup")].""");
     }
 
     [Test]
@@ -3139,7 +3139,7 @@ public class IdMismatchAnalyzerTests
         await Assert.That(diagnostics.Length).IsEqualTo(1);
         await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
         await Assert.That(diagnostics[0].GetMessage()).IsEqualTo(
-            """Value with [Id("Group")] is assigned to a target with [Id("AccessGroup")]""");
+            """property 'Group.Id' is [Id("Group")] and flows to field 'AccessRule._accessGroupId', which is [Id("AccessGroup")]. Fix: apply [Id("Group")] to field 'AccessRule._accessGroupId' (line 20), or pass a value tagged [Id("AccessGroup")].""");
     }
 
     [Test]

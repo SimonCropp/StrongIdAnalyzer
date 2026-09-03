@@ -393,110 +393,36 @@ The second case flips to SIA005 as soon as something else vouches for `"SourcePr
 
 ## Diagnostics
 
-| ID     | Severity | Code fix | Summary                                                                 |
-|--------|----------|----------|-------------------------------------------------------------------------|
-| SIA001 | Warning  | Yes      | Both sides tagged with different `[Id]` values                          |
-| SIA002 | Warning  | Yes      | Source missing `[Id]`; target has one                                   |
-| SIA003 | Warning  | Yes      | Source has `[Id]`; target missing one                                   |
-| SIA004 | Error    | —        | Two `public Guid Id` declarations collide under the naming convention   |
-| SIA005 | Warning  | Yes      | `[Id("x")]` is redundant — the naming convention already infers `"x"`   |
-| SIA006 | Warning  | Yes      | `[UnionId("x")]` with a single option should be `[Id("x")]`             |
+Each rule has its own page with the message anatomy, every fix option, and the cases where it deliberately stays silent. The page URL is also the diagnostic's help link, so IDEs and SARIF output point straight at it.
+
+| ID                        | Severity | Code fix | Summary                                                                 |
+|---------------------------|----------|----------|-------------------------------------------------------------------------|
+| [SIA001](docs/SIA001.md)  | Warning  | Yes      | Both sides tagged with different `[Id]` values                          |
+| [SIA002](docs/SIA002.md)  | Warning  | Yes      | Source missing `[Id]`; target has one                                   |
+| [SIA003](docs/SIA003.md)  | Warning  | Yes      | Source has `[Id]`; target missing one                                   |
+| [SIA004](docs/SIA004.md)  | Error    | —        | Two `public Guid Id` declarations collide under the naming convention   |
+| [SIA005](docs/SIA005.md)  | Warning  | Yes      | `[Id("x")]` is redundant — the naming convention already infers `"x"`   |
+| [SIA006](docs/SIA006.md)  | Warning  | Yes      | `[UnionId("x")]` with a single option should be `[Id("x")]`             |
+| [SIA007](docs/SIA007.md)  | Error    | —        | `[Id]` / `[UnionId]` tag is empty or whitespace                         |
 
 
-### SIA001 — Id mismatch
+### Reading a diagnostic
 
-Fires when both operands carry `[Id]` and the id values differ. The analyzer sees an unambiguous cross-domain flow (e.g. a `Customer` id passed where an `Order` id is expected) and refuses it.
+Every message names both declarations involved, states the attribute to write, and says where to write it, so the build log alone is enough to act on — no IDE hover required:
 
-<!-- snippet: SIA001Example -->
-<a id='snippet-SIA001Example'></a>
-```cs
-public class SIA001Sample
-{
-    // CustomerId is tagged "Customer" by naming convention.
-    public Guid CustomerId { get; set; }
-
-    public static void ProcessOrder(Guid orderId) { }
-
-    public void Trigger() =>
-        // SIA001: argument tagged [Id("Customer")] passed to parameter tagged [Id("Order")].
-        ProcessOrder(CustomerId);
-}
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L123-L137' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA001Example' title='Start of snippet'>anchor</a></sup>
-<!-- endSnippet -->
-
-
-#### Code fixes
-
-For flow-style mismatches (argument, assignment, property/field initializer) the analyzer attaches the **target** declaration as the fix site and offers:
-
- * **Change attribute on `<kind> '<name>'` to `[Id("<source id>")]`** — when the target already carries an explicit `[Id]` / `[UnionId]`, replaces it with the source's id.
- * **Add `[Id("<source id>")]` to `<kind> '<name>'`** — when the target is untagged (its current id came from naming convention), adds the attribute.
- * **Rename `<kind> '<name>'` to `<sourceTag>Id`** — when the target has no explicit attribute and its name matches the `XxxId` convention. First-character case is preserved (`bidId` → `treasuryBidId`, `BidId` → `TreasuryBidId`), as is a field's underscore prefix (`_bidId` → `_treasuryBidId`). Works for parameters, properties, and single-declarator fields.
-
-The `<source id>` is the receiver's static type, not the declaring type of the `Id` member. For `treasuryBid.Id` where `Id` is inherited from `BaseEntity`, the fix suggests `TreasuryBid` — what reads locally at the call site — rather than `BaseEntity`.
-
-The fixer always changes the *target* side because the analyzer picks a direction by fix site, not by blaming. If the source annotation is the one that's actually wrong, fix it by hand — a silent cross-domain rewrite would be a behavior change dressed as a fix.
-
-No fix is offered for equality-operand mismatches (`a == b`): both sides are symmetric and there's no distinguished "target" to blame. The mechanical options — replace with `false` / `true`, since cross-domain equality is always false — would be behavior changes, not corrections. Manual resolution is the only safe path there.
-
-
-### SIA002 — Source missing `[Id]`
-
-Fires when the source (argument, right-hand side of an assignment, initializer, or one operand of an equality check) has no `[Id]` but the target carries one. The fix adds `[Id("<target value>")]` to the source symbol's declaration.
-
-<!-- snippet: SIA002Example -->
-<a id='snippet-SIA002Example'></a>
-```cs
-public class SIA002Sample
-{
-    // Name doesn't match the `Id`/`XxxId` convention, so no automatic tag.
-    public Guid Raw { get; set; }
-
-    public static void ProcessOrder(Guid orderId) { }
-
-    public void Trigger() =>
-        // SIA002: Raw has no [Id] but is passed to an [Id("Order")] parameter.
-        // Code fix: add [Id("Order")] to Raw's declaration.
-        ProcessOrder(Raw);
-}
+SIA002: property 'Order.CustomerRef' has no [Id] but flows to parameter 'customerId' of 'Customers.Load', which is [Id("Customer")]. Fix: add [Id("Customer")] to property 'Order.CustomerRef' (line 12).
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L139-L154' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA002Example' title='Start of snippet'>anchor</a></sup>
-<!-- endSnippet -->
 
-Suppressed when the untagged source lives in referenced metadata (e.g. `Guid.Empty`, a third-party property) — library authors can't apply `[Id]`, so the warning would offer no actionable fix.
+The location in the `Fix:` clause is the *declaration* to edit, which is often not where the warning is reported. `(line 12)` means the same file as the warning; a declaration elsewhere is given as `(D:\src\Order.cs:12)`. Equality checks read `is compared with` instead of `flows to`. MSBuild appends each rule's help link after the message, so the build log also carries the URL of the rule's page.
 
+The mechanically-fixable rules can be applied across a project from the command line, without an IDE, because the code fixes ship inside the analyzer package:
 
-### SIA003 — Target missing `[Id]`
-
-Fires when the source carries `[Id]` but the target (parameter, assignment left-hand side, initializer) does not. The fix adds `[Id("<source value>")]` to the target symbol's declaration.
-
-<!-- snippet: SIA003Example -->
-<a id='snippet-SIA003Example'></a>
-```cs
-public class SIA003Sample
-{
-    // OrderId is tagged "Order" by naming convention.
-    public Guid OrderId { get; set; }
-
-    public static void Consume(Guid value) { }
-
-    public void Trigger() =>
-        // SIA003: OrderId is [Id("Order")] but Consume's parameter has no [Id].
-        // Code fix: add [Id("Order")] to Consume's value parameter.
-        Consume(OrderId);
-}
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/Samples.cs#L156-L171' title='Snippet source file'>snippet source</a> | <a href='#snippet-SIA003Example' title='Start of snippet'>anchor</a></sup>
-<!-- endSnippet -->
+dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006
+```
 
-SIA003 is suppressed when the id can't meaningfully survive:
-
- * **Library metadata targets** — BCL and third-party members (`Dictionary<Guid, T>.this[Guid]`, `Guid.Equals(Guid)`, `object.Equals(object)`). Library authors can't apply `[Id]`.
- * **`object` parameters / properties / fields** — logging, serialization, message buses. The id is erased through `object` anyway.
- * **Unconstrained generic type parameters (`T`), and constructed generics still containing one (`TestEntity<T>`, `List<T>`, `Dictionary<Guid, T>`, `T[]`)** — identity methods, container helpers, generic wrappers. The target can't carry a domain tag while T is unbound, so SIA003 would have no place to land a fix.
- * **Targets in a suppressed namespace** — by default `System*` and `Microsoft*` (see below).
- * **Equality comparisons** — `==` / `!=` operands are symmetric, so only SIA001 / SIA002 apply.
+SIA001 is left out on purpose: it has two competing fixes (retag the target, or pass a different value) and only a human can tell which one is the bug. See [SIA001](docs/SIA001.md).
 
 
 ## `[UnionId(...)]`
