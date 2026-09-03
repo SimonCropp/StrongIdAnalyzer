@@ -25,11 +25,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             var inferSuffixTags = SuffixInference.Read(
                 start.Options.AnalyzerConfigOptionsProvider,
                 start.Compilation);
+            // Built before Config because the known-tags computation consults it too.
+            var wrappers = new WrapperTypes(
+                WrapperTypes.Read(start.Options.AnalyzerConfigOptionsProvider, start.Compilation),
+                suppressedNamespaces);
             var config = new Config(
                 suppressedNamespaces,
                 inferSuffixTags,
+                wrappers,
                 start.Compilation,
-                new(() => CollectKnownTags(start.Compilation, suppressedNamespaces)));
+                new(() => CollectKnownTags(start.Compilation, suppressedNamespaces, wrappers)));
 
             start.RegisterOperationAction(
                 _ => AnalyzeArgument(_, config),
@@ -209,7 +214,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (!TryGetConventionName(symbol, out var conventionName, out var fromContainingType))
+        // A wrapper-derived tag beats the naming convention in the resolver, so it is
+        // what "the tag without this attribute" means here too. It never feeds the
+        // ambiguity map: the tag comes from the type, not the containing type's name.
+        var hasWrapperTag = config.Wrappers.TryGetSymbolTag(symbol, receiverType: null, out var wrapperTag);
+        if (!TryGetConventionName(symbol, out var conventionName, out var fromContainingType) &&
+            !hasWrapperTag)
         {
             return;
         }
@@ -234,7 +244,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Only the containing-type-named rule (`public Guid Id`) feeds ambiguity tracking.
         // Any explicit Id-family attribute ([Id] or [UnionId]) opts out — it resolves the
         // ambiguity that SIA004 would otherwise complain about.
-        if (fromContainingType && !hasAnyIdFamily)
+        if (fromContainingType && !hasAnyIdFamily && !hasWrapperTag)
         {
             ambiguity
                 .GetOrAdd(conventionName, _ => [])
@@ -258,11 +268,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // would compare the attribute with a candidate it is itself supplying, so the
         // probe set drops the tag unless something else vouches for it.
         var effective = conventionName;
-        if (config.InferSuffixTags &&
-            SuffixInference.TryMatch(
-                symbol.ConventionName(),
-                config.KnownTags.Value.Without(explicitValue),
-                out var suffixTag))
+        if (hasWrapperTag)
+        {
+            effective = wrapperTag;
+        }
+        else if (config.InferSuffixTags &&
+                 SuffixInference.TryMatch(
+                     symbol.ConventionName(),
+                     config.KnownTags.Value.Without(explicitValue),
+                     out var suffixTag))
         {
             effective = suffixTag;
         }
@@ -659,6 +673,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var leftInfo = GetAccessInfo(operation.LeftOperand, config);
         var rightInfo = GetAccessInfo(operation.RightOperand, config);
 
+        // Two wrappers compared as wrappers: C# already resolved the operator against
+        // the same wrapper type, so only explicit tags could disagree.
+        if (leftInfo.ExplicitTags.IsDefaultOrEmpty &&
+            rightInfo.ExplicitTags.IsDefaultOrEmpty &&
+            config.Wrappers.TryGet(GetStaticType(operation.LeftOperand), out _) &&
+            config.Wrappers.TryGet(GetStaticType(operation.RightOperand), out _))
+        {
+            return;
+        }
+
         // Equality is symmetric: if the two tag sets share any tag, the values could
         // represent the same identity. Only fire SIA001 when the sets are disjoint.
         if (leftInfo.State == IdState.Present &&
@@ -679,9 +703,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             Rules.ReportMismatch(
                 context,
                 operation.Syntax.GetLocation(),
-                leftSymbol,
+                FixSite(leftSymbol, leftInfo, config),
                 leftInfo,
-                rightSymbol,
+                FixSite(rightSymbol, rightInfo, config),
                 rightInfo);
             return;
         }
@@ -747,6 +771,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
+        // `: base(value)` inside a wrapper's own constructor hands the primitive to the
+        // base it is built on. The base may be a non-generic hand-rolled `EntityId`
+        // recognised under its own tag; the flow is the wrapper's internal plumbing, not
+        // a seam between domains.
+        if (argument.Parent is IInvocationOperation { Syntax: ConstructorInitializerSyntax } &&
+            config.Wrappers.TryGet(context.ContainingSymbol.ContainingType, out _))
+        {
+            return;
+        }
+
         var targetInfo = GetIdWithInheritance(parameter, config);
         var sourceSymbol = argument.Value.GetReferencedSymbol();
         var sourceInfo = GetAccessInfo(argument.Value, config);
@@ -755,10 +789,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             argument.Value.Syntax.GetLocation(),
             sourceSymbol,
             sourceInfo,
+            GetStaticType(argument.Value),
             parameter,
             targetInfo,
             config);
     }
+
+    static ITypeSymbol? GetStaticType(IOperation operation) =>
+        operation.Unwrap().Type;
 
     static void AnalyzeSimpleAssignment(OperationAnalysisContext context, Config config)
     {
@@ -780,6 +818,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             assignment.Value.Syntax.GetLocation(),
             sourceSymbol,
             sourceInfo,
+            GetStaticType(assignment.Value),
             targetSymbol,
             targetInfo,
             config);
@@ -798,6 +837,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 init.Value.Syntax.GetLocation(),
                 sourceSymbol,
                 sourceInfo,
+                GetStaticType(init.Value),
                 property,
                 targetInfo,
                 config);
@@ -817,6 +857,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 init.Value.Syntax.GetLocation(),
                 sourceSymbol,
                 sourceInfo,
+                GetStaticType(init.Value),
                 field,
                 targetInfo,
                 config);
@@ -836,9 +877,28 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // receiver slot would fire SIA003 against the untagged passthrough parameter.
     // Element-tag consumers (foreach, .First(), lambda binding, chain walks) bypass
     // this path via GetReceiverElementTags so they still see the tag.
+    //
+    // Locals, untagged invocations and compound expressions are deliberately Unknown —
+    // a name cannot vouch for a value. Opt-in wrapper types are the one exception: an
+    // expression whose static type is a recognised wrapper carries that wrapper's tag,
+    // because the type itself vouches for it. Explicit tags still win; the fallback only
+    // replaces Unknown / NotPresent results.
     static IdInfo GetAccessInfo(IOperation operation, Config config)
     {
+        var original = operation;
         operation = operation.Unwrap();
+        var resolved = ResolveAccessInfo(operation, config);
+        if (resolved.State != IdState.Present &&
+            config.Wrappers.TryGetExpressionTag(original, operation, out var wrapperTag))
+        {
+            return IdInfo.Present(wrapperTag);
+        }
+
+        return resolved;
+    }
+
+    static IdInfo ResolveAccessInfo(IOperation operation, Config config)
+    {
         switch (operation)
         {
             case IPropertyReferenceOperation prop:
@@ -855,10 +915,20 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     return anonInfo;
                 }
 
+                if (TryResolveWrapperReceiver(prop.Property, prop.Instance, config, out var propReceiverInfo))
+                {
+                    return propReceiverInfo;
+                }
+
                 return SuppressCollectionTag(
                     prop.Property.Type,
                     GetMemberAccessInfo(prop.Property, prop.Instance?.Type, config));
             case IFieldReferenceOperation field:
+                if (TryResolveWrapperReceiver(field.Field, field.Instance, config, out var fieldReceiverInfo))
+                {
+                    return fieldReceiverInfo;
+                }
+
                 return SuppressCollectionTag(
                     field.Field.Type,
                     GetMemberAccessInfo(field.Field, field.Instance?.Type, config));
@@ -901,6 +971,34 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             default:
                 return IdInfo.Unknown;
         }
+    }
+
+    // Unwrapping a wrapper whose receiver carries an explicit tag: `[Id("Payer")] UserId
+    // PayerId; Take(PayerId.Value)` means "Payer", not merely "User" — the attribute on the
+    // receiver says more than the wrapper type does, and it stays available to the fixer
+    // as an explicit tag.
+    static bool TryResolveWrapperReceiver(
+        ISymbol member,
+        IOperation? instance,
+        Config config,
+        out IdInfo info)
+    {
+        info = IdInfo.Unknown;
+        if (instance is null ||
+            !config.Wrappers.IsValueMember(member, instance.Type))
+        {
+            return false;
+        }
+
+        var receiverInfo = GetAccessInfo(instance, config);
+        if (receiverInfo.State != IdState.Present ||
+            receiverInfo.ExplicitTags.IsDefaultOrEmpty)
+        {
+            return false;
+        }
+
+        info = receiverInfo;
+        return true;
     }
 
     // If the expression's static type is a single-T collection, any tag we read is
@@ -1555,7 +1653,19 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // because ContainingAssembly is the source assembly.
         if (TryGetFromIndex(member, config, out var indexed))
         {
-            return indexed.IsDefaultOrEmpty ? IdInfo.NotPresent : IdInfo.Present(indexed);
+            if (!indexed.IsDefaultOrEmpty)
+            {
+                return IdInfo.Present(indexed);
+            }
+
+            // An index that lists a wrapper-owned member as untagged must not silence the
+            // wrapper rule — the producer had no way to express a type-derived tag.
+            if (config.Wrappers.TryGetSymbolTag(member, receiverType, out var indexedWrapperTag))
+            {
+                return IdInfo.Present(indexedWrapperTag);
+            }
+
+            return IdInfo.NotPresent;
         }
 
         var receiverTags = ImmutableArray.CreateBuilder<string>();
@@ -1622,6 +1732,19 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 }
             }
 
+            // Opt-in wrapper types: a level typed as a wrapper, or a wrapper's value
+            // member, carries the wrapper's tag — for metadata levels too, since the tag
+            // comes from the type rather than from anything the user could annotate.
+            if (config.Wrappers.TryGetSymbolTag(level, receiverType, out var wrapperTag))
+            {
+                if (seen.Add(wrapperTag))
+                {
+                    memberTags.Add(wrapperTag);
+                }
+
+                continue;
+            }
+
             // Convention only applies to user-declared members. Library-declared levels
             // in the chain (e.g. an interface member in a referenced assembly) are
             // silently skipped — the user can't attach a tag to them.
@@ -1667,9 +1790,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         //    Only the `Id` rule applies here; `XxxId` is name-based and already captured.
         //    Stop at System.Object so "Object" never leaks into the tag set — relevant
         //    when the declaring type is an interface and `.BaseType` walks past it.
+        //    A wrapper-typed `Id` is fully described by its type; `admin.Id` of type
+        //    UserId must not gain "Admin".
         if (member.ConventionName() == "Id" &&
             member.ContainingType is { } memberContaining &&
-            receiverType is INamedTypeSymbol rt)
+            receiverType is INamedTypeSymbol rt &&
+            !config.Wrappers.TryGetSymbolTag(member, receiverType, out _))
         {
             var boundary = memberContaining.OriginalDefinition;
             var current = rt;
@@ -1718,13 +1844,27 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // Resolution order:
     //   1. Explicit [Id] on the symbol itself.
     //   2. Inherited [Id] via override/interface impl chain (properties & parameters).
-    //   3. Naming convention (properties/fields only).
-    //   4. NotPresent.
+    //   3. Opt-in wrapper type: the symbol's declared type is a wrapper, it is a
+    //      wrapper's value member, or it is a wrapper's constructor / factory parameter
+    //      (metadata symbols included). Other parameters declared on a wrapper are
+    //      Unknown so no fix site ever lands inside the wrapper.
+    //   4. Naming convention (user-declared properties/fields/parameters only).
+    //   5. NotPresent.
     static IdInfo GetIdWithInheritance(ISymbol symbol, Config config)
     {
         if (TryGetFromIndex(symbol, config, out var indexed))
         {
-            return indexed.IsDefaultOrEmpty ? IdInfo.NotPresent : IdInfo.Present(indexed);
+            if (!indexed.IsDefaultOrEmpty)
+            {
+                return IdInfo.Present(indexed);
+            }
+
+            if (config.Wrappers.TryGetSymbolTag(symbol, receiverType: null, out var indexedWrapperTag))
+            {
+                return IdInfo.Present(indexedWrapperTag);
+            }
+
+            return IdInfo.NotPresent;
         }
 
         var direct = GetIdFromAttributes(symbol.GetAttributes());
@@ -1757,6 +1897,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             {
                 return inherited;
             }
+        }
+
+        if (config.Wrappers.TryGetSymbolTag(symbol, receiverType: null, out var wrapperTag))
+        {
+            return IdInfo.Present(wrapperTag);
+        }
+
+        if (config.Wrappers.IsWrapperOwned(symbol))
+        {
+            return IdInfo.Unknown;
         }
 
         // Convention applies only to user-declared symbols. Library members (e.g.
@@ -1812,9 +1962,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // then immediately match itself, defeating the descent to "Product". Domain-ness
     // needs an independent signal — a type or an explicit attribute — not the same
     // member name we're trying to classify.
+    //   (3) With wrapper types opted in, every recognised wrapper vouches for its tag —
+    //       a half-migrated codebase's `Guid sourceUserId` should resolve to "User" while
+    //       the `UserId` wrapper still exists. Counted as a type tag so SIA005's
+    //       "without my own attribute" probe keeps it.
     static TagIndex CollectKnownTags(
         Compilation compilation,
-        ImmutableArray<NamespacePattern> suppressedNamespaces)
+        ImmutableArray<NamespacePattern> suppressedNamespaces,
+        WrapperTypes wrappers)
     {
         var typeTags = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
         var explicitCounts = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -1824,6 +1979,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (type.Name.Length > 0 && type.HasIdMemberInChain())
             {
                 typeTags.Add(type.Name);
+            }
+
+            if (wrappers.TryGet(type, out var wrapper))
+            {
+                typeTags.Add(wrapper.Tag);
             }
         }
 
@@ -2097,11 +2257,28 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             : IdInfo.PresentExplicit(tags.ToImmutable());
     }
 
+    // A wrapper-typed member, a wrapper's value member or a wrapper's constructor /
+    // factory parameter carries a type-derived tag: adding or renaming there cannot change
+    // it, and the declaration may be the record header of the wrapper itself. Such a side
+    // is not a fix site unless it also carries an explicit attribute the user could change.
+    static ISymbol? FixSite(ISymbol? symbol, IdInfo info, Config config)
+    {
+        if (symbol is not null &&
+            info.ExplicitTags.IsDefaultOrEmpty &&
+            config.Wrappers.TryGetSymbolTag(symbol, receiverType: null, out _))
+        {
+            return null;
+        }
+
+        return symbol;
+    }
+
     static void Report(
         OperationAnalysisContext context,
         Location location,
         ISymbol? sourceSymbol,
         IdInfo source,
+        ITypeSymbol? sourceType,
         ISymbol targetSymbol,
         IdInfo target,
         Config config)
@@ -2122,9 +2299,20 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
+        // A wrapper flowing as itself (into its own type, a base, an interface, object,
+        // a substituted T) leaks no primitive — the compiler already type-checked it.
+        var intact = config.Wrappers.TravelsIntact(sourceType, targetSymbol.GetDeclaredType(), config.Compilation);
+
         if (source.State == IdState.Present &&
             target.State == IdState.Present)
         {
+            if (intact &&
+                source.ExplicitTags.IsDefaultOrEmpty &&
+                target.ExplicitTags.IsDefaultOrEmpty)
+            {
+                return;
+            }
+
             // Source and target sets must overlap — at least one shared tag means the
             // value could legitimately flow in. Intersection is symmetric, so it handles
             // both receiver-walked covariant sources (`child.Id` = {"Child","Base"}) and
@@ -2140,9 +2328,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 Rules.ReportMismatch(
                     context,
                     location,
-                    sourceSymbol,
+                    FixSite(sourceSymbol, source, config),
                     source,
-                    targetSymbol,
+                    FixSite(targetSymbol, target, config),
                     target);
             }
 
@@ -2194,6 +2382,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (source.State == IdState.Present &&
             target.State == IdState.NotPresent)
         {
+            if (intact)
+            {
+                return;
+            }
+
             // Don't fire SIA003 when the target is declared in referenced metadata (BCL,
             // third-party libraries). Library authors can't apply [Id], and boundary APIs
             // like Equals(Guid), CompareTo, Dictionary<Guid,T>.this[Guid] would otherwise

@@ -5,16 +5,23 @@
 //
 // Deliberately knows nothing about tag resolution itself. `knownTags` arrives as an
 // already-built Lazy so the computation stays with the analyzer that understands what
-// a tag is, while this type only owns when it runs and who shares the result.
+// a tag is, while this type only owns when it runs and who shares the result. The same
+// goes for `wrappers`: it is constructed before this struct because the known-tags
+// computation needs it too.
 readonly struct Config(
     ImmutableArray<NamespacePattern> suppressedNamespaces,
     bool inferSuffixTags,
+    WrapperTypes wrappers,
     Compilation compilation,
     Lazy<TagIndex> knownTags)
 {
     public ImmutableArray<NamespacePattern> SuppressedNamespaces { get; } = suppressedNamespaces;
     public bool InferSuffixTags { get; } = inferSuffixTags;
     public Compilation Compilation { get; } = compilation;
+
+    // Opt-in wrapper-type recognition (`strongidanalyzer.infer_wrapper_ids`) with its
+    // per-type cache. Disabled instances answer false to everything.
+    public WrapperTypes Wrappers { get; } = wrappers;
 
     // Every tag observed in the source compilation — convention-derived and explicit.
     // Computed on the first suffix-inference attempt and shared for the rest of the

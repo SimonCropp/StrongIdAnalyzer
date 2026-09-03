@@ -11,3 +11,8 @@ strongidanalyzer.suppressed_namespaces = System*,Microsoft*,Suppressed*
 # would be tagged "SourceProduct" / "TargetProduct" by the whole-name rule and fail
 # the build.
 strongidanalyzer.infer_suffix_ids = true
+
+# Opt-in wrapper-type ids — used by WrapperIdsConsumeTests. With this flag off, the
+# `UserId momUserId` / `UserId dadUserId` fields would be tagged "MomUser" / "DadUser"
+# by the whole-name rule and the assignment between them would fail the build.
+strongidanalyzer.infer_wrapper_ids = true

@@ -302,10 +302,56 @@ public class IndexTests
     // [assembly: StrongIdIndexAttribute(...)]), then compiles `consumer` with that
     // dll as a metadata reference and runs the analyzer. Returns the analyzer's
     // diagnostics on the consumer only.
+    // An index entry with an empty tag set means "untagged" — but a wrapper's Value
+    // member carries a type-derived tag the producer had no way to express, so the
+    // wrapper rule still runs behind the empty entry.
+    [Test]
+    public async Task IndexEntry_EmptyTagsOnWrapperValueMember_DoesNotBlockWrapperRule()
+    {
+        var library =
+            """
+            using System;
+            namespace StrongIdAnalyzer
+            {
+                [AttributeUsage(
+                    AttributeTargets.Property | AttributeTargets.Field |
+                    AttributeTargets.Parameter | AttributeTargets.ReturnValue,
+                    Inherited = false)]
+                internal sealed class IdAttribute(string type) : Attribute;
+            }
+            public readonly record struct UserId(Guid Value);
+            public static class Methods
+            {
+                public static void TakeOrder([StrongIdAnalyzer.Id("Order")] Guid value) { }
+            }
+            """;
+
+        var consumer =
+            """
+            public class CallSite
+            {
+                public void Run(UserId id) => Methods.TakeOrder(id.Value);
+            }
+            """;
+
+        var wrapperOn = new Dictionary<string, string>
+        {
+            ["strongidanalyzer.infer_wrapper_ids"] = "true"
+        };
+
+        var diagnostics = await GetCrossAssemblyDiagnostics(
+            library,
+            index: "P:UserId.Value=",
+            consumer,
+            wrapperOn);
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
     static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string library,
         string? index,
-        string consumer)
+        string consumer,
+        IDictionary<string, string>? options = null)
     {
         // Strip the test assembly itself — it already defines `Customer` / `Order` etc.
         // in other test files, and TPA includes every loaded assembly, which causes
@@ -363,8 +409,11 @@ public class IndexTests
                 string.Join(Environment.NewLine, consumerErrors.Select(_ => _.ToString())));
         }
 
+        var analyzerOptions = options is null
+            ? null
+            : new AnalyzerOptions([], new TestAnalyzerConfigOptionsProvider(options));
         return consumerCompilation
-            .WithAnalyzers([new IdMismatchAnalyzer()])
+            .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
             .GetAnalyzerDiagnosticsAsync();
     }
 }
