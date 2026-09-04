@@ -97,8 +97,19 @@ static class Rules
         description: "An [Id] or [UnionId] tag that is empty or whitespace cannot identify a domain. Supply the name of the domain type the value identifies.",
         helpLinkUri: helpRoot + "SIA007.md");
 
+    static readonly DiagnosticDescriptor externalIdInvalid = new(
+        id: "SIA008",
+        title: "[ExternalId] cannot be applied",
+        messageFormat: "[ExternalId] for '{0}.{1}' {2}. Fix: {3}.",
+        category: "IdAttribute.Usage",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "An [assembly: ExternalId] attribute names a property or field that its type does not declare or inherit, or supplies no non-empty id, so the mapping can never apply. Reference an existing member (nameof lets the compiler check it) and give the domain name the value identifies.",
+        helpLinkUri: helpRoot + "SIA008.md",
+        customTags: [WellKnownDiagnosticTags.CompilationEnd]);
+
     public static readonly ImmutableArray<DiagnosticDescriptor> All =
-        [idMismatch, missingSourceId, droppedId, ambiguousConvention, redundantId, singletonUnion, emptyTag];
+        [idMismatch, missingSourceId, droppedId, ambiguousConvention, redundantId, singletonUnion, emptyTag, externalIdInvalid];
 
     // SIA001. Both declarations ride along as additional locations so the code fix can
     // offer to fix either side — slot 0 is always the target, slot 1 the source. Slots
@@ -257,6 +268,34 @@ static class Rules
         Location location,
         string attributeName) =>
         context.ReportDiagnostic(Diagnostic.Create(emptyTag, location, attributeName, Describe(context.Symbol)));
+
+    // SIA008. Compilation-end, on the attribute itself: `typeName` is the short name of
+    // the `typeof` argument, `member` the string as written.
+    public static void ReportExternalIdMemberMissing(
+        CompilationAnalysisContext context,
+        Location location,
+        string typeName,
+        string member) =>
+        context.ReportDiagnostic(Diagnostic.Create(
+            externalIdInvalid,
+            location,
+            typeName,
+            member,
+            "names no property or field of that type or its bases",
+            $"reference an existing member, e.g. nameof({typeName}.Id)"));
+
+    public static void ReportExternalIdEmptyTag(
+        CompilationAnalysisContext context,
+        Location location,
+        string typeName,
+        string member) =>
+        context.ReportDiagnostic(Diagnostic.Create(
+            externalIdInvalid,
+            location,
+            typeName,
+            member,
+            "has no id",
+            $"supply a non-empty domain name, e.g. [assembly: ExternalId(typeof({typeName}), \"{member}\", \"Customer\")]"));
 
     // Shared shape for SIA002/SIA003: the diagnostic carries the tags to apply plus the
     // declaration to apply them to.

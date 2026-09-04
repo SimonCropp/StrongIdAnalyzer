@@ -252,18 +252,19 @@ This applies to fields only: a leading underscore has no established meaning on 
 - **Anonymous-type properties under rule 1** — a bare `Id` on `new { Id = x }` would map to a synthesized `<>f__AnonymousType*` name, which is meaningless as an id. Rule 2 still applies (`new { CustomerId = x }` reads as `"Customer"`), so values projected through anonymous types in LINQ pipelines or EF `HasIndex` expressions keep flowing the right id downstream. Writes **into** anonymous-type properties never produce a diagnostic — there's no fix site, since anon members can't carry `[Id]`.
 - **Indexers** — `this[Guid id]` never participates.
 - **Implicitly-declared fields** — backing fields, primary-constructor capture fields, and similar compiler-synthesized members.
-- **Members declared in referenced metadata** — BCL and third-party members (`Diagnostic.Id`, `EventArgs`, …) never receive a convention id. If it were otherwise, any library property named `Id` would suddenly carry an id the user can't change.
+- **Members declared in referenced metadata** — BCL and third-party members (`Diagnostic.Id`, `EventArgs`, …) never receive a convention id from their *name*. If it were otherwise, any library property named `Id` would suddenly carry an id the user can't change. At an access site such as `product.Id` the receiver's static type can still contribute its name (see "Inheritance and covariant Id tagging"), but only for types outside the [suppression lists](#suppressing-namespaces-and-assemblies) — a domain type in another project of the same solution keeps its id, while `Microsoft.Graph.Models.User` contributes nothing. To tag a library member deliberately, use [`[assembly: ExternalId]`](#tagging-members-of-referenced-assemblies).
 
 
 ### Precedence
 
 When resolving a symbol's id set, the analyzer consults these sources in order and stops at the first that produces an id:
 
-1. **Explicit `[Id]` / `[UnionId]`** directly on the symbol.
-2. **Inherited explicit attribute** via the property's override / interface-implementation chain, or the parameter's matching slot on overridden / implemented methods.
-3. **Record primary-constructor parameter attribute** bridged onto the synthesized property (see "Record primary-constructor parameters" below).
-4. **Wrapper type** (opt-in, see "Wrapper types" below) — the symbol's declared type is a recognised wrapper, it is a wrapper's value member, or it is a wrapper's constructor / factory parameter.
-5. **Naming convention** (rules 1 and 2 above).
+1. **`[assembly: ExternalId(...)]` mapping** for the symbol's declaring type, one of its bases, or one of its interfaces (see "Tagging members of referenced assemblies" below) — the consumer's own word about a member it does not own, so it precedes even an attribute on the member.
+2. **Explicit `[Id]` / `[UnionId]`** directly on the symbol.
+3. **Inherited explicit attribute** via the property's override / interface-implementation chain, or the parameter's matching slot on overridden / implemented methods.
+4. **Record primary-constructor parameter attribute** bridged onto the synthesized property (see "Record primary-constructor parameters" below).
+5. **Wrapper type** (opt-in, see "Wrapper types" below) — the symbol's declared type is a recognised wrapper, it is a wrapper's value member, or it is a wrapper's constructor / factory parameter.
+6. **Naming convention** (rules 1 and 2 above).
 
 At access sites (`child.Id`), covariant receiver-type walking unions the current level's ids with every parent-type id between the receiver type and the declaring type — see "Inheritance and covariant Id tagging".
 
@@ -404,6 +405,7 @@ Each rule has its own page with the message anatomy, every fix option, and the c
 | [SIA005](docs/SIA005.md)  | Warning  | Yes      | `[Id("x")]` is redundant — the naming convention already infers `"x"`   |
 | [SIA006](docs/SIA006.md)  | Warning  | Yes      | `[UnionId("x")]` with a single option should be `[Id("x")]`             |
 | [SIA007](docs/SIA007.md)  | Error    | —        | `[Id]` / `[UnionId]` tag is empty or whitespace                         |
+| [SIA008](docs/SIA008.md)  | Error    | —        | `[assembly: ExternalId]` names a missing member or supplies no id       |
 
 
 ### Reading a diagnostic
@@ -430,7 +432,7 @@ SIA001 is left out on purpose: it has two competing fixes (retag the target, or 
 The messages and the per-rule pages are written so an agent reading a build log can act without further context. The failure mode to guard against is an agent making a warning disappear rather than fixing the bug it reports: suppressing with `#pragma`, deleting the `[Id]` from the tagged side, or widening to `[UnionId]`. The block below is ready to paste into a consumer repository's `AGENTS.md` or `CLAUDE.md` to head that off:
 
 ```md
-## StrongIdAnalyzer (SIA001–SIA007)
+## StrongIdAnalyzer (SIA001–SIA008)
 
 This project uses StrongIdAnalyzer to stop primitive ids (Guid/int/string) from
 being mixed between domains. Ids are tagged with `[Id("Customer")]` or inferred
@@ -453,6 +455,8 @@ https://github.com/SimonCropp/StrongIdAnalyzer/blob/main/docs/<ID>.md.
 - SIA005 (redundant `[Id]`): delete the attribute.
 - SIA006 (single-option `[UnionId]`): replace with `[Id]`.
 - SIA007 (empty tag): supply the domain name.
+- SIA008 (`[assembly: ExternalId]` cannot apply): fix the member name (prefer
+  `nameof`) or supply the domain name.
 
 Apply the mechanical fixes without an IDE:
 
@@ -461,7 +465,10 @@ Apply the mechanical fixes without an IDE:
 Literals, locals, and untagged method results (`Guid.NewGuid()`, `Guid.Empty`)
 are deliberately not tracked; do not add tags to make them tracked.
 `[UnionId("A", "B")]` is for members that accept several domains, not a way to
-make a mismatch pass.
+make a mismatch pass. A member of a referenced assembly (an SDK's `User.Id`)
+cannot carry `[Id]`; tag it from this project with
+`[assembly: ExternalId(typeof(T), nameof(T.Member), "Domain")]` rather than
+suppressing the warning.
 ```
 
 
@@ -487,7 +494,7 @@ A `[UnionId("x")]` with a single option is always a mistake — use `[Id("x")]`.
 A property (or field) named `Id` inherited from a base type carries ids from **every** level of the chain its receiver walks — the base type's id **and** the derived type's id. At an access site like `child1.Id`, the id set is the union of:
 
  * Every explicit `[Id("...")]` found on the property, its `override` chain, and its interface impls.
- * Every naming-convention id for types in the receiver's static-type chain between the receiver type and the member's declaring type (inclusive), where the member was not redeclared.
+ * Every naming-convention id for types in the receiver's static-type chain between the receiver type and the member's declaring type (inclusive), where the member was not redeclared. Types in a [suppressed namespace or assembly](#suppressing-namespaces-and-assemblies) contribute nothing — an SDK's base classes are not domain types.
 
 Matching rules use set containment — a single-id parameter is satisfied if its id appears anywhere in the source's set. So given `public static void Foo(Guid child1Id, Guid baseId)`:
 
@@ -678,31 +685,104 @@ namespace InheritanceInterfaceConvention
 <!-- endSnippet -->
 
 
-## Suppressing namespaces
+## Suppressing namespaces and assemblies
 
-Diagnostics SIA002 and SIA003 are suppressed when the fix-target lives in a namespace matching the configured list. Defaults:
+Two `.editorconfig` lists mark types as *not domain types*. A type matched by either list:
+
+ * is never a fix target — SIA002 and SIA003 are suppressed when the untagged side lives there;
+ * contributes no convention id at an access site — `graphUser.Id` does not read as `"User"` merely because the receiver is `Microsoft.Graph.Models.User` (see "Inheritance and covariant Id tagging");
+ * seeds no [suffix-inference](#suffix-inference-opt-in) ids and is never recognised as a [wrapper type](#wrapper-types-opt-in).
+
+`strongidanalyzer.suppressed_namespaces` matches the containing namespace. Defaults:
 
  * `System*`
  * `Microsoft*`
 
-Patterns:
+`strongidanalyzer.suppressed_assemblies` matches the containing assembly's name. Default: empty. It is the knob for an SDK whose namespaces are not predictable, or one that does not sit under a suppressed root — `Microsoft.Graph` is already covered by `Microsoft*`, a third-party SDK is not:
 
- * A trailing `*` makes it a prefix match — `System*` matches the `System` namespace itself *and* any `System.<anything>` child namespace, but not unrelated roots like `SystemX`.
- * Without `*`, the pattern is an exact namespace match.
+```editorconfig
+[*.cs]
+strongidanalyzer.suppressed_assemblies = Auth0*,Stripe.net
+```
 
-Override via `.editorconfig` — user value fully replaces the defaults:
+Both lists share one pattern syntax:
+
+ * Patterns are `.`-segmented. A trailing `*` makes it a prefix match — `System*` matches the `System` namespace itself *and* any `System.<anything>` child namespace, but not unrelated roots like `SystemX`; `Microsoft.Graph*` matches the `Microsoft.Graph` and `Microsoft.Graph.Core` assemblies but not `Microsoft.Graphics`.
+ * Without `*`, the pattern is an exact match.
+ * A bare `*` matches everything.
+
+Override via `.editorconfig` — a user value fully replaces that list's defaults:
 
 ```editorconfig
 [*.cs]
 strongidanalyzer.suppressed_namespaces = System*,Microsoft*,MyCompany.Logging*
 ```
 
-Set the value to empty to disable namespace suppression entirely (the metadata-target, `object`, and generic-`T` suppressions still apply):
+Set a value to empty to disable that list (the metadata-target, `object`, and generic-`T` suppressions still apply):
 
 ```editorconfig
 [*.cs]
 strongidanalyzer.suppressed_namespaces =
 ```
+
+Suppression makes a library member silent; it does not make it *checked*. To have the analyzer hold a library member to a domain, tag it with `[assembly: ExternalId]` below.
+
+
+## Tagging members of referenced assemblies
+
+Nothing in a referenced assembly can carry `[Id]`, so an SDK's id members are invisible to the analyzer: after suppression `entraUser.Id` is untagged, and assigning it to `_customerId` is not reported. `[assembly: ExternalId]` tags such a member from the consumer's side:
+
+<!-- snippet: ExternalIdSample -->
+<a id='snippet-ExternalIdSample'></a>
+```cs
+using System.Diagnostics;
+
+// Process.Id is declared in the framework, so nothing can put [Id] on it. The assembly
+// attribute tags it from this side: read through Process (or a derived type), Id is a
+// "Process" id.
+[assembly: ExternalId(typeof(Process), nameof(Process.Id), "Process")]
+
+namespace ExternalIdSample
+{
+    public class JobRunner
+    {
+        // id: "Process" (rule 2)
+        public int ProcessId { get; set; }
+
+        // id: "Job" (rule 2)
+        public int JobId { get; set; }
+
+        public void Track(Process process)
+        {
+            // OK: "Process" flows to "Process"
+            ProcessId = process.Id;
+
+            // SIA001: property 'Process.Id' is [Id("Process")] and flows to property
+            // 'JobRunner.JobId', which is [Id("Job")]
+            JobId = process.Id;
+        }
+    }
+}
+```
+<sup><a href='/src/StrongIdAnalyzer.Tests/ExternalIdSamples.cs#L10-L41' title='Snippet source file'>snippet source</a> | <a href='#snippet-ExternalIdSample' title='Start of snippet'>anchor</a></sup>
+<!-- endSnippet -->
+
+`[assembly: ExternalId(typeof(T), nameof(T.Member), "Domain", ...)]` says: read or written through `T` **or any type derived from it**, `Member` carries those ids. For Microsoft Graph, where `Id` is declared on `Entity` and inherited by `DirectoryObject`, `User`, `Group`, …:
+
+```cs
+using Microsoft.Graph.Models;
+
+[assembly: ExternalId(typeof(DirectoryObject), nameof(DirectoryObject.Id), "EntraObject")]
+```
+
+Rules:
+
+ * **Properties and fields only.** Parameters and return values of library methods are not covered.
+ * **The id is explicit.** It beats everything else — a `[StrongIdIndex]` shipped by the library, an attribute on the member, and every naming convention — and SIA002/SIA003 fixes propose exactly these ids.
+ * **The receiver chain is walked, most-derived first, and unioned**, mirroring the naming convention: with mappings for both `User.Id` → `"EntraUser"` and `DirectoryObject.Id` → `"EntraObject"`, `user.Id` is `{"EntraUser","EntraObject"}` and `group.Id` is `{"EntraObject"}`. Several attributes for the same member also union their ids. Interfaces count: a mapping on `IEntity.Id` applies to every implementation.
+ * **Mappings travel.** Attributes in referenced assemblies are read too, so a shared project can declare them once for every consumer.
+ * **Suppression does not apply.** A mapped member in a suppressed namespace or assembly still carries its ids; that is the point.
+ * **Validated at build.** SIA008 (error) fires for a member name the type does not have, or an empty id. Use `nameof` so the compiler checks the name.
 
 
 

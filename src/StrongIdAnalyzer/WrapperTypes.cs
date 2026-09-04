@@ -14,7 +14,7 @@
 // Recognition is structural and cached per type. Type-derived tags are reliable where
 // name-derived ones are not, which is why they beat the naming convention but still lose
 // to an explicit [Id] / [UnionId].
-sealed class WrapperTypes(bool enabled, ImmutableArray<NamespacePattern> suppressedNamespaces)
+sealed class WrapperTypes(bool enabled, Suppression suppression)
 {
     const string optionKey = "strongidanalyzer.infer_wrapper_ids";
     const string idSuffix = "Id";
@@ -110,7 +110,7 @@ sealed class WrapperTypes(bool enabled, ImmutableArray<NamespacePattern> suppres
 
         // Keeps Lazy<T>, Task<T> and friends out — and keeps the KnownTags walk from
         // inspecting the members of every framework type.
-        if (NamespaceSuppression.IsSuppressed(type, suppressedNamespaces))
+        if (suppression.IsSuppressed(type))
         {
             return null;
         }

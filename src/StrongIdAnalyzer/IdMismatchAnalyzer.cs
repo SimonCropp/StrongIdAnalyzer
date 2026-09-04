@@ -19,22 +19,24 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // ambiguity). Matching attributes by fully-qualified name instead of symbol
             // identity keeps cross-assembly usage working — e.g. messages assembly tags
             // a property with [Id("Customer")] and the consumer assembly assigns it.
-            var suppressedNamespaces = NamespaceSuppression.Read(
+            var suppression = Suppression.Read(
                 start.Options.AnalyzerConfigOptionsProvider,
                 start.Compilation);
             var inferSuffixTags = SuffixInference.Read(
                 start.Options.AnalyzerConfigOptionsProvider,
                 start.Compilation);
-            // Built before Config because the known-tags computation consults it too.
+            // Built before Config because the known-tags computation consults them too.
             var wrappers = new WrapperTypes(
                 WrapperTypes.Read(start.Options.AnalyzerConfigOptionsProvider, start.Compilation),
-                suppressedNamespaces);
+                suppression);
+            var externalIds = ExternalIds.Read(start.Compilation);
             var config = new Config(
-                suppressedNamespaces,
+                suppression,
                 inferSuffixTags,
                 wrappers,
+                externalIds,
                 start.Compilation,
-                new(() => CollectKnownTags(start.Compilation, suppressedNamespaces, wrappers)));
+                new(() => CollectKnownTags(start.Compilation, suppression, wrappers, externalIds)));
 
             start.RegisterOperationAction(
                 _ => AnalyzeArgument(_, config),
@@ -86,8 +88,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 SymbolKind.Parameter,
                 SymbolKind.Method);
 
-            start.RegisterCompilationEndAction(
-                _ => ReportConventionDiagnostics(_, ambiguity, redundantCandidates));
+            start.RegisterCompilationEndAction(end =>
+            {
+                ReportConventionDiagnostics(end, ambiguity, redundantCandidates);
+                ValidateExternalIds(end, externalIds);
+            });
         });
     }
 
@@ -348,6 +353,60 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
             Rules.ReportRedundant(context, candidate.Reference.ToLocation(), candidate.Symbol, candidate.Value);
         }
+    }
+
+    // SIA008: an [assembly: ExternalId] the analyzer could never apply. Only the
+    // compilation's own attributes are checked — a referenced assembly's are not
+    // editable from here. A missing member is the `nameof`-less typo case; an empty id
+    // list is the [Id("")] case for this attribute.
+    static void ValidateExternalIds(CompilationAnalysisContext context, ExternalIds externalIds)
+    {
+        foreach (var entry in externalIds.SourceEntries)
+        {
+            var location = entry.Attribute.ApplicationSyntaxReference?.ToLocation() ?? Location.None;
+            if (!HasPropertyOrField(entry.Type, entry.Member))
+            {
+                Rules.ReportExternalIdMemberMissing(context, location, entry.Type.Name, entry.Member);
+                continue;
+            }
+
+            if (entry.Tags.IsEmpty)
+            {
+                Rules.ReportExternalIdEmptyTag(context, location, entry.Type.Name, entry.Member);
+            }
+        }
+    }
+
+    static bool HasPropertyOrField(INamedTypeSymbol type, string member)
+    {
+        if (member.Length == 0)
+        {
+            return false;
+        }
+
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var candidate in current.GetMembers(member))
+            {
+                if (candidate is IPropertySymbol { IsIndexer: false } or IFieldSymbol)
+                {
+                    return true;
+                }
+            }
+        }
+
+        foreach (var iface in type.AllInterfaces)
+        {
+            foreach (var candidate in iface.GetMembers(member))
+            {
+                if (candidate is IPropertySymbol { IsIndexer: false })
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     sealed class RedundantKeyComparer : IEqualityComparer<(ISymbol Symbol, int Position)>
@@ -755,7 +814,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (NamespaceSuppression.IsSuppressed(untaggedSymbol, config.SuppressedNamespaces))
+        if (config.Suppression.IsSuppressed(untaggedSymbol))
         {
             return;
         }
@@ -1653,6 +1712,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType, Config config)
     {
+        // An [assembly: ExternalId] mapping is the consumer overriding what it cannot
+        // edit, so it beats the library's own index, attributes and conventions alike.
+        if (config.ExternalIds.TryGetSymbolTags(member, receiverType, out var external))
+        {
+            return IdInfo.PresentExplicit(external);
+        }
+
         // Pre-resolved index covers the library-side (member + its declaring-type receiver)
         // tag set directly. When hit, skip EnumerateMemberChain (AllInterfaces walk) AND
         // the receiver-type walk — the producer has already folded those contributions in
@@ -1799,6 +1865,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         //    when the declaring type is an interface and `.BaseType` walks past it.
         //    A wrapper-typed `Id` is fully described by its type; `admin.Id` of type
         //    UserId must not gain "Admin".
+        //    Types in a suppressed namespace or assembly contribute nothing: they are
+        //    not the user's domain, which is the same contract KnownTags and wrapper
+        //    recognition apply. This is deliberately not a "declared in metadata" gate —
+        //    a domain type in a referenced project of the same solution has no syntax
+        //    here either, and `product.Id` must keep carrying "Product". Without the gate
+        //    `graphUser.Id` reads as {"User","DirectoryObject"} from Microsoft.Graph and
+        //    every assignment of it into a tagged field is a false SIA001 the user cannot
+        //    fix. The walk continues past a suppressed type: the boundary and the
+        //    remaining chain are unaffected, only the tag is withheld.
         if (member.ConventionName() == "Id" &&
             member.ContainingType is { } memberContaining &&
             receiverType is INamedTypeSymbol rt &&
@@ -1816,6 +1891,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
                 if (!coveredTypes.Contains(current.OriginalDefinition) &&
                     current.Name.Length > 0 &&
+                    !config.Suppression.IsSuppressed(current) &&
                     seen.Add(current.Name))
                 {
                     receiverTags.Add(current.Name);
@@ -1849,6 +1925,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // and the user is explicitly saying "this is not the base's property".
     //
     // Resolution order:
+    //   0. `[assembly: ExternalId]` mapping for the symbol's declaring-type chain — the
+    //      consumer's word about a member it does not own, so it precedes everything.
     //   1. Explicit [Id] on the symbol itself.
     //   2. Inherited [Id] via override/interface impl chain (properties & parameters).
     //   3. Opt-in wrapper type: the symbol's declared type is a wrapper, it is a
@@ -1859,6 +1937,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     //   5. NotPresent.
     static IdInfo GetIdWithInheritance(ISymbol symbol, Config config)
     {
+        if (config.ExternalIds.TryGetSymbolTags(symbol, receiverType: null, out var external))
+        {
+            return IdInfo.PresentExplicit(external);
+        }
+
         if (TryGetFromIndex(symbol, config, out var indexed))
         {
             if (!indexed.IsDefaultOrEmpty)
@@ -1975,13 +2058,21 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     //       "without my own attribute" probe keeps it.
     static TagIndex CollectKnownTags(
         Compilation compilation,
-        ImmutableArray<NamespacePattern> suppressedNamespaces,
-        WrapperTypes wrappers)
+        Suppression suppression,
+        WrapperTypes wrappers,
+        ExternalIds externalIds)
     {
         var typeTags = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
         var explicitCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        foreach (var type in EnumerateAccessibleTypes(compilation.GlobalNamespace, suppressedNamespaces))
+        // An external mapping is vouched for by something other than the declaration
+        // SIA005 is probing, so it counts with the type tags and survives `Without`.
+        foreach (var tag in externalIds.AllTags)
+        {
+            typeTags.Add(tag);
+        }
+
+        foreach (var type in EnumerateAccessibleTypes(compilation.GlobalNamespace, suppression))
         {
             if (type.Name.Length > 0 && type.HasIdMemberInChain())
             {
@@ -2042,14 +2133,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // would balloon and traverse thousands of unrelated framework types per compilation.
     static IEnumerable<INamedTypeSymbol> EnumerateAccessibleTypes(
         INamespaceSymbol ns,
-        ImmutableArray<NamespacePattern> suppressedNamespaces)
+        Suppression suppression)
     {
         foreach (var member in ns.GetMembers())
         {
             switch (member)
             {
                 case INamedTypeSymbol type:
-                    if (NamespaceSuppression.IsSuppressed(type, suppressedNamespaces))
+                    if (suppression.IsSuppressed(type))
                     {
                         break;
                     }
@@ -2062,7 +2153,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
                     break;
                 case INamespaceSymbol child:
-                    foreach (var t in EnumerateAccessibleTypes(child, suppressedNamespaces))
+                    foreach (var t in EnumerateAccessibleTypes(child, suppression))
                     {
                         yield return t;
                     }
@@ -2358,7 +2449,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            if (NamespaceSuppression.IsSuppressed(sourceSymbol, config.SuppressedNamespaces))
+            if (config.Suppression.IsSuppressed(sourceSymbol))
             {
                 return;
             }
@@ -2405,7 +2496,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            if (NamespaceSuppression.IsSuppressed(targetSymbol, config.SuppressedNamespaces))
+            if (config.Suppression.IsSuppressed(targetSymbol))
             {
                 return;
             }

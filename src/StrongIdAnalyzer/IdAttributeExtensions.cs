@@ -7,6 +7,7 @@ static class IdAttributeExtensions
 {
     public const string IdMetadataName = "IdAttribute";
     public const string UnionIdMetadataName = "UnionIdAttribute";
+    public const string ExternalIdMetadataName = "ExternalIdAttribute";
     const string idTagMetadataName = "IdTagAttribute";
     const string idNamespace = "StrongIdAnalyzer";
     const string idGenericMetadataName = "IdAttribute`1";
