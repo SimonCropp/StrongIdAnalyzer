@@ -62,9 +62,4 @@ readonly struct IdInfo
         }
         return false;
     }
-
-    // Flat representation for diagnostic messages. Multi-tag sets use "/" as a
-    // separator so a reader sees the full set at once: [Id("Child1/Base")].
-    public string Format() =>
-        Tags.IsDefaultOrEmpty ? "" : string.Join("/", Tags);
 }

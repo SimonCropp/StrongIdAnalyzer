@@ -105,7 +105,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA002");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """property 'Sample.Raw' has no [Id] but flows to parameter 'key' of 'Sample.Lookup', which is [Id("Customer/Product")]. Fix: add [UnionId("Customer", "Product")] to property 'Sample.Raw' (line 4).""");
+            """property 'Sample.Raw' has no [Id] but flows to parameter 'key' of 'Sample.Lookup', which is [UnionId("Customer", "Product")]. Fix: add [UnionId("Customer", "Product")] to property 'Sample.Raw' (line 4).""");
     }
 
     [Test]

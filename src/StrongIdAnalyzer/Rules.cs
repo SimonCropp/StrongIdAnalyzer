@@ -28,7 +28,7 @@ static class Rules
     static readonly DiagnosticDescriptor idMismatch = new(
         id: "SIA001",
         title: "Id type mismatch",
-        messageFormat: "{0} is [Id(\"{1}\")] and {2} {3}, which is [Id(\"{4}\")]. {5}.",
+        messageFormat: "{0} is {1} and {2} {3}, which is {4}. {5}.",
         category: "IdAttribute.Usage",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -38,7 +38,7 @@ static class Rules
     static readonly DiagnosticDescriptor missingSourceId = new(
         id: "SIA002",
         title: "Source has no Id while target requires one",
-        messageFormat: "{0} has no [Id] but {1} {2}, which is [Id(\"{3}\")]. Fix: add {4} to {0}{5}.",
+        messageFormat: "{0} has no [Id] but {1} {2}, which is {3}. Fix: add {4} to {0}{5}.",
         category: "IdAttribute.Usage",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -48,7 +48,7 @@ static class Rules
     static readonly DiagnosticDescriptor droppedId = new(
         id: "SIA003",
         title: "Source has Id while target has none",
-        messageFormat: "{0} is [Id(\"{1}\")] but {2} {3}, which has no [Id]. Fix: add {4} to {3}{5}.",
+        messageFormat: "{0} is {1} but {2} {3}, which has no [Id]. Fix: add {4} to {3}{5}.",
         category: "IdAttribute.Usage",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -135,10 +135,10 @@ static class Rules
             messageArgs:
             [
                 Describe(sourceSymbol),
-                source.Format(),
+                FormatAttribute(source.Tags),
                 relation,
                 Describe(targetSymbol),
-                target.Format(),
+                FormatAttribute(target.Tags),
                 MismatchFix(location, sourceSymbol, sourceFixSite, source, targetSymbol, targetFixSite, target)
             ]));
 
@@ -285,7 +285,7 @@ static class Rules
             location,
             additionalLocations: GetAdditionalLocations(fixTarget),
             properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, joined),
-            messageArgs: messageArgs(fixTags, info.Format()));
+            messageArgs: messageArgs(fixTags, FormatAttribute(info.Tags)));
     }
 
     // The attribute the reader should write: one tag → [Id("X")], several → the

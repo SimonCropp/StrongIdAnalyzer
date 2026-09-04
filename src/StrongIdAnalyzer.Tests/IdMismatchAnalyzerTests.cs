@@ -2643,14 +2643,14 @@ public class IdMismatchAnalyzerTests
 
         await Assert.That(diagnostics.Length).IsEqualTo(1);
         var message = diagnostics[0].GetMessage();
-        await Assert.That(message.Contains("TreasuryBid/BaseEntity")).IsTrue();
+        await Assert.That(message.Contains("""UnionId("TreasuryBid", "BaseEntity")""")).IsTrue();
     }
 
     [Test]
     public async Task Convention_InheritedId_DeepChain_MismatchMessage_MostDerivedFirst()
     {
-        // leaf.Id walks Leaf → Mid → Root. The resulting tag list must be
-        // "Leaf/Mid/Root" (most-derived first) so code fixes pick the receiver type.
+        // leaf.Id walks Leaf → Mid → Root. The resulting tag list must render
+        // most-derived first ("Leaf", "Mid", "Root") so code fixes pick the receiver type.
         var source =
             """
             using System;
@@ -2670,7 +2670,7 @@ public class IdMismatchAnalyzerTests
         var diagnostics = (await GetDiagnostics(source)).Where(_ => _.Id == "SIA001").ToArray();
 
         await Assert.That(diagnostics.Length).IsEqualTo(1);
-        await Assert.That(diagnostics[0].GetMessage().Contains("Leaf/Mid/Root")).IsTrue();
+        await Assert.That(diagnostics[0].GetMessage().Contains("""UnionId("Leaf", "Mid", "Root")""")).IsTrue();
     }
 
     [Test]
