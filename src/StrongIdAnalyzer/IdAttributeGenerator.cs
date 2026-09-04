@@ -66,6 +66,21 @@ public class IdAttributeGenerator : IIncrementalGenerator
         [ExcludeFromCodeCoverage]
         [DebuggerNonUserCode]
         sealed class IdTagAttribute : Attribute;
+
+        /// <summary>
+        /// Tags a property or field declared in a referenced assembly, which cannot carry
+        /// <see cref="IdAttribute"/> itself. Read or written through <paramref name="type"/>
+        /// or any type derived from it, <paramref name="member"/> carries <paramref name="ids"/>
+        /// exactly as if the attribute were on the declaration:
+        /// <c>[assembly: ExternalId(typeof(DirectoryObject), nameof(DirectoryObject.Id), "EntraObject")]</c>.
+        /// Several attributes for the same member union their ids.
+        /// </summary>
+        [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true, Inherited = false)]
+        [ExcludeFromCodeCoverage]
+        [DebuggerNonUserCode]
+        #pragma warning disable CS9113
+        sealed class ExternalIdAttribute(Type type, string member, params string[] ids) : Attribute;
+        #pragma warning restore CS9113
         """;
 
     // Generic variant — equivalent to [Id(nameof(T))] but enforced by the compiler to
@@ -142,7 +157,9 @@ public class IdAttributeGenerator : IIncrementalGenerator
 
         // If a referenced assembly already exposes StrongIdAnalyzer.IdAttribute to us
         // (e.g. an upstream project that grants InternalsVisibleTo), skip emitting to
-        // avoid CS0436 type-conflict errors. We must check actual accessibility from
+        // avoid CS0436 type-conflict errors. The whole family is skipped on that one
+        // probe, so an upstream built with an analyzer that predates ExternalIdAttribute
+        // leaves it unavailable downstream — the existing IVT caveat, extended. We must check actual accessibility from
         // the current compilation's assembly — GetTypesByMetadataName returns types
         // from referenced assemblies regardless of accessibility, so an internal-without-IVT
         // match doesn't count.

@@ -6,6 +6,11 @@ root = true
 # SuppressedNamespaceConsumeTests so the rest of the project still compiles clean.
 strongidanalyzer.suppressed_namespaces = System*,Microsoft*,Suppressed*
 
+# Same syntax, matched against the containing assembly's name. Empty here — nothing in
+# this project needs it, and the key is present so the packaged analyzer is seen to
+# accept it.
+strongidanalyzer.suppressed_assemblies =
+
 # Opt-in suffix inference — used by SuffixInferenceConsumeTests.
 # With this flag off, `SourceProductId` / `TargetProductId` (properties and parameters)
 # would be tagged "SourceProduct" / "TargetProduct" by the whole-name rule and fail

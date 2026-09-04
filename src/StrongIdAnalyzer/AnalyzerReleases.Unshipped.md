@@ -9,3 +9,4 @@ SIA004 | IdAttribute.Usage | Error | Multiple declarations map to the same conve
 SIA005 | IdAttribute.Usage | Warning | [Id(...)] attribute matches the naming convention and is redundant
 SIA006 | IdAttribute.Usage | Warning | [UnionId("x")] with a single option should be [Id("x")]
 SIA007 | IdAttribute.Usage | Error | Id tag must not be empty or whitespace
+SIA008 | IdAttribute.Usage | Error | [assembly: ExternalId] names a missing member or supplies no id

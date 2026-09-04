@@ -259,6 +259,60 @@ public class MessageTests
     }
 
     [Test]
+    public async Task SIA008_MissingMember()
+    {
+        var source =
+            """
+            using System.Diagnostics;
+            [assembly: ExternalId(typeof(Process), "Idd", "Process")]
+            public class Sample { }
+            """;
+
+        var diagnostic = await Single(source, "SIA008");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """[ExternalId] for 'Process.Idd' names no property or field of that type or its bases. Fix: reference an existing member, e.g. nameof(Process.Id).""");
+    }
+
+    [Test]
+    public async Task SIA008_EmptyId()
+    {
+        var source =
+            """
+            using System.Diagnostics;
+            [assembly: ExternalId(typeof(Process), nameof(Process.Id))]
+            public class Sample { }
+            """;
+
+        var diagnostic = await Single(source, "SIA008");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """[ExternalId] for 'Process.Id' has no id. Fix: supply a non-empty domain name, e.g. [assembly: ExternalId(typeof(Process), "Id", "Customer")].""");
+    }
+
+    [Test]
+    public async Task SIA001_ExternalIdSource()
+    {
+        // The source is a framework member tagged through [assembly: ExternalId]; it has
+        // no editable declaration, so the fix clause can only point at the target.
+        var source =
+            """
+            using System.Diagnostics;
+            [assembly: ExternalId(typeof(Process), nameof(Process.Id), "Process")]
+            public class Sample
+            {
+                public int JobId { get; set; }
+                public void Run(Process process) => JobId = process.Id;
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA001");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """property 'Process.Id' is [Id("Process")] and flows to property 'Sample.JobId', which is [Id("Job")]. Fix: apply [Id("Process")] to property 'Sample.JobId' (line 5), or pass a value tagged [Id("Job")].""");
+    }
+
+    [Test]
     public async Task EveryRule_HasHelpLinkAndDescription()
     {
         foreach (var descriptor in new IdMismatchAnalyzer().SupportedDiagnostics)

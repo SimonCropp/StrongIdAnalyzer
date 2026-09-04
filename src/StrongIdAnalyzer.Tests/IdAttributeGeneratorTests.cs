@@ -12,7 +12,38 @@ public class IdAttributeGeneratorTests
         var text = generated.ToString();
 
         await Assert.That(text.Contains("sealed class IdAttribute")).IsTrue();
+        await Assert.That(text.Contains("sealed class ExternalIdAttribute")).IsTrue();
         await Assert.That(text.Contains("namespace StrongIdAnalyzer")).IsTrue();
+    }
+
+    [Test]
+    public async Task ConsumerCodeUsingExternalIdAttribute_Compiles()
+    {
+        var source =
+            """
+            using System.Diagnostics;
+
+            [assembly: ExternalId(typeof(Process), nameof(Process.Id), "Process")]
+            [assembly: ExternalId(typeof(Process), nameof(Process.SessionId), "Session", "LogonSession")]
+
+            public class Holder
+            {
+                public int ProcessId { get; set; }
+
+                public void Use(Process process) => ProcessId = process.Id;
+            }
+            """;
+
+        var compilation = BuildCompilation(source);
+        var driver = CSharpGeneratorDriver.Create(new IdAttributeGenerator());
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var updated, out var genDiagnostics);
+
+        await Assert.That(genDiagnostics.Length).IsEqualTo(0);
+
+        var errors = updated.GetDiagnostics()
+            .Where(_ => _.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        await Assert.That(errors.Length).IsEqualTo(0);
     }
 
     [Test]

@@ -6,18 +6,23 @@
 // Deliberately knows nothing about tag resolution itself. `knownTags` arrives as an
 // already-built Lazy so the computation stays with the analyzer that understands what
 // a tag is, while this type only owns when it runs and who shares the result. The same
-// goes for `wrappers`: it is constructed before this struct because the known-tags
-// computation needs it too.
+// goes for `wrappers` and `externalIds`: both are constructed before this struct because
+// the known-tags computation needs them too.
 readonly struct Config(
-    ImmutableArray<NamespacePattern> suppressedNamespaces,
+    Suppression suppression,
     bool inferSuffixTags,
     WrapperTypes wrappers,
+    ExternalIds externalIds,
     Compilation compilation,
     Lazy<TagIndex> knownTags)
 {
-    public ImmutableArray<NamespacePattern> SuppressedNamespaces { get; } = suppressedNamespaces;
+    public Suppression Suppression { get; } = suppression;
     public bool InferSuffixTags { get; } = inferSuffixTags;
     public Compilation Compilation { get; } = compilation;
+
+    // `[assembly: ExternalId(...)]` mappings for members the user does not own. Consulted
+    // before every other source of tags; empty for most compilations.
+    public ExternalIds ExternalIds { get; } = externalIds;
 
     // Opt-in wrapper-type recognition (`strongidanalyzer.infer_wrapper_ids`) with its
     // per-type cache. Disabled instances answer false to everything.
