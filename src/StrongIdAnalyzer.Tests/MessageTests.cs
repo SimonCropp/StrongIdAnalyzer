@@ -69,6 +69,71 @@ public class MessageTests
     }
 
     [Test]
+    public async Task SIA001_InheritedSource_FixUsesReceiverTag()
+    {
+        // leaf.Id carries every type between the receiver and the declaring type. The
+        // body shows that whole set; the Fix clause names only the first (most-derived)
+        // tag because that is the single value the fixer applies to the target.
+        var source =
+            """
+            using System;
+            public class Root { public Guid Id { get; set; } }
+            public class Mid : Root { }
+            public class Leaf : Mid { }
+            public class Service
+            {
+                public static void TakeOther(Guid otherId) { }
+                public void Run(Leaf leaf) => TakeOther(leaf.Id);
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA001");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """property 'Root.Id' is [UnionId("Leaf", "Mid", "Root")] and flows to parameter 'otherId' of 'Service.TakeOther', which is [Id("Other")]. Fix: apply [Id("Leaf")] to parameter 'otherId' of 'Service.TakeOther' (line 7), or pass a value tagged [Id("Other")].""");
+    }
+
+    [Test]
+    public async Task SIA001_UnionSource_FixUsesFirstOption()
+    {
+        var source =
+            """
+            using System;
+            public class Service
+            {
+                public static void Place(Guid orderId) { }
+                public void Run([UnionId("Customer", "Product")] Guid key) => Place(key);
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA001");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """parameter 'key' of 'Service.Run' is [UnionId("Customer", "Product")] and flows to parameter 'orderId' of 'Service.Place', which is [Id("Order")]. Fix: apply [Id("Customer")] to parameter 'orderId' of 'Service.Place' (line 4), or pass a value tagged [Id("Order")].""");
+    }
+
+    [Test]
+    public async Task SIA001_UnionTarget_ValueClauseShowsWholeSet()
+    {
+        // "pass a value tagged" keeps the target's full set: any one of them satisfies it.
+        var source =
+            """
+            using System;
+            public class Customer { public Guid Id { get; set; } }
+            public class Service
+            {
+                public static void Lookup([UnionId("Order", "Product")] Guid key) { }
+                public void Run(Customer customer) => Lookup(customer.Id);
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA001");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """property 'Customer.Id' is [Id("Customer")] and flows to parameter 'key' of 'Service.Lookup', which is [UnionId("Order", "Product")]. Fix: apply [Id("Customer")] to parameter 'key' of 'Service.Lookup' (line 5), or pass a value tagged [UnionId("Order", "Product")].""");
+    }
+
+    [Test]
     public async Task SIA002_SingleTag()
     {
         var source =
@@ -146,6 +211,25 @@ public class MessageTests
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
             """property 'Sample.OrderId' is [Id("Order")] but flows to parameter 'value' of 'Sample.Consume', which has no [Id]. Fix: add [Id("Order")] to parameter 'value' of 'Sample.Consume' (line 5).""");
+    }
+
+    [Test]
+    public async Task SIA003_UnionSource_SuggestsUnionId()
+    {
+        var source =
+            """
+            using System;
+            public class Service
+            {
+                public static void Consume(Guid value) { }
+                public void Run([UnionId("Customer", "Product")] Guid key) => Consume(key);
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA003");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """parameter 'key' of 'Service.Run' is [UnionId("Customer", "Product")] but flows to parameter 'value' of 'Service.Consume', which has no [Id]. Fix: add [UnionId("Customer", "Product")] to parameter 'value' of 'Service.Consume' (line 4).""");
     }
 
     [Test]

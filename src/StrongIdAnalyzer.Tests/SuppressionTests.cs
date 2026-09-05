@@ -106,7 +106,7 @@ public class SuppressionTests
             });
 
         await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
-        await Assert.That(diagnostics[0].GetMessage()).Contains("""[Id("User/DirectoryObject")]""");
+        await Assert.That(diagnostics[0].GetMessage()).Contains("""[UnionId("User", "DirectoryObject")]""");
     }
 
     [Test]

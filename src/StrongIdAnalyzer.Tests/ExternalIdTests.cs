@@ -139,7 +139,7 @@ public class ExternalIdTests
         await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001", "SIA001"]);
         var messages = diagnostics.Select(_ => _.GetMessage()).ToArray();
         await Assert.That(messages.Count(_ => _.Contains("""is [Id("EntraObject")] and flows to field 'Holder._entraUserId'"""))).IsEqualTo(1);
-        await Assert.That(messages.Count(_ => _.Contains("""is [Id("EntraUser/EntraObject")] and flows to field 'Holder._customerId'"""))).IsEqualTo(1);
+        await Assert.That(messages.Count(_ => _.Contains("""is [UnionId("EntraUser", "EntraObject")] and flows to field 'Holder._customerId'"""))).IsEqualTo(1);
     }
 
     [Test]

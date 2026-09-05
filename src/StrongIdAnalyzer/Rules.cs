@@ -155,7 +155,9 @@ static class Rules
 
     // The fix clause prefers retagging the target (matches the fixer's default), falls
     // back to the source when only that side is editable, and otherwise can only ask
-    // for a different value.
+    // for a different value. The attribute it promises is the one the fixer writes:
+    // the other side's *first* tag (see FixAttribute), while "pass a value tagged"
+    // shows the target's whole set because any tag in it satisfies the target.
     static string MismatchFix(
         Location location,
         ISymbol? sourceSymbol,
@@ -167,12 +169,12 @@ static class Rules
     {
         if (targetFixSite.IsEditable())
         {
-            return $"Fix: apply {FormatAttribute(source.Tags)} to {Describe(targetSymbol)}{Site(location, targetFixSite)}, or pass a value tagged {FormatAttribute(target.Tags)}";
+            return $"Fix: apply {FixAttribute(source)} to {Describe(targetSymbol)}{Site(location, targetFixSite)}, or pass a value tagged {FormatAttribute(target.Tags)}";
         }
 
         if (sourceFixSite.IsEditable())
         {
-            return $"Fix: apply {FormatAttribute(target.Tags)} to {Describe(sourceSymbol)}{Site(location, sourceFixSite)}, or pass a value tagged {FormatAttribute(target.Tags)}";
+            return $"Fix: apply {FixAttribute(target)} to {Describe(sourceSymbol)}{Site(location, sourceFixSite)}, or pass a value tagged {FormatAttribute(target.Tags)}";
         }
 
         return $"Fix: pass a value tagged {FormatAttribute(target.Tags)}";
@@ -326,6 +328,14 @@ static class Rules
             properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, joined),
             messageArgs: messageArgs(fixTags, FormatAttribute(info.Tags)));
     }
+
+    // SIA001's fixer applies a single tag — source.FirstValue onto the target,
+    // target.FirstValue onto the source — so a multi-tag side (an inherited Id read
+    // through a derived receiver, a [UnionId]) is reduced to its first tag here. That
+    // keeps the Fix clause and the IDE action title in agreement; rendering the full
+    // set as [UnionId(...)] would promise an attribute the fixer never writes.
+    static string FixAttribute(IdInfo info) =>
+        FormatAttribute(info.Tags.IsDefaultOrEmpty ? info.Tags : [info.Tags[0]]);
 
     // The attribute the reader should write: one tag → [Id("X")], several → the
     // equivalent [UnionId("X", "Y")].
