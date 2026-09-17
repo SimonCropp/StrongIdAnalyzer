@@ -331,7 +331,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
             foreach (var symbol in distinct)
             {
-                var others = distinct.Where(_ => !SymbolEqualityComparer.Default.Equals(_, symbol));
+                var others = distinct
+                    .Where(_ => !SymbolEqualityComparer.Default.Equals(_, symbol))
+                    .ToList();
                 foreach (var reference in symbol.DeclaringSyntaxReferences)
                 {
                     Rules.ReportAmbiguousConvention(context, reference.ToLocation(), symbol, others, entry.Key);

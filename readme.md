@@ -735,36 +735,33 @@ Nothing in a referenced assembly can carry `[Id]`, so an SDK's id members are in
 <!-- snippet: ExternalIdSample -->
 <a id='snippet-ExternalIdSample'></a>
 ```cs
-using System.Diagnostics;
-
 // Process.Id is declared in the framework, so nothing can put [Id] on it. The assembly
 // attribute tags it from this side: read through Process (or a derived type), Id is a
 // "Process" id.
 [assembly: ExternalId(typeof(Process), nameof(Process.Id), "Process")]
 
-namespace ExternalIdSample
+namespace ExternalIdSample;
+
+public class JobRunner
 {
-    public class JobRunner
+    // id: "Process" (rule 2)
+    public int ProcessId { get; set; }
+
+    // id: "Job" (rule 2)
+    public int JobId { get; set; }
+
+    public void Track(Process process)
     {
-        // id: "Process" (rule 2)
-        public int ProcessId { get; set; }
+        // OK: "Process" flows to "Process"
+        ProcessId = process.Id;
 
-        // id: "Job" (rule 2)
-        public int JobId { get; set; }
-
-        public void Track(Process process)
-        {
-            // OK: "Process" flows to "Process"
-            ProcessId = process.Id;
-
-            // SIA001: property 'Process.Id' is [Id("Process")] and flows to property
-            // 'JobRunner.JobId', which is [Id("Job")]
-            JobId = process.Id;
-        }
+        // SIA001: property 'Process.Id' is [Id("Process")] and flows to property
+        // 'JobRunner.JobId', which is [Id("Job")]
+        JobId = process.Id;
     }
 }
 ```
-<sup><a href='/src/StrongIdAnalyzer.Tests/ExternalIdSamples.cs#L10-L41' title='Snippet source file'>snippet source</a> | <a href='#snippet-ExternalIdSample' title='Start of snippet'>anchor</a></sup>
+<sup><a href='/src/StrongIdAnalyzer.Tests/ExternalIdSamples.cs#L10-L38' title='Snippet source file'>snippet source</a> | <a href='#snippet-ExternalIdSample' title='Start of snippet'>anchor</a></sup>
 <!-- endSnippet -->
 
 `[assembly: ExternalId(typeof(T), nameof(T.Member), "Domain", ...)]` says: read or written through `T` **or any type derived from it**, `Member` carries those ids. For Microsoft Graph, where `Id` is declared on `Entity` and inherited by `DirectoryObject`, `User`, `Group`, …:

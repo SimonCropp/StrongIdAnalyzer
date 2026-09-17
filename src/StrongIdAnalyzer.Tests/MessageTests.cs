@@ -354,8 +354,9 @@ public class MessageTests
 
         var diagnostic = await Single(source, "SIA008");
 
-        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """[ExternalId] for 'Process.Idd' names no property or field of that type or its bases. Fix: reference an existing member, e.g. nameof(Process.Id).""");
+        await Assert.That(diagnostic.GetMessage())
+            .IsEqualTo(
+                "[ExternalId] for 'Process.Idd' names no property or field of that type or its bases. Fix: reference an existing member, e.g. nameof(Process.Id).");
     }
 
     [Test]
