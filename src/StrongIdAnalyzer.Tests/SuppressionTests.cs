@@ -105,8 +105,13 @@ public class SuppressionTests
                 ["strongidanalyzer.suppressed_namespaces"] = ""
             });
 
+        // `Entity` is in the set because it is where `Id` is declared, and a metadata
+        // level contributes no tag of its own — so the receiver walk names it, exactly as
+        // it names the derived levels. A source-declared `Entity` reaches the same set
+        // through the member chain's naming rule instead; the two shapes agree.
         await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
-        await Assert.That(diagnostics[0].GetMessage()).Contains("""[UnionId("User", "DirectoryObject")]""");
+        await Assert.That(diagnostics[0].GetMessage())
+            .Contains("""[UnionId("User", "DirectoryObject", "Entity")]""");
     }
 
     [Test]
@@ -375,6 +380,166 @@ public class SuppressionTests
             });
         await Assert.That(suppressed.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
         await Assert.That(suppressed[0].GetMessage()).Contains("""[Id("SourceGroup")]""");
+    }
+
+    // A referenced domain type that declares `Id` DIRECTLY. The member-chain walk skips
+    // metadata levels, so the level contributes nothing — and marking its type covered
+    // anyway left the receiver walk nothing to add either, so `product.Id` came back
+    // untagged. Only the `Product : Entity` shape was ever tested, and that one worked
+    // because the receiver and the declaring type differ.
+    [Test]
+    public async Task ReceiverWalk_MetadataTypeDeclaringIdDirectly_StillTagged()
+    {
+        var library =
+            """
+            using System;
+
+            namespace Shop
+            {
+                public class Product
+                {
+                    public Guid Id { get; set; }
+                }
+            }
+            """;
+
+        var consumer =
+            """
+            using System;
+
+            public class Holder
+            {
+                public void Use(Shop.Product product) => UseOrder(product.Id);
+
+                static void UseOrder([Id("Order")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await Analyze(library, consumer);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+        await Assert.That(diagnostics[0].GetMessage()).Contains("""[Id("Product")]""");
+    }
+
+    // Ancestor widening searched every type in every referenced assembly by simple name,
+    // suppression included. A domain class named `Process` therefore inherited
+    // `System.Diagnostics.Process`'s base chain and silently accepted a "Component" id;
+    // `Microsoft.Graph`'s `User : DirectoryObject : Entity` does the same to any domain
+    // `User`. The predicate that decides "not the user's domain" everywhere else decides
+    // it here too.
+    [Test]
+    public async Task Widening_IgnoresSuppressedNamespaces()
+    {
+        var source =
+            """
+            using System;
+
+            public class Process
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Component
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Use(Process process) => UseComponent(process.Id);
+
+                static void UseComponent([Id("Component")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await Analyze(library: "public class Unused { }", source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
+    // A domain base type in the source compilation still widens: the rule is suppression,
+    // not "declared elsewhere".
+    [Test]
+    public async Task Widening_KeepsDomainAncestors()
+    {
+        var source =
+            """
+            using System;
+
+            public class Entity
+            {
+                public Guid Key { get; set; }
+            }
+
+            public class Invoice : Entity
+            {
+            }
+
+            public class Holder
+            {
+                [Id("Invoice")]
+                public Guid Source { get; set; }
+
+                public void Use() => TakeEntity(Source);
+
+                static void TakeEntity([Id("Entity")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await Analyze(library: "public class Unused { }", source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    // `Ext.*` is how everyone writes it. Splitting on `.` left an empty trailing segment
+    // that no namespace chain can match, so the list quietly covered nothing.
+    [Test]
+    public async Task NamespacePattern_WithDotStar_MatchesLikeStar()
+    {
+        // One compilation: the fix site has to be editable for SIA003 to fire at all,
+        // which is what makes the suppression verdict observable here.
+        const string unused = "public class Unused { }";
+        var source =
+            """
+            using System;
+
+            namespace Ext.Vendor
+            {
+                public class Widget
+                {
+                    public Guid Slot { get; set; }
+                }
+            }
+
+            public class Holder
+            {
+                [Id("Order")]
+                public Guid Source { get; set; }
+
+                public void Use(Ext.Vendor.Widget widget) => widget.Slot = Source;
+            }
+            """;
+
+        var unsuppressed = await Analyze(unused, source);
+        await Assert.That(unsuppressed.Select(_ => _.Id)).IsEquivalentTo(["SIA003"]);
+
+        var dotStar = await Analyze(
+            unused,
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.suppressed_namespaces"] = "Ext.*"
+            });
+        await Assert.That(dotStar).IsEmpty();
+
+        var star = await Analyze(
+            unused,
+            source,
+            new Dictionary<string, string>
+            {
+                ["strongidanalyzer.suppressed_namespaces"] = "Ext*"
+            });
+        await Assert.That(star).IsEmpty();
     }
 
     // Compiles `library` (with the generator, so it can use [Id]) into an in-memory

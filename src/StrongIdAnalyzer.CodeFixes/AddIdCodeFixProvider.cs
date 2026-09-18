@@ -146,6 +146,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
                 actionTitle,
                 cancel => ChangeOrAddAttributeAsync(
                     context.Document.Project.Solution,
+                    context.Document.Project.Id,
                     declarationLocation,
                     value,
                     preferGeneric,
@@ -159,7 +160,8 @@ public class AddIdCodeFixProvider : CodeFixProvider
                 CodeAction.Create(
                     $"Rename {hostDescription} to '{newName}'",
                     cancel => RenameAsync(
-                        context.Document,
+                        context.Document.Project.Solution,
+                        context.Document.Project.Id,
                         declarationLocation,
                         newName,
                         cancel),
@@ -168,28 +170,101 @@ public class AddIdCodeFixProvider : CodeFixProvider
         }
     }
 
-    static async Task<Solution> ChangeOrAddAttributeAsync(
+    // The document a declaration lives in. Solution.GetDocument(tree) matches by tree
+    // identity, which fails in an out-of-process analyzer host (Rider): the diagnostic
+    // carries a tree that was re-parsed on the fix side, so the lookup returned null and
+    // every attribute fix quietly returned the solution unchanged — the action appeared
+    // in the lightbulb and did nothing. Fall back to the file path, preferring the
+    // project the fix was invoked from, the same recovery ShouldUseGenericAsync makes.
+    static Document? FindDocument(Solution solution, ProjectId projectId, SyntaxTree? tree)
+    {
+        if (tree is null)
+        {
+            return null;
+        }
+
+        if (solution.GetDocument(tree) is { } byIdentity)
+        {
+            return byIdentity;
+        }
+
+        var path = tree.FilePath;
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+
+        if (solution.GetProject(projectId) is { } project &&
+            FindByPath(project, path) is { } inProject)
+        {
+            return inProject;
+        }
+
+        foreach (var other in solution.Projects)
+        {
+            if (FindByPath(other, path) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    static Document? FindByPath(Project project, string path)
+    {
+        foreach (var document in project.Documents)
+        {
+            if (string.Equals(document.FilePath, path, StringComparison.Ordinal))
+            {
+                return document;
+            }
+        }
+
+        return null;
+    }
+
+    // Root of the declaring document, plus the node the declaration location points at.
+    // Returns null when the location cannot be mapped — a span from a document that is
+    // no longer in the solution must never be run against a different file's tree.
+    static async Task<(Document Document, SyntaxNode Root, SyntaxNode Node)?> FindDeclarationAsync(
         Solution solution,
+        ProjectId projectId,
         Location declarationLocation,
-        string value,
-        bool preferGeneric,
         Cancel cancel)
     {
-        var document = solution.GetDocument(declarationLocation.SourceTree);
+        var document = FindDocument(solution, projectId, declarationLocation.SourceTree);
         if (document is null)
         {
-            return solution;
+            return null;
         }
 
         var root = await document
             .GetSyntaxRootAsync(cancel)
             .ConfigureAwait(false);
-        if (root is null)
+        if (root is null ||
+            !root.FullSpan.Contains(declarationLocation.SourceSpan))
+        {
+            return null;
+        }
+
+        return (document, root, root.FindNode(declarationLocation.SourceSpan));
+    }
+
+    static async Task<Solution> ChangeOrAddAttributeAsync(
+        Solution solution,
+        ProjectId projectId,
+        Location declarationLocation,
+        string value,
+        bool preferGeneric,
+        Cancel cancel)
+    {
+        if (await FindDeclarationAsync(solution, projectId, declarationLocation, cancel).ConfigureAwait(false)
+            is not var (document, root, declarationNode))
         {
             return solution;
         }
 
-        var declarationNode = root.FindNode(declarationLocation.SourceSpan);
         var host = AttributeHost.Find(declarationNode);
         if (host is null)
         {
@@ -210,33 +285,34 @@ public class AddIdCodeFixProvider : CodeFixProvider
         return newDocument.Project.Solution;
     }
 
+    // Renames through the DECLARING document. Running the declaration's span against the
+    // document the diagnostic was raised in renamed whichever unrelated member happened
+    // to occupy those offsets in that file — and threw when the span ran past its end.
     static async Task<Solution> RenameAsync(
-        Document document,
+        Solution solution,
+        ProjectId projectId,
         Location declarationLocation,
         string newName,
         Cancel cancel)
     {
+        if (await FindDeclarationAsync(solution, projectId, declarationLocation, cancel).ConfigureAwait(false)
+            is not var (document, _, declarationNode))
+        {
+            return solution;
+        }
+
         var semanticModel = await document
             .GetSemanticModelAsync(cancel)
             .ConfigureAwait(false);
         if (semanticModel is null)
         {
-            return document.Project.Solution;
+            return solution;
         }
 
-        var root = await document
-            .GetSyntaxRootAsync(cancel)
-            .ConfigureAwait(false);
-        if (root is null)
-        {
-            return document.Project.Solution;
-        }
-
-        var declarationNode = root.FindNode(declarationLocation.SourceSpan);
         var symbol = semanticModel.GetDeclaredSymbol(declarationNode, cancel);
         if (symbol is null)
         {
-            return document.Project.Solution;
+            return solution;
         }
 
         return await Renamer
@@ -251,7 +327,14 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
     // Decide whether the fix output should use the generic attribute form `[Id<X>]`
     // for a specific tag value. Generic form is chosen when the value is a valid
-    // C# identifier and a type with that name is visible at the host's position.
+    // C# identifier and exactly one non-generic, non-static type with that name is
+    // visible at the host's position.
+    //
+    // All three qualifiers matter, because `[Id<X>]` has to compile: a generic type
+    // needs its type arguments (`[Id<Ledger>]` for `Ledger<TKey>` is CS0305, and a
+    // generic entity base makes that shape common), two candidates are CS0104, and a
+    // static class cannot be a type argument at all (CS0718). The string form always
+    // compiles, so anything short of certain falls back to it.
     //
     // In out-of-process analyzer hosts (Rider) the syntax tree carried by the
     // diagnostic location is re-parsed on the fix side and does not match the
@@ -297,7 +380,23 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
         var model = compilation.GetSemanticModel(tree);
         var symbols = model.LookupNamespacesAndTypes(host.SpanStart, name: value);
-        return symbols.Any(_ => _ is INamedTypeSymbol);
+        INamedTypeSymbol? only = null;
+        foreach (var symbol in symbols)
+        {
+            if (symbol is not INamedTypeSymbol named)
+            {
+                continue;
+            }
+
+            if (only is not null)
+            {
+                return false;
+            }
+
+            only = named;
+        }
+
+        return only is { Arity: 0, IsStatic: false, TypeKind: not TypeKind.Error };
     }
 
     static async Task RegisterAddFix(CodeFixContext context, Diagnostic diagnostic)
@@ -362,6 +461,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
                     $"Add {unionRendered} to {hostDescription}",
                     cancel => AddUnionAttributeAsync(
                         context.Document.Project.Solution,
+                        context.Document.Project.Id,
                         declarationLocation,
                         values,
                         useGenericUnion,
@@ -382,6 +482,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
                     $"Add {rendered} to {hostDescription}",
                     cancel => AddAttributeAsync(
                         context.Document.Project.Solution,
+                        context.Document.Project.Id,
                         declarationLocation,
                         singleValue,
                         useGeneric,
@@ -411,7 +512,8 @@ public class AddIdCodeFixProvider : CodeFixProvider
                 CodeAction.Create(
                     $"Rename {hostDescription} to '{newName}'",
                     cancel => RenameAsync(
-                        context.Document,
+                        context.Document.Project.Solution,
+                        context.Document.Project.Id,
                         declarationLocation,
                         newName,
                         cancel),
@@ -495,26 +597,18 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
     static async Task<Solution> AddAttributeAsync(
         Solution solution,
+        ProjectId projectId,
         Location declarationLocation,
         string value,
         bool preferGeneric,
         Cancel cancel)
     {
-        var document = solution.GetDocument(declarationLocation.SourceTree);
-        if (document is null)
+        if (await FindDeclarationAsync(solution, projectId, declarationLocation, cancel).ConfigureAwait(false)
+            is not var (document, root, declarationNode))
         {
             return solution;
         }
 
-        var root = await document
-            .GetSyntaxRootAsync(cancel)
-            .ConfigureAwait(false);
-        if (root is null)
-        {
-            return solution;
-        }
-
-        var declarationNode = root.FindNode(declarationLocation.SourceSpan);
         var targetNode = AttributeHost.Find(declarationNode);
         if (targetNode is null)
         {
@@ -545,26 +639,18 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
     static async Task<Solution> AddUnionAttributeAsync(
         Solution solution,
+        ProjectId projectId,
         Location declarationLocation,
         string[] values,
         bool preferGeneric,
         Cancel cancel)
     {
-        var document = solution.GetDocument(declarationLocation.SourceTree);
-        if (document is null)
+        if (await FindDeclarationAsync(solution, projectId, declarationLocation, cancel).ConfigureAwait(false)
+            is not var (document, root, declarationNode))
         {
             return solution;
         }
 
-        var root = await document
-            .GetSyntaxRootAsync(cancel)
-            .ConfigureAwait(false);
-        if (root is null)
-        {
-            return solution;
-        }
-
-        var declarationNode = root.FindNode(declarationLocation.SourceSpan);
         var targetNode = AttributeHost.Find(declarationNode);
         if (targetNode is null)
         {
@@ -637,17 +723,36 @@ public class AddIdCodeFixProvider : CodeFixProvider
         }
 
         SyntaxNode newRoot;
-        if (attribute.Parent is AttributeListSyntax { Attributes.Count: 1 } list)
+        if (attribute.Parent is AttributeListSyntax { Attributes.Count: 1 } list &&
+            list.Parent is { } owner)
         {
             // Whole list (e.g. `[Id("Order")]`) is just this attribute — drop the list so we
             // don't leave behind empty brackets on the declaration.
-            newRoot = root.RemoveNode(list, SyntaxRemoveOptions.KeepNoTrivia)!;
+            //
+            // Everything written above the attribute is leading trivia of the list, so
+            // removing it with KeepNoTrivia took the declaration's doc comment and any
+            // `//` comments with it — and cut `#if` / `#region` lines loose from their
+            // `#endif` / `#endregion`, which does not compile. Move that trivia onto the
+            // declaration instead, and keep whatever sat between the `]` and the
+            // declaration (a closing `#endif` lives there). Blank space at the front of
+            // that second part is dropped: the list's own trivia already ends with the
+            // indentation the declaration needs, so keeping it would leave behind the
+            // empty line the attribute used to occupy.
+            var stripped = owner.RemoveNode(list, SyntaxRemoveOptions.KeepNoTrivia)!;
+            var leading = list
+                .GetLeadingTrivia()
+                .AddRange(stripped.GetLeadingTrivia().SkipWhile(IsBlank));
+            newRoot = root.ReplaceNode(owner, stripped.WithLeadingTrivia(leading));
         }
         else
         {
-            newRoot = root.RemoveNode(attribute, SyntaxRemoveOptions.KeepNoTrivia)!;
+            newRoot = root.RemoveNode(attribute, SyntaxRemoveOptions.KeepExteriorTrivia)!;
         }
 
         return document.WithSyntaxRoot(newRoot);
     }
+
+    static bool IsBlank(SyntaxTrivia trivia) =>
+        trivia.IsKind(SyntaxKind.WhitespaceTrivia) ||
+        trivia.IsKind(SyntaxKind.EndOfLineTrivia);
 }

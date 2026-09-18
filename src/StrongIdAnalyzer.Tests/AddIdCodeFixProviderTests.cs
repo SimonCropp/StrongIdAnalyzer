@@ -1175,6 +1175,320 @@ public class AddIdCodeFixProviderTests
         await Assert.That(titles.Any(_ => _.Contains("[Id(\"Election\")]"))).IsFalse();
     }
 
+    // Same setup as SIA002_PrefersGenericForm_WhenDiagnosticTreeIsStale, but applying the
+    // action rather than only reading its title: the document lookup went by tree
+    // identity, so against a re-parsed tree it returned null and every attribute action
+    // handed back the solution unchanged — an entry in the lightbulb that did nothing.
+    [Test]
+    public async Task SIA002_AppliesFix_WhenDiagnosticTreeIsStale()
+    {
+        var source =
+            """
+            using System;
+
+            public class Election
+            {
+                public Guid Id { get; set; }
+
+                public static Guid Election2022 = Guid.NewGuid();
+            }
+
+            public class Holder
+            {
+                public void Use(Election e) => e.Id = Election.Election2022;
+            }
+            """;
+
+        var workspace = new AdhocWorkspace();
+        var projectInfo = ProjectInfo.Create(
+            ProjectId.CreateNewId(),
+            VersionStamp.Default,
+            name: "Tests",
+            assemblyName: "Tests",
+            language: LanguageNames.CSharp,
+            compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
+            metadataReferences: TrustedReferences.All);
+        var idAttrId = DocumentId.CreateNewId(projectInfo.Id);
+        var documentId = DocumentId.CreateNewId(projectInfo.Id);
+        var solution = workspace.CurrentSolution
+            .AddProject(projectInfo)
+            .AddDocument(idAttrId, "IdAttribute.cs", idAttributeSource, filePath: "IdAttribute.cs")
+            .AddDocument(documentId, "Test.cs", source, filePath: "Test.cs");
+
+        var compilation = (await solution.GetProject(projectInfo.Id)!.GetCompilationAsync())!;
+        var diagnostics = await compilation
+            .WithAnalyzers([new IdMismatchAnalyzer()])
+            .GetAnalyzerDiagnosticsAsync();
+        var diagnostic = diagnostics.Single(_ => _.Id == "SIA002");
+
+        var refreshedSolution = solution.WithDocumentText(
+            documentId,
+            Microsoft.CodeAnalysis.Text.SourceText.From(source));
+        var refreshedDocument = refreshedSolution.GetDocument(documentId)!;
+
+        var actions = ImmutableArray.CreateBuilder<CodeAction>();
+        var context = new CodeFixContext(
+            refreshedDocument,
+            diagnostic,
+            (action, _) => actions.Add(action),
+            Cancel.None);
+        await new AddIdCodeFixProvider().RegisterCodeFixesAsync(context);
+
+        var action = actions
+            .ToImmutable()
+            .Single(_ => _.Title.StartsWith("Add", StringComparison.Ordinal));
+        var fixedSource = await ApplyAction(action, documentId);
+
+        await Contains(fixedSource, "[Id<Election>]");
+    }
+
+    // The declaration being fixed lives in another file. Running its span against the
+    // document the diagnostic was raised in renamed whatever member happened to sit at
+    // those offsets there — silently, and leaving the diagnostic in place.
+    [Test]
+    public async Task SIA003_RenamesInDeclaringFile()
+    {
+        const string order =
+            """
+            using System;
+
+            public class Order
+            {
+                public Guid Value { get; set; }
+            }
+            """;
+
+        const string test =
+            """
+            using System;
+
+            public class Holdr
+            {
+                public string Name { get; set; }
+
+                [Id("Customer")]
+                public Guid Source { get; set; }
+
+                public void Use(Order order) => order.Value = Source;
+            }
+            """;
+
+        var workspace = new AdhocWorkspace();
+        var projectInfo = ProjectInfo.Create(
+            ProjectId.CreateNewId(),
+            VersionStamp.Default,
+            name: "Tests",
+            assemblyName: "Tests",
+            language: LanguageNames.CSharp,
+            compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
+            metadataReferences: TrustedReferences.All);
+        var idAttrId = DocumentId.CreateNewId(projectInfo.Id);
+        var orderId = DocumentId.CreateNewId(projectInfo.Id);
+        var testId = DocumentId.CreateNewId(projectInfo.Id);
+        var solution = workspace.CurrentSolution
+            .AddProject(projectInfo)
+            .AddDocument(idAttrId, "IdAttribute.cs", idAttributeSource, filePath: "IdAttribute.cs")
+            .AddDocument(orderId, "Order.cs", order, filePath: "Order.cs")
+            .AddDocument(testId, "Test.cs", test, filePath: "Test.cs");
+
+        var compilation = (await solution.GetProject(projectInfo.Id)!.GetCompilationAsync())!;
+        var diagnostics = await compilation
+            .WithAnalyzers([new IdMismatchAnalyzer()])
+            .GetAnalyzerDiagnosticsAsync();
+        var diagnostic = diagnostics.Single(_ => _.Id == "SIA003");
+
+        var document = solution.GetDocument(diagnostic.Location.SourceTree)!;
+        await Assert.That(document.Id).IsEqualTo(testId);
+
+        var actions = ImmutableArray.CreateBuilder<CodeAction>();
+        var context = new CodeFixContext(
+            document,
+            diagnostic,
+            (action, _) => actions.Add(action),
+            Cancel.None);
+        await new AddIdCodeFixProvider().RegisterCodeFixesAsync(context);
+
+        var action = actions
+            .ToImmutable()
+            .Single(_ => _.Title.StartsWith("Rename", StringComparison.Ordinal));
+        var operations = await action.GetOperationsAsync(Cancel.None);
+        var changed = operations.OfType<ApplyChangesOperation>().Single().ChangedSolution;
+
+        var newOrder = (await changed.GetDocument(orderId)!.GetTextAsync()).ToString();
+        var newTest = (await changed.GetDocument(testId)!.GetTextAsync()).ToString();
+
+        await Contains(newOrder, "public Guid CustomerId { get; set; }");
+        await Contains(newTest, "public string Name { get; set; }");
+        await Contains(newTest, "order.CustomerId = Source;");
+    }
+
+    // KeepNoTrivia took the declaration's leading trivia with the attribute list, which
+    // is where the doc comment, the `//` comments and any `#if` / `#region` live.
+    [Test]
+    public async Task SIA005_RemoveFix_KeepsComments()
+    {
+        var source =
+            """
+            using System;
+
+            public class Order
+            {
+                /// <summary>The order id.</summary>
+                // keep this note
+                [Id("Order")]
+                public Guid Id { get; set; }
+            }
+            """;
+
+        var fixedSource = await ApplyFix(source, "SIA005");
+
+        await Contains(fixedSource, "/// <summary>The order id.</summary>");
+        await Contains(fixedSource, "// keep this note");
+        await DoesNotContain(fixedSource, "[Id(\"Order\")]");
+    }
+
+    [Test]
+    public async Task SIA005_RemoveFix_KeepsDirectives()
+    {
+        var source =
+            """
+            using System;
+
+            public class Order
+            {
+                #region Identity
+            #if true
+                [Id("Order")]
+            #endif
+                public Guid Id { get; set; }
+                #endregion
+            }
+            """;
+
+        var fixedSource = await ApplyFix(source, "SIA005");
+
+        await Contains(fixedSource, "#region Identity");
+        await Contains(fixedSource, "#endregion");
+        await Contains(fixedSource, "#if true");
+        await Contains(fixedSource, "#endif");
+        await DoesNotContain(fixedSource, "[Id(\"Order\")]");
+    }
+
+    // `[Id<Ledger>]` for `Ledger<TKey>` is CS0305. The string form always compiles, so
+    // anything short of one unambiguous non-generic, non-static type falls back to it.
+    [Test]
+    public async Task SIA003_FallsBackToStringForm_WhenTypeIsGeneric()
+    {
+        var source =
+            """
+            using System;
+
+            public class Ledger<TKey>
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public Guid Slot { get; set; }
+
+                public void Use(Ledger<int> ledger) => Slot = ledger.Id;
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Add");
+
+        await Contains(fixedSource, "[Id(\"Ledger\")]");
+        await DoesNotContain(fixedSource, "[Id<Ledger>]");
+    }
+
+    [Test]
+    public async Task SIA003_FallsBackToStringForm_WhenTypeIsStatic()
+    {
+        var source =
+            """
+            using System;
+
+            public static class Ledger
+            {
+                public static Guid Key;
+            }
+
+            public class Holder
+            {
+                public Guid Slot { get; set; }
+
+                public void Use() => Slot = Source;
+
+                [Id("Ledger")]
+                public Guid Source { get; set; }
+            }
+            """;
+
+        var fixedSource = await ApplyFixByTitlePrefix(source, "SIA003", "Add");
+
+        await Contains(fixedSource, "[Id(\"Ledger\")]");
+        await DoesNotContain(fixedSource, "[Id<Ledger>]");
+    }
+
+    // The rename only helps if the naming convention reads the new name back as the same
+    // tag. For a lower-case tag it never does — the convention upper-cases the first
+    // character — so `customerId` would leave an SIA001 where there was an SIA003.
+    [Test]
+    public async Task SIA003_LowerCaseTag_OffersNoRename()
+    {
+        var source =
+            """
+            using System;
+
+            public class Target
+            {
+                public void Take(Guid value) { }
+            }
+
+            public class Holder
+            {
+                [Id("customer")]
+                public Guid Source { get; set; }
+
+                public void Use(Target target) => target.Take(Source);
+            }
+            """;
+
+        var titles = (await GetCodeActions(source, "SIA003", options: null))
+            .Select(_ => _.Title)
+            .ToArray();
+
+        await Assert.That(titles).Contains("Add [Id(\"customer\")] to parameter 'value'");
+        await Assert.That(titles.Any(_ => _.StartsWith("Rename", StringComparison.Ordinal))).IsFalse();
+    }
+
+    // A tuple element's declaration is inside a tuple TYPE, so every host lookup used to
+    // climb onto the enclosing parameter: the attribute described the whole tuple (and
+    // the diagnostic survived) while the rename rewrote the element.
+    [Test]
+    public async Task SIA001_TupleElementSource_OffersOnlyTargetSideFixes()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                public void Use((Guid CustomerId, Guid Other) pair) => Ship(pair.CustomerId);
+
+                static void Ship([Id("Order")] Guid value) { }
+            }
+            """;
+
+        var titles = (await GetCodeActions(source, "SIA001", options: null))
+            .Select(_ => _.Title)
+            .ToArray();
+
+        await Assert.That(titles).IsEquivalentTo(
+            ["Change attribute on parameter 'value' to [Id<Customer>]"]);
+    }
+
     [Test]
     public async Task SIA002_FallsBackToStringForm_WhenTagDoesNotMatchVisibleType()
     {

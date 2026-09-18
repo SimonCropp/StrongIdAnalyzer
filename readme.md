@@ -136,6 +136,11 @@ public static class FixedUsage
 
 The `IdAttribute` is source-generated into the consuming compilation — no runtime dependency on any attributes assembly. Install the analyzer package and start tagging.
 
+The generated declarations are written in syntax any C# compiler accepts, so a project on an older `LangVersion` — including the C# 7.3 that `netstandard2.0` and .NET Framework target frameworks default to — compiles as-is. Two conveniences are language-version gated:
+
+ * **C# 10+** gets a `global using StrongIdAnalyzer;`. Below that, add `using StrongIdAnalyzer;` to the files that tag declarations.
+ * **C# 11+** gets the generic attribute forms, `[Id<Customer>]` and `[UnionId<Customer, Order>]`. The string forms work everywhere.
+
 
 ## Alternatives, and why this one
 
@@ -839,7 +844,17 @@ var fresh = Guid.NewGuid();
 Consume(fresh);
 ```
 
-Reassignments aren't tracked — only the declarator's initializer is inspected. `var x = tagged; x = other;` still reports `x` as the initializer's id on every read.
+The initializer only speaks for the local while nothing else writes to it. A local that is later assigned to, incremented, or passed as a `ref` / `out` argument is Unknown on every read — including the reads before the write. Tracking which reads come after which write would mean flow analysis; refusing to guess is the same policy the analyzer applies to every other expression it cannot resolve exactly.
+
+```cs
+[Id("Customer")] Guid source = default;
+
+var copy = source;
+copy = other;
+
+// unknown — `copy` is written after its declaration
+Consume(copy);
+```
 
 ### Method invocations
 
@@ -965,9 +980,14 @@ Ids flow through three categories of call, classified by signature rather than b
    * Identity lambda `x => x` keeps the receiver's element id.
    * Method group `Select(Converter)` reads `[return: Id(...)]` on the target method.
    * Expression-bodied lambda with a tagged body (`Select(x => GetTagged(x))`) adopts the body's resolved id.
+   * `SelectMany(x => x.TaggedCollection)` takes the id of the **inner collection's** elements. The three-argument overload takes it from the result selector instead, which is the one that decides what the call produces.
    * Any other selector shape drops the id.
 
-Lambda parameters in those calls inherit the receiver's element id without an attribute, which is the mechanism that makes `IQueryable` predicates analyzable.
+A method's own `[return: Id(...)]` always wins over the shape rules above — a helper that maps one domain to another says so on its signature.
+
+The element-preserving shape rule extends to third-party extensions with the same signature (MoreLINQ, custom paging helpers), but only when the element type is one of the method's **own type parameters** — `static IEnumerable<T> Paged<T>(this IEnumerable<T> source, int size)`. A method that names a concrete element type on both sides, `IEnumerable<Guid> → IEnumerable<Guid>`, matches the shape by coincidence and is free to change domain, so it is not assumed to preserve anything.
+
+Lambda parameters in those calls inherit the receiver's element id without an attribute, which is the mechanism that makes `IQueryable` predicates analyzable. Instance methods that take a lambda over their own elements, such as `List<T>.ForEach`, bind the same way as the extension forms. A lambda parameter is never itself a fix site: C# only allows an attribute there inside a parenthesized parameter list, and not at all inside an expression tree, so the id belongs on the collection.
 
 
 ### `foreach`

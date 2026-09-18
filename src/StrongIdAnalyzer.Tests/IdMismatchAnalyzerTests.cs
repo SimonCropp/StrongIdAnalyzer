@@ -5418,10 +5418,11 @@ public class IdMismatchAnalyzerTests
     [Test]
     public async Task IdTag_NoAttribute_ProducesNoTag()
     {
-        // Without `[IdTag]`, a plain generic type parameter must NOT leak a tag.
-        // The `.Select(_ => new Holder { Target = _ })` shape forces the lambda param
-        // resolution path: receiver Guids is untagged, so `_` falls back to NotPresent,
-        // and the assignment to `[Id<Operation>] Target` fires SIA002.
+        // Without `[IdTag]`, a plain generic type parameter must NOT leak a tag. This is
+        // IdTag_Mismatch_ReportsSIA001 with the attribute taken off: that one fires
+        // SIA001 because `WellKnownId<Operation>` tags the element "Operation" and the
+        // target is `[Id<Customer>]`. With no `[IdTag]` the element carries nothing, so
+        // the same code has to be silent — a leak would show up as that same SIA001.
         var source =
             """
             using System;
@@ -5429,6 +5430,7 @@ public class IdMismatchAnalyzerTests
             using System.Linq;
 
             public class Operation;
+            public class Customer;
 
             public static class WellKnownId<T>
             {
@@ -5437,19 +5439,17 @@ public class IdMismatchAnalyzerTests
 
             public class Holder
             {
-                [Id<Operation>]
+                [Id<Customer>]
                 public Guid Target { get; set; }
 
-                public void Use() =>
-                    WellKnownId<Operation>.Guids
-                        .Select(_ => new Holder { Target = _ });
+                public void Copy() =>
+                    Target = WellKnownId<Operation>.Guids.First();
             }
             """;
 
         var diagnostics = await GetDiagnostics(source);
 
-        await Assert.That(diagnostics.Length).IsEqualTo(1);
-        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA002");
+        await Assert.That(diagnostics).IsEmpty();
     }
 
     [Test]
@@ -5976,6 +5976,883 @@ public class IdMismatchAnalyzerTests
 
         await Assert.That(diagnostics.Length).IsEqualTo(1);
         await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
+    // A local whose initializer reaches itself is a compile error, but an analyzer sees
+    // half-typed code all day. Before the cycle guard this recursed until the stack ran
+    // out, which takes csc / VBCSCompiler (or the IDE's analyzer process) down with it —
+    // so "returns at all" is the whole assertion.
+    [Test]
+    public async Task SelfReferentialLocal_DoesNotRecurse()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                public void Use()
+                {
+                    Guid a = a;
+                    Consume(a);
+                }
+
+                static void Consume([Id("Order")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    [Test]
+    public async Task MutuallyReferentialLocals_DoNotRecurse()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                public void Use()
+                {
+                    Guid a = b;
+                    Guid b = a;
+                    Consume(a);
+                }
+
+                static void Consume([Id("Order")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    // The initializer describes the local only while nothing else writes to it.
+    [Test]
+    public async Task ReassignedLocal_DoesNotKeepInitializerTag()
+    {
+        var source =
+            """
+            using System;
+
+            public class Order
+            {
+                [Id("Customer")]
+                public Guid Key { get; set; }
+            }
+
+            public class Product
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Use(Order order, Product product)
+                {
+                    var id = order.Key;
+                    id = product.Id;
+                    UseProduct(id);
+                }
+
+                static void UseProduct([Id("Product")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    [Test]
+    public async Task UnwrittenLocal_StillCarriesInitializerTag()
+    {
+        var source =
+            """
+            using System;
+
+            public class Order
+            {
+                [Id("Customer")]
+                public Guid Key { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Use(Order order)
+                {
+                    var id = order.Key;
+                    UseProduct(id);
+                }
+
+                static void UseProduct([Id("Product")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
+    [Test]
+    public async Task LocalPassedAsOutArgument_DoesNotKeepInitializerTag()
+    {
+        var source =
+            """
+            using System;
+
+            public class Order
+            {
+                [Id("Customer")]
+                public Guid Key { get; set; }
+            }
+
+            public class Holder
+            {
+                public void Use(Order order)
+                {
+                    var id = order.Key;
+                    Replace(out id);
+                    UseProduct(id);
+                }
+
+                static void Replace(out Guid slot) => slot = Guid.NewGuid();
+
+                static void UseProduct([Id("Product")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    // `[UnionId(null)]` binds null to the params array itself. Reading Values.Length on
+    // that constant throws, which surfaced as AD0001 rather than a diagnostic.
+    [Test]
+    public async Task SIA007_NullUnionArray_FiresErrorWithoutThrowing()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [UnionId(null)]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA007"]);
+    }
+
+    [Test]
+    public async Task SIA007_NullTag_FiresError()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id(null)]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA007"]);
+    }
+
+    // A null option inside the array reads the same as an empty one — SIA007 for the
+    // empty tag, SIA006 because what remains is a single option.
+    [Test]
+    public async Task SIA007_NullUnionOption_FiresError()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [UnionId(null, "Order")]
+                public Guid Value { get; set; }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id).OrderBy(_ => _))
+            .IsEquivalentTo(["SIA006", "SIA007"]);
+    }
+
+    [Test]
+    public async Task SIA006_ReturnAttribute_Fires()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [return: UnionId("Order")]
+                public Guid Get() => Guid.Empty;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA006"]);
+        await Assert.That(diagnostics[0].GetMessage()).Contains("return value of 'Holder.Get'");
+    }
+
+    // SIA004 is an error, and the field rule reads `_id` as `Id`. Counting private
+    // members would fail the build for any two same-named classes that each keep an id
+    // field — which is most of them.
+    [Test]
+    public async Task SIA004_PrivateFields_DoNotCollide()
+    {
+        var source =
+            """
+            using System;
+
+            namespace Billing
+            {
+                public class Handler
+                {
+                    private readonly Guid _id;
+
+                    public Handler(Guid id) => _id = id;
+                }
+            }
+
+            namespace Shipping
+            {
+                public class Handler
+                {
+                    private readonly Guid _id;
+
+                    public Handler(Guid id) => _id = id;
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    [Test]
+    public async Task SIA004_PublicProperties_StillCollide()
+    {
+        var source =
+            """
+            using System;
+
+            namespace Billing
+            {
+                public class Handler
+                {
+                    public Guid Id { get; set; }
+                }
+            }
+
+            namespace Shipping
+            {
+                public class Handler
+                {
+                    public Guid Id { get; set; }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA004", "SIA004"]);
+    }
+
+    // Removing this attribute would put `A.Customer.Id` back into the ambiguity map
+    // alongside `B.Customer.Id` and produce two SIA004 errors. It is load-bearing.
+    [Test]
+    public async Task SIA005_NotReportedWhenRemovalWouldCollide()
+    {
+        var source =
+            """
+            using System;
+
+            namespace A
+            {
+                public class Customer
+                {
+                    [Id("Customer")]
+                    public Guid Id { get; set; }
+                }
+            }
+
+            namespace B
+            {
+                public class Customer
+                {
+                    public Guid Id { get; set; }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    // Removing the override's attribute would inherit the base's "Client" instead, so
+    // the attribute is not redundant even though the name infers the same tag.
+    [Test]
+    public async Task SIA005_NotReportedWhenBaseDeclaresDifferentTag()
+    {
+        var source =
+            """
+            using System;
+
+            public abstract class BaseHandler
+            {
+                public abstract void Handle([Id("Client")] Guid customerId);
+            }
+
+            public class Handler : BaseHandler
+            {
+                public override void Handle([Id("Customer")] Guid customerId) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    [Test]
+    public async Task SIA005_ReportedWhenBaseDeclaresSameTag()
+    {
+        var source =
+            """
+            using System;
+
+            public abstract class BaseHandler
+            {
+                public abstract void Handle([Id("Customer")] Guid customerId);
+            }
+
+            public class Handler : BaseHandler
+            {
+                public override void Handle([Id("Customer")] Guid customerId) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA005", "SIA005"]);
+    }
+
+    // `Box<T>.Content` holds `T`; the fix site is the declaration, where the tag would
+    // bind to every other closing of T as well.
+    [Test]
+    public async Task SIA003_GenericMemberWithConcreteArgument_NotReported()
+    {
+        var source =
+            """
+            using System;
+
+            public class Box<T>
+            {
+                public T Content { get; set; }
+
+                public T Slot;
+
+                public void Put(T value) { }
+            }
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public Guid Key { get; set; }
+
+                public void Use(Box<Guid> box)
+                {
+                    var created = new Box<Guid> { Content = Key };
+                    box.Slot = Key;
+                    box.Put(Key);
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    // A method that declares what it returns outranks the element-preserving shape rule.
+    [Test]
+    public async Task ReturnAttribute_BeatsElementPreservingShape()
+    {
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public static class Lookups
+            {
+                [return: Id("Order")]
+                public static IEnumerable<Guid> OrdersOf([Id("Customer")] this IEnumerable<Guid> customerIds) =>
+                    customerIds;
+            }
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public List<Guid> CustomerIds { get; set; }
+
+                public void Use()
+                {
+                    foreach (var orderId in CustomerIds.OrdersOf())
+                    {
+                        Ship(orderId);
+                    }
+
+                    Ship(CustomerIds.OrdersOf().First());
+                }
+
+                static void Ship([Id("Order")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    // The shape rule stays available to genuinely generic helpers — that is what it is
+    // for. A concrete `IEnumerable<Guid>` in and out is free to change domain, so it
+    // must not inherit the receiver's tag.
+    [Test]
+    public async Task GenericElementPreservingExtension_StillFlowsTags()
+    {
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public static class Lookups
+            {
+                public static IEnumerable<T> Paged<T>(this IEnumerable<T> source, int size) => source;
+            }
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public List<Guid> CustomerIds { get; set; }
+
+                public void Use() => Ship(CustomerIds.Paged(10).First());
+
+                static void Ship([Id("Order")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
+    // A call site hands the resolver the constructed `Get<int>`, while the interface
+    // implementation lookup answers with the definition `Get<T>`.
+    [Test]
+    public async Task GenericInterfaceMethod_InheritsReturnTag()
+    {
+        var source =
+            """
+            using System;
+
+            public interface IRepo
+            {
+                [return: Id("Order")]
+                Guid Get<T>();
+
+                void Put<T>([Id("Order")] Guid key);
+            }
+
+            public class Repo : IRepo
+            {
+                public Guid Get<T>() => Guid.Empty;
+
+                public void Put<T>(Guid key) { }
+            }
+
+            public class Holder
+            {
+                [Id("Product")]
+                public Guid Key { get; set; }
+
+                public void Use(Repo repo)
+                {
+                    UseProduct(repo.Get<int>());
+                    repo.Put<int>(Key);
+                }
+
+                static void UseProduct([Id("Product")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001", "SIA001"]);
+    }
+
+    // A lambda parameter cannot carry the attribute the fix would write — the useful
+    // annotation is on the collection.
+    [Test]
+    public async Task SIA002_NotReportedOnLambdaParameter()
+    {
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Order
+            {
+                public Guid Id { get; set; }
+            }
+
+            public class Holder
+            {
+                public List<Guid> Ids { get; set; }
+
+                public bool Use(Order order) => Ids.Any(_ => _ == order.Id);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    // `List<T>.ForEach` is an instance method, so it was not bound to its receiver and
+    // the element tag never reached the lambda parameter.
+    [Test]
+    public async Task InstanceEnumerableMethod_BindsLambdaParameterToReceiver()
+    {
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public List<Guid> CustomerIds { get; set; }
+
+                public void Use() => CustomerIds.ForEach(_ => Ship(_));
+
+                static void Ship([Id("Order")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
+    // The lambda that DECLARES the parameter decides the receiver, not the innermost one
+    // around the reference. Only shows up when both collections share an element type.
+    [Test]
+    public async Task NestedLambdas_BindEachParameterToItsOwnReceiver()
+    {
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public List<Guid> CustomerIds { get; set; }
+
+                [Id("Order")]
+                public List<Guid> OrderIds { get; set; }
+
+                public bool Matching() =>
+                    CustomerIds.Any(customerId => OrderIds.Any(orderId => IsCustomer(customerId)));
+
+                static bool IsCustomer([Id("Customer")] Guid value) => true;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    [Test]
+    public async Task NestedLambdas_ReportComparisonAcrossCollections()
+    {
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public List<Guid> CustomerIds { get; set; }
+
+                [Id("Order")]
+                public List<Guid> OrderIds { get; set; }
+
+                public bool Crossed() =>
+                    CustomerIds.Any(customerId => OrderIds.Any(orderId => orderId == customerId));
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
+    // A tuple element has no declaration a fix can edit — every host lookup climbs out
+    // of the tuple type onto the enclosing parameter.
+    [Test]
+    public async Task TupleElementSource_ReportsWithoutFixSite()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                public void Use((Guid CustomerId, Guid Other) pair) => Ship(pair.CustomerId);
+
+                static void Ship([Id("Order")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+
+        // Slot 0 is the target and stays fixable; slot 1 is the tuple element and is
+        // recorded as the no-location sentinel.
+        var additional = diagnostics[0].AdditionalLocations;
+        await Assert.That(additional.Count).IsEqualTo(2);
+        await Assert.That(additional[0].IsInSource).IsTrue();
+        await Assert.That(additional[1].IsInSource).IsFalse();
+    }
+
+    [Test]
+    public async Task TupleElementTarget_NotReported()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public Guid Key { get; set; }
+
+                public void Use((Guid First, Guid Other) pair) => pair.First = Key;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    // `_id = id` is the same statement as `Id = id`; the field's underscore prefix is
+    // punctuation, not part of the name being matched.
+    [Test]
+    public async Task SIA002_ConstructorAssigningBackingField_NotReported()
+    {
+        var source =
+            """
+            using System;
+
+            public class Tenant
+            {
+                private readonly string _id;
+
+                public Tenant(string id) => _id = id;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    [Test]
+    public async Task SIA002_ConstructorAssigningUnrelatedField_StillReported()
+    {
+        var source =
+            """
+            using System;
+
+            public class Tenant
+            {
+                private readonly string _customerId;
+
+                public Tenant(string orderId) => _customerId = orderId;
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
+    // The readme documents casts as one of the compound expressions that collapse to
+    // "unknown" — that is the escape hatch, and peeling them made it a no-op.
+    [Test]
+    public async Task ExplicitCast_IsUnknown()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("Order")]
+                public Guid Key { get; set; }
+
+                [Id("Customer")]
+                public long LongKey { get; set; }
+
+                public void Use()
+                {
+                    Consume((Guid)(object)Key);
+                    UseInt((int)LongKey);
+                }
+
+                static void Consume([Id("Customer")] Guid value) { }
+
+                static void UseInt([Id("Order")] int value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    [Test]
+    public async Task ImplicitConversion_StillFlows()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                [Id("Customer")]
+                public int CustomerKey { get; set; }
+
+                public void Use() => Take(CustomerKey);
+
+                static void Take([Id("Order")] long value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
+    // SelectMany's selector body IS the inner collection, so its element tags are the
+    // ones the call produces.
+    [Test]
+    public async Task SelectMany_PassesElementTagsThrough()
+    {
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Customer
+            {
+                [Id("Order")]
+                public List<Guid> OrderIds { get; set; }
+            }
+
+            public class Holder
+            {
+                public List<Customer> Customers { get; set; }
+
+                public void Use()
+                {
+                    foreach (var id in Customers.SelectMany(_ => _.OrderIds))
+                    {
+                        UseCustomer(id);
+                    }
+                }
+
+                static void UseCustomer([Id("Customer")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
+    // The three-argument overload's element type comes from the RESULT selector, which
+    // sits after the collection selector.
+    [Test]
+    public async Task SelectMany_WithResultSelector_UsesResultSelector()
+    {
+        var source =
+            """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public class Customer
+            {
+                [Id("Customer")]
+                public Guid Key { get; set; }
+
+                [Id("Order")]
+                public List<Guid> OrderIds { get; set; }
+            }
+
+            public class Holder
+            {
+                public List<Customer> Customers { get; set; }
+
+                public void Use()
+                {
+                    foreach (var id in Customers.SelectMany(_ => _.OrderIds, (customer, orderId) => customer.Key))
+                    {
+                        UseOrder(id);
+                    }
+                }
+
+                static void UseOrder([Id("Order")] Guid value) { }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
     }
 
     static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(

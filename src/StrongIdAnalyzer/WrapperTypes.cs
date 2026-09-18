@@ -36,8 +36,24 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
 
     // Null entries mean "not a wrapper". Recognition recurses (type arguments, the value
     // member's type), so the TryGetValue / compute / TryAdd shape is used rather than a
-    // GetOrAdd closure — re-entrancy on the same dictionary is safe that way.
+    // GetOrAdd closure — re-entrancy on the same dictionary is safe that way. Recursion
+    // that comes back to a type still being recognised is handled by the stack below,
+    // and only settled results are ever written here.
     readonly ConcurrentDictionary<ITypeSymbol, WrapperInfo?> cache = new(SymbolEqualityComparer.Default);
+
+    // Types whose recognition is in progress on this thread, innermost last, plus the
+    // ones a cycle has already condemned. Recognition recurses through the value
+    // member's type and through type arguments, so `record struct UserId(Id<UserId>
+    // Value)` reaches itself and would recurse until the stack runs out. Re-entry marks
+    // every type from the re-entered one up to the top of the stack — exactly the cycle
+    // — as "not a wrapper", which is the same verdict whichever member of the cycle was
+    // asked about first. Thread-static so a provisional answer never escapes to another
+    // thread or into the shared cache.
+    [ThreadStatic]
+    static List<INamedTypeSymbol>? recognizing;
+
+    [ThreadStatic]
+    static HashSet<ITypeSymbol>? cyclic;
 
     public bool TryGet(ITypeSymbol? type, out WrapperInfo info)
     {
@@ -49,7 +65,34 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
 
         if (!cache.TryGetValue(named, out var cached))
         {
-            cached = Recognize(named);
+            var stack = recognizing ??= [];
+            var depth = IndexOnStack(stack, named);
+            if (depth >= 0)
+            {
+                var cycle = cyclic ??= new(SymbolEqualityComparer.Default);
+                for (var index = depth; index < stack.Count; index++)
+                {
+                    cycle.Add(stack[index]);
+                }
+
+                return false;
+            }
+
+            stack.Add(named);
+            try
+            {
+                cached = Recognize(named);
+            }
+            finally
+            {
+                stack.RemoveAt(stack.Count - 1);
+            }
+
+            if (cyclic?.Remove(named) == true)
+            {
+                cached = null;
+            }
+
             cache.TryAdd(named, cached);
         }
 
@@ -60,6 +103,19 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
 
         info = cached;
         return true;
+    }
+
+    static int IndexOnStack(List<INamedTypeSymbol> stack, INamedTypeSymbol type)
+    {
+        for (var index = 0; index < stack.Count; index++)
+        {
+            if (SymbolEqualityComparer.Default.Equals(stack[index], type))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     // `UserId?` is still a UserId as far as identity goes. Nullable itself is never a

@@ -74,6 +74,12 @@ sealed class Suppression(ImmutableArray<NamePattern> namespaces, ImmutableArray<
 
             var isWildcard = trimmed[^1] == '*';
             var prefix = isWildcard ? trimmed[..^1] : trimmed;
+
+            // `Ext.*` is the spelling everyone reaches for, and splitting it on `.` left
+            // a trailing empty segment that no namespace chain can ever match — so the
+            // list silently covered nothing. Read it as `Ext*`.
+            prefix = prefix.TrimEnd('.');
+
             ImmutableArray<string> segments = prefix.Length == 0
                 ? []
                 : [..prefix.Split('.')];

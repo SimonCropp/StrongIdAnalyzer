@@ -1,16 +1,23 @@
 static class Extensions
 {
-    // Peels off conversions and `await` so the resolver sees the value-producing
+    // Peels off implicit conversions and `await` so the resolver sees the value-producing
     // operation underneath. An `await task` result carries the tag of the method that
     // produced the task, so unwrapping lets `[return: Id]` on an async method flow
     // through the await.
+    //
+    // An explicit cast is deliberately NOT peeled. The readme documents casts as one of
+    // the compound expressions that collapse to "unknown" — `Consume((Guid)(object)a)` is
+    // its worked example — and that is the escape hatch a user reaches for to say "I know
+    // what I am doing here". Peeling every conversion made the cast a no-op and reported
+    // the diagnostic anyway. Implicit conversions carry no such intent: they are inserted
+    // by the compiler at boundaries the user never wrote.
     public static IOperation Unwrap(this IOperation operation)
     {
         while (true)
         {
             switch (operation)
             {
-                case IConversionOperation conversion:
+                case IConversionOperation { Conversion.IsImplicit: true } conversion:
                     operation = conversion.Operand;
                     continue;
                 case IAwaitOperation await:
