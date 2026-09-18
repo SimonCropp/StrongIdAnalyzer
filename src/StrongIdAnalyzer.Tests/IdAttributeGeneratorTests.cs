@@ -122,18 +122,92 @@ public class IdAttributeGeneratorTests
             .IsTrue();
     }
 
-    static GeneratorDriverRunResult RunGenerator(string source)
+    // The generated source is parsed at the CONSUMER's language version. A netstandard2.0
+    // or .NET Framework project defaults to C# 7.3, where a file-scoped namespace, a
+    // `global using` and a primary constructor are all errors — so referencing the
+    // analyzer at all stopped such a project from compiling. The declarations are written
+    // in syntax every compiler accepts; only the generic attribute forms (C# 11) and the
+    // `global using` (C# 10) are gated.
+    [Test]
+    [Arguments(LanguageVersion.CSharp7_3)]
+    [Arguments(LanguageVersion.CSharp8)]
+    [Arguments(LanguageVersion.CSharp9)]
+    [Arguments(LanguageVersion.CSharp10)]
+    [Arguments(LanguageVersion.CSharp11)]
+    [Arguments(LanguageVersion.CSharp12)]
+    public async Task GeneratedAttributes_CompileOnEveryLanguageVersion(LanguageVersion version)
     {
-        var compilation = BuildCompilation(source);
+        var source = version >= LanguageVersion.CSharp10
+            ? "public class Dummy { }"
+            : """
+              using StrongIdAnalyzer;
 
-        var driver = CSharpGeneratorDriver.Create(new IdAttributeGenerator());
+              public class Dummy { }
+              """;
+
+        var compilation = BuildCompilation(source, version);
+        var parseOptions = new CSharpParseOptions(version);
+        var driver = CSharpGeneratorDriver.Create(
+            [new IdAttributeGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var updated, out var generatorDiagnostics);
+
+        await Assert.That(generatorDiagnostics.Length).IsEqualTo(0);
+
+        var errors = updated.GetDiagnostics()
+            .Where(_ => _.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        await Assert.That(string.Join("\n", errors.Select(_ => _.ToString()))).IsEqualTo("");
+    }
+
+    [Test]
+    public async Task GlobalUsing_OnlyEmittedFromCSharp10()
+    {
+        var below = RunGenerator("public class Dummy { }", LanguageVersion.CSharp9);
+        await Assert.That(below.GeneratedTrees.Any(_ => _.FilePath.EndsWith("IdAttributeGlobalUsings.g.cs")))
+            .IsFalse();
+
+        var above = RunGenerator("public class Dummy { }", LanguageVersion.CSharp10);
+        await Assert.That(above.GeneratedTrees.Any(_ => _.FilePath.EndsWith("IdAttributeGlobalUsings.g.cs")))
+            .IsTrue();
+    }
+
+    [Test]
+    public async Task GenericForms_OnlyEmittedFromCSharp11()
+    {
+        var below = RunGenerator("public class Dummy { }", LanguageVersion.CSharp10);
+        var belowText = below.GeneratedTrees
+            .Single(_ => _.FilePath.EndsWith("IdAttribute.g.cs"))
+            .ToString();
+        await Assert.That(belowText.Contains("class IdAttribute<T>")).IsFalse();
+
+        var above = RunGenerator("public class Dummy { }", LanguageVersion.CSharp11);
+        var aboveText = above.GeneratedTrees
+            .Single(_ => _.FilePath.EndsWith("IdAttribute.g.cs"))
+            .ToString();
+        await Assert.That(aboveText.Contains("class IdAttribute<T>")).IsTrue();
+    }
+
+    static GeneratorDriverRunResult RunGenerator(string source) =>
+        RunGenerator(source, LanguageVersion.Latest);
+
+    static GeneratorDriverRunResult RunGenerator(string source, LanguageVersion version)
+    {
+        var compilation = BuildCompilation(source, version);
+
+        var driver = CSharpGeneratorDriver.Create(
+            [new IdAttributeGenerator().AsSourceGenerator()],
+            parseOptions: new CSharpParseOptions(version));
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
     static CSharpCompilation BuildCompilation(string source) =>
+        BuildCompilation(source, LanguageVersion.Latest);
+
+    static CSharpCompilation BuildCompilation(string source, LanguageVersion version) =>
         CSharpCompilation.Create(
             "Tests",
-            [CSharpSyntaxTree.ParseText(source)],
+            [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(version))],
             TrustedReferences.All,
             new(OutputKind.DynamicallyLinkedLibrary));
 }

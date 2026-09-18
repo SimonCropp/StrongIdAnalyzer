@@ -67,7 +67,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 string,
                 ConcurrentBag<ISymbol>>(StringComparer.Ordinal);
             var redundantCandidates = new ConcurrentBag<
-                (ISymbol Symbol, string Value, SyntaxReference Reference)>();
+                (ISymbol Symbol, string Value, SyntaxReference Reference, bool JoinsAmbiguity)>();
 
             start.RegisterSymbolAction(
                 _ => CollectConvention(_, config, ambiguity, redundantCandidates),
@@ -79,7 +79,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 AnalyzeSingletonUnion,
                 SymbolKind.Property,
                 SymbolKind.Field,
-                SymbolKind.Parameter);
+                SymbolKind.Parameter,
+                SymbolKind.Method);
 
             start.RegisterSymbolAction(
                 AnalyzeEmptyTag,
@@ -123,9 +124,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         {
             // Generic `[Id<T>]` can't have an empty tag — the type argument binds
             // at compile time. Only the string-arg constructor needs checking.
+            // `[Id(null)]` identifies a domain no better than `[Id("")]` does, so it
+            // reports the same way rather than slipping through untagged.
             if (attribute.ConstructorArguments.Length > 0 &&
-                attribute.ConstructorArguments[0].Value is string s &&
-                string.IsNullOrWhiteSpace(s))
+                IsEmptyTag(attribute.ConstructorArguments[0]))
             {
                 ReportEmptyTag(context, attribute, "Id");
             }
@@ -149,7 +151,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (first.Values.Length == 0)
+        // `[UnionId(null)]` passes null as the array rather than as one option: the
+        // constant is null and its Values is uninitialised, so it has to be handled
+        // before anything reads `.Length`.
+        if (first.IsNull ||
+            first.Values.Length == 0)
         {
             ReportEmptyTag(context, attribute, "UnionId");
             return;
@@ -157,14 +163,18 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         foreach (var element in first.Values)
         {
-            if (element.Value is string option &&
-                string.IsNullOrWhiteSpace(option))
+            if (IsEmptyTag(element))
             {
                 ReportEmptyTag(context, attribute, "UnionId");
                 return;
             }
         }
     }
+
+    // A tag argument that names no domain: `null`, `""`, or whitespace.
+    static bool IsEmptyTag(TypedConstant constant) =>
+        constant.IsNull ||
+        (constant.Value is string tag && string.IsNullOrWhiteSpace(tag));
 
     static void ReportEmptyTag(SymbolAnalysisContext context, AttributeData attribute, string attributeName)
     {
@@ -179,7 +189,20 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
     static void AnalyzeSingletonUnion(SymbolAnalysisContext context)
     {
-        foreach (var attribute in context.Symbol.GetAttributes())
+        CheckSingletonUnion(context, context.Symbol.GetAttributes());
+
+        // `[return: UnionId("Order")]` is the same redundancy as the one on a property,
+        // and carries the same fix — it just lives on a different attribute list, the
+        // one AnalyzeEmptyTag already reads.
+        if (context.Symbol is IMethodSymbol method)
+        {
+            CheckSingletonUnion(context, method.GetReturnTypeAttributes());
+        }
+    }
+
+    static void CheckSingletonUnion(SymbolAnalysisContext context, ImmutableArray<AttributeData> attributes)
+    {
+        foreach (var attribute in attributes)
         {
             if (!attribute.IsNamed(IdAttributeExtensions.UnionIdMetadataName))
             {
@@ -211,7 +234,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         SymbolAnalysisContext context,
         Config config,
         ConcurrentDictionary<string, ConcurrentBag<ISymbol>> ambiguity,
-        ConcurrentBag<(ISymbol Symbol, string Value, SyntaxReference Reference)> redundantCandidates)
+        ConcurrentBag<(ISymbol Symbol, string Value, SyntaxReference Reference, bool JoinsAmbiguity)> redundantCandidates)
     {
         var symbol = context.Symbol;
         if (symbol.DeclaringSyntaxReferences.IsEmpty)
@@ -246,10 +269,20 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var explicitAttribute = symbol.GetExplicitIdAttribute();
         var hasAnyIdFamily = symbol.HasAnyIdFamilyAttribute();
 
-        // Only the containing-type-named rule (`public Guid Id`) feeds ambiguity tracking.
+        // Only the containing-type-named rule (`public Guid Id`) feeds ambiguity tracking,
+        // and only for members on the assembly's API surface. SIA004 is an error about two
+        // domains laying claim to one tag where values can actually cross between them; a
+        // `private readonly Guid _id` is an implementation detail, and since the field rule
+        // reads `_id` as `Id`, counting those would fail the build for any two same-named
+        // classes in different namespaces — `Billing.Handler` and `Shipping.Handler` with a
+        // private id field each. They keep their naming-rule tag; they just don't collide.
+        var joinsAmbiguity = fromContainingType &&
+                             !hasWrapperTag &&
+                             symbol.DeclaredAccessibility == Accessibility.Public;
+
         // Any explicit Id-family attribute ([Id] or [UnionId]) opts out — it resolves the
         // ambiguity that SIA004 would otherwise complain about.
-        if (fromContainingType && !hasAnyIdFamily && !hasWrapperTag)
+        if (joinsAmbiguity && !hasAnyIdFamily)
         {
             ambiguity
                 .GetOrAdd(conventionName, _ => [])
@@ -267,26 +300,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        // SIA005 means "deleting this attribute leaves the same tag behind", so the
-        // comparison has to run the same precedence the resolver does — opt-in suffix
-        // inference first, then the whole-name rule. Matching against the index directly
-        // would compare the attribute with a candidate it is itself supplying, so the
-        // probe set drops the tag unless something else vouches for it.
-        var effective = conventionName;
-        if (hasWrapperTag)
-        {
-            effective = wrapperTag;
-        }
-        else if (config.InferSuffixTags &&
-                 SuffixInference.TryMatch(
-                     symbol.ConventionName(),
-                     config.KnownTags.Value.Without(explicitValue),
-                     out var suffixTag))
-        {
-            effective = suffixTag;
-        }
-
-        if (!string.Equals(explicitValue, effective, StringComparison.Ordinal))
+        if (TagWithoutAttribute(symbol, config, explicitValue, conventionName, hasWrapperTag, wrapperTag) is not { } effective ||
+            !string.Equals(explicitValue, effective, StringComparison.Ordinal))
         {
             return;
         }
@@ -297,13 +312,93 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        redundantCandidates.Add((symbol, effective, syntaxRef));
+        redundantCandidates.Add((symbol, effective, syntaxRef, joinsAmbiguity));
     }
+
+    // The single tag `symbol` would resolve to with its explicit attribute deleted, or
+    // null when that would not be one definite tag. SIA005 means "deleting this attribute
+    // leaves the same tag behind", so this has to run GetIdWithInheritance's precedence
+    // exactly: an external mapping, then an attribute inherited from a base or interface
+    // member, then the record primary-constructor parameter, then the wrapper type, then
+    // opt-in suffix inference, then the whole-name rule. Comparing against the naming rule
+    // alone called an override's `[Id("Customer")]` redundant while the base declared
+    // `[Id("Client")]`, and removing it silently retagged the parameter.
+    //
+    // The suffix probe runs against the index minus this attribute's own tag: an explicit
+    // attribute contributes to KnownTags, so matching against the whole index would let
+    // the attribute vouch for the very candidate it is being compared with.
+    static string? TagWithoutAttribute(
+        ISymbol symbol,
+        Config config,
+        string explicitValue,
+        string conventionName,
+        bool hasWrapperTag,
+        string wrapperTag)
+    {
+        if (config.ExternalIds.TryGetSymbolTags(symbol, receiverType: null, out var external))
+        {
+            return OnlyTag(external);
+        }
+
+        var inherited = InheritedId(symbol);
+        if (inherited.State == IdState.Present)
+        {
+            return OnlyTag(inherited.Tags);
+        }
+
+        if (hasWrapperTag)
+        {
+            return wrapperTag;
+        }
+
+        if (config.InferSuffixTags &&
+            SuffixInference.TryMatch(
+                symbol.ConventionName(),
+                config.KnownTags.Value.Without(explicitValue),
+                out var suffixTag))
+        {
+            return suffixTag;
+        }
+
+        return conventionName.Length == 0 ? null : conventionName;
+    }
+
+    // Tags a member would still carry from somewhere other than its own attribute:
+    // an override / interface-implementation chain, or — for a record's synthesized
+    // property — the primary-constructor parameter the compiler left the attribute on.
+    static IdInfo InheritedId(ISymbol symbol)
+    {
+        if (symbol is IParameterSymbol parameter)
+        {
+            return GetParameterIdFromHierarchy(parameter);
+        }
+
+        if (symbol is not IPropertySymbol property)
+        {
+            return IdInfo.NotPresent;
+        }
+
+        var fromHierarchy = GetPropertyIdFromHierarchy(property);
+        if (fromHierarchy.State == IdState.Present)
+        {
+            return fromHierarchy;
+        }
+
+        if (property.FindRecordPrimaryParameter() is { } recordParameter)
+        {
+            return GetIdFromAttributes(recordParameter.GetAttributes());
+        }
+
+        return IdInfo.NotPresent;
+    }
+
+    static string? OnlyTag(ImmutableArray<string> tags) =>
+        tags is [var single] ? single : null;
 
     static void ReportConventionDiagnostics(
         CompilationAnalysisContext context,
         ConcurrentDictionary<string, ConcurrentBag<ISymbol>> ambiguity,
-        ConcurrentBag<(ISymbol Symbol, string Value, SyntaxReference Reference)> redundantCandidates)
+        ConcurrentBag<(ISymbol Symbol, string Value, SyntaxReference Reference, bool JoinsAmbiguity)> redundantCandidates)
     {
         foreach (var entry in ambiguity)
         {
@@ -353,8 +448,33 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
+            // Deleting the attribute would put this member back into the ambiguity map,
+            // so when another type already claims the same conventional name the "fix"
+            // trades one warning for two SIA004 errors. The attribute is what keeps the
+            // two domains apart — it is not redundant.
+            if (candidate.JoinsAmbiguity &&
+                ambiguity.TryGetValue(candidate.Value, out var claimants) &&
+                ClaimedByAnotherType(claimants, candidate.Symbol))
+            {
+                continue;
+            }
+
             Rules.ReportRedundant(context, candidate.Reference.ToLocation(), candidate.Symbol, candidate.Value);
         }
+    }
+
+    static bool ClaimedByAnotherType(ConcurrentBag<ISymbol> claimants, ISymbol symbol)
+    {
+        var owner = symbol.ContainingType?.OriginalDefinition;
+        foreach (var claimant in claimants)
+        {
+            if (!SymbolEqualityComparer.Default.Equals(claimant.ContainingType?.OriginalDefinition, owner))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // SIA008: an [assembly: ExternalId] the analyzer could never apply. Only the
@@ -679,24 +799,35 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return cached;
         }
 
-        var computed = ComputeAncestorTags(tag, config.Compilation);
+        var computed = ComputeAncestorTags(tag, config);
         return config.AncestorTagCache.GetOrAdd(tag, computed);
     }
 
-    static ImmutableArray<string> ComputeAncestorTags(string tag, Compilation compilation)
+    // The base-type and interface names of every type in the compilation whose simple
+    // name is `tag` — what lets a derived id flow into a base-tagged slot.
+    //
+    // Suppressed types take no part, on either end. A name the user chose for a domain
+    // class is regularly also a framework class: with `System.Diagnostics.Process` in the
+    // reference set, "Process" widened to include "Component", and a `Process` id assigned
+    // to a `[Id("Component")]` target stopped being reported. `Microsoft.Graph`'s
+    // `User : DirectoryObject : Entity` does the same to any domain "User". The same
+    // predicate that decides "not the user's domain" everywhere else decides it here.
+    static ImmutableArray<string> ComputeAncestorTags(string tag, Config config)
     {
-        if (string.IsNullOrEmpty(tag))
+        if (string.IsNullOrEmpty(tag) ||
+            !config.TypesByName.Value.TryGetValue(tag, out var types))
         {
             return ImmutableArray<string>.Empty;
         }
 
         var result = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var type in TypeEnumeration.FindByName(compilation, tag))
+        foreach (var type in types)
         {
             var baseType = type.BaseType;
             while (baseType is not null && baseType.SpecialType != SpecialType.System_Object)
             {
-                if (baseType.Name.Length > 0)
+                if (baseType.Name.Length > 0 &&
+                    !config.Suppression.IsSuppressed(baseType))
                 {
                     result.Add(baseType.Name);
                 }
@@ -706,7 +837,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
             foreach (var iface in type.AllInterfaces)
             {
-                if (iface.Name.Length > 0)
+                if (iface.Name.Length > 0 &&
+                    !config.Suppression.IsSuppressed(iface))
                 {
                     result.Add(iface.Name);
                 }
@@ -750,6 +882,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         if (leftInfo.State == IdState.Present &&
             rightInfo.State == IdState.Present)
         {
+            // The common case is that the sets already overlap, and that costs a couple
+            // of string comparisons — check it before paying for the ancestor walk.
+            if (leftInfo.IntersectsWith(rightInfo))
+            {
+                return;
+            }
+
             // Equality is symmetric, so widen both sides — a derived id comparing equal
             // to a base id is legitimate (the actual entity might be the derived type).
             var leftWidened = Widen(leftInfo, config);
@@ -812,6 +951,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // Anonymous-type members can't carry [Id]; suppress for the same reason as the
         // target-side check in Report.
         if (untaggedSymbol is IPropertySymbol { ContainingType.IsAnonymousType: true })
+        {
+            return;
+        }
+
+        if (HasNoEditableDeclaration(untaggedSymbol))
         {
             return;
         }
@@ -1175,8 +1319,22 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
+        // The initializer only describes the local for as long as nothing else writes
+        // to it. `var id = order.CustomerId; id = product.Id;` must not keep reporting
+        // the first assignment's tag for every later read.
+        if (IsReassigned(localRef, config))
+        {
+            return false;
+        }
+
         var semanticModel = localRef.SemanticModel;
         if (semanticModel is null)
+        {
+            return false;
+        }
+
+        using var guard = ResolutionGuard.Enter(localRef.Local);
+        if (!guard.Entered)
         {
             return false;
         }
@@ -1195,6 +1353,110 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         info = resolved;
         return true;
+    }
+
+    // `Guid a = a;` and `Guid a = b; Guid b = a;` are compile errors, but an analyzer
+    // runs on half-typed code, so the resolver has to terminate on them rather than
+    // recurse until the stack runs out — which kills csc / VBCSCompiler outright.
+    // Thread-static because analysis is concurrent and the guard is per resolution
+    // stack, not per compilation.
+    readonly struct ResolutionGuard : IDisposable
+    {
+        [ThreadStatic]
+        static HashSet<ISymbol>? active;
+
+        readonly ISymbol? symbol;
+
+        ResolutionGuard(ISymbol? symbol)
+        {
+            this.symbol = symbol;
+            Entered = symbol is not null;
+        }
+
+        public bool Entered { get; }
+
+        public static ResolutionGuard Enter(ISymbol symbol)
+        {
+            var set = active ??= new(SymbolEqualityComparer.Default);
+            return new(set.Add(symbol) ? symbol : null);
+        }
+
+        public void Dispose()
+        {
+            if (symbol is not null)
+            {
+                active!.Remove(symbol);
+            }
+        }
+    }
+
+    // True when anything other than the declarator's own initializer writes to the
+    // local: an assignment (simple, compound, deconstruction), an increment, or a
+    // `ref` / `out` argument. Scanned once per local and cached for the compilation.
+    static bool IsReassigned(ILocalReferenceOperation localRef, Config config)
+    {
+        var local = localRef.Local;
+        if (config.ReassignedLocals.TryGetValue(local, out var cached))
+        {
+            return cached;
+        }
+
+        var root = (IOperation)localRef;
+        while (root.Parent is { } parent)
+        {
+            root = parent;
+        }
+
+        var reassigned = ContainsWriteTo(root, local);
+        config.ReassignedLocals.TryAdd(local, reassigned);
+        return reassigned;
+    }
+
+    static bool ContainsWriteTo(IOperation operation, ILocalSymbol local)
+    {
+        // IAssignmentOperation covers simple, compound and deconstruction assignment —
+        // a deconstruction target is a tuple, so the whole target subtree is searched.
+        var written = operation switch
+        {
+            IAssignmentOperation assignment => ReferencesLocal(assignment.Target, local),
+            IIncrementOrDecrementOperation increment => ReferencesLocal(increment.Target, local),
+            IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out } argument =>
+                ReferencesLocal(argument.Value, local),
+            _ => false
+        };
+        if (written)
+        {
+            return true;
+        }
+
+        foreach (var child in operation.ChildOperations)
+        {
+            if (ContainsWriteTo(child, local))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    static bool ReferencesLocal(IOperation operation, ILocalSymbol local)
+    {
+        if (operation is ILocalReferenceOperation reference &&
+            SymbolEqualityComparer.Default.Equals(reference.Local, local))
+        {
+            return true;
+        }
+
+        foreach (var child in operation.ChildOperations)
+        {
+            if (ReferencesLocal(child, local))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     static bool TryResolveLinqElementReturn(
@@ -1287,6 +1549,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (receiver is IInvocationOperation inv)
             {
                 var targetMethod = inv.TargetMethod;
+
+                // A method that says what it returns outranks any shape rule. Without
+                // this, `[return: Id("Order")] IEnumerable<Guid> OrdersOf(this
+                // IEnumerable<Guid> customerIds)` was read as element-preserving and its
+                // results came back tagged "Customer".
+                var declared = GetReturnInfo(targetMethod, config);
+                if (declared.State == IdState.Present)
+                {
+                    return declared;
+                }
 
                 if (targetMethod.IsSelectCall())
                 {
@@ -1433,6 +1705,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return GetReceiverElementTags(next, config);
             }
 
+            // Two-argument SelectMany: the body IS the inner collection, so its tags are
+            // the collection's element tags. Resolving it as a value instead handed a
+            // collection-typed expression to GetAccessInfo, which suppresses collection
+            // tags — so SelectMany never passed an element tag through at all.
+            if (invocation.IsCollectionSelector())
+            {
+                return GetReceiverElementTags(body, config);
+            }
+
             return GetAccessInfo(body, config);
         }
 
@@ -1536,6 +1817,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         var semanticModel = localRef.SemanticModel;
         if (semanticModel is null)
+        {
+            return null;
+        }
+
+        // Same cycle guard as TryResolveLocalInitializer: a local whose initializer
+        // reaches itself would otherwise recurse forever.
+        using var guard = ResolutionGuard.Enter(localRef.Local);
+        if (!guard.Entered)
         {
             return null;
         }
@@ -1694,8 +1983,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             {
                 foreach (var ifaceMember in iface.GetMembers(method.Name).OfType<IMethodSymbol>())
                 {
+                    // FindImplementationForInterfaceMember answers with the definition
+                    // (`Get<T>`), while a call site hands us the constructed `Get<int>`.
+                    // Compare against ConstructedFrom so a generic method keeps the tags
+                    // its interface declared; for a non-generic one it is the same symbol.
                     var impl = containingType.FindImplementationForInterfaceMember(ifaceMember);
-                    if (!SymbolEqualityComparer.Default.Equals(impl, method))
+                    if (!SymbolEqualityComparer.Default.Equals(impl, method.ConstructedFrom))
                     {
                         continue;
                     }
@@ -1712,6 +2005,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return IdInfo.Unknown;
     }
 
+    static void Cover(HashSet<ISymbol> coveredTypes, INamedTypeSymbol? type)
+    {
+        if (type is not null)
+        {
+            coveredTypes.Add(type);
+        }
+    }
+
     static IdInfo GetMemberAccessInfo(ISymbol member, ITypeSymbol? receiverType, Config config)
     {
         // An [assembly: ExternalId] mapping is the consumer overriding what it cannot
@@ -1721,28 +2022,6 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return IdInfo.PresentExplicit(external);
         }
 
-        // Pre-resolved index covers the library-side (member + its declaring-type receiver)
-        // tag set directly. When hit, skip EnumerateMemberChain (AllInterfaces walk) AND
-        // the receiver-type walk — the producer has already folded those contributions in
-        // for the concrete types it owns. Consumer-side subclass receivers fall through
-        // because ContainingAssembly is the source assembly.
-        if (TryGetFromIndex(member, config, out var indexed))
-        {
-            if (!indexed.IsDefaultOrEmpty)
-            {
-                return IdInfo.Present(indexed);
-            }
-
-            // An index that lists a wrapper-owned member as untagged must not silence the
-            // wrapper rule — the producer had no way to express a type-derived tag.
-            if (config.Wrappers.TryGetSymbolTag(member, receiverType, out var indexedWrapperTag))
-            {
-                return IdInfo.Present(indexedWrapperTag);
-            }
-
-            return IdInfo.NotPresent;
-        }
-
         var receiverTags = ImmutableArray.CreateBuilder<string>();
         var memberTags = ImmutableArray.CreateBuilder<string>();
         var explicitTags = ImmutableArray.CreateBuilder<string>();
@@ -1750,21 +2029,57 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var explicitSeen = new HashSet<string>(StringComparer.Ordinal);
         var coveredTypes = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
 
+        // Pre-resolved index covers the library-side (member + its declaring-type receiver)
+        // tag set directly. When hit, skip EnumerateMemberChain (AllInterfaces walk) — the
+        // producer has already folded those contributions in for the concrete types it
+        // owns. The receiver-type walk still runs, because a subclass declared in the
+        // consuming project is something the producer could not have indexed: without it
+        // `invoice.Id` on `Invoice : Entity` reads as "Entity" alone and every assignment
+        // into an `[Id("Invoice")]` target is a false SIA001.
+        var indexedAssembly = TryGetFromIndex(member, config, out var indexed)
+            ? member.ContainingAssembly
+            : null;
+        if (indexedAssembly is not null)
+        {
+            foreach (var tag in indexed)
+            {
+                if (seen.Add(tag))
+                {
+                    memberTags.Add(tag);
+                }
+            }
+
+            // An index that lists a wrapper-owned member as untagged must not silence the
+            // wrapper rule — the producer had no way to express a type-derived tag.
+            if (memberTags.Count == 0 &&
+                config.Wrappers.TryGetSymbolTag(member, receiverType, out var indexedWrapperTag) &&
+                seen.Add(indexedWrapperTag))
+            {
+                memberTags.Add(indexedWrapperTag);
+            }
+        }
+
         // 1. Walk the property's override + interface chain. At every level contribute
         //    the level's explicit [Id] tag, or — if the level has none — the convention
         //    tag for that level (type name for `Id`, prefix for `XxxId`). Explicit and
         //    convention tags merge into one set; users who want to broaden a convention
         //    tag stack explicit [Id]s on base / override members.
-        foreach (var level in member.EnumerateMemberChain())
+        var chain = indexedAssembly is null
+            ? member.EnumerateMemberChain()
+            : Enumerable.Empty<ISymbol>();
+        foreach (var level in chain)
         {
-            if (level.ContainingType is { } ct)
-            {
-                coveredTypes.Add(ct.OriginalDefinition);
-            }
+            // A level only covers its containing type once it has actually contributed a
+            // tag. Marking it up front silences the receiver-type walk for a level that
+            // went on to contribute nothing — which is every metadata level, so
+            // `product.Id` on a `Shop.Product` in a referenced project came back untagged
+            // while the same shape with `Product : Entity` worked.
+            var levelType = level.ContainingType?.OriginalDefinition;
 
             var explicitInfo = GetIdFromAttributes(level.GetAttributes());
             if (explicitInfo.State == IdState.Present)
             {
+                Cover(coveredTypes, levelType);
                 foreach (var tag in explicitInfo.Tags)
                 {
                     if (seen.Add(tag))
@@ -1790,6 +2105,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 var parameterInfo = GetIdFromAttributes(recordParameter.GetAttributes());
                 if (parameterInfo.State == IdState.Present)
                 {
+                    Cover(coveredTypes, levelType);
                     foreach (var tag in parameterInfo.Tags)
                     {
                         if (seen.Add(tag))
@@ -1812,6 +2128,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // comes from the type rather than from anything the user could annotate.
             if (config.Wrappers.TryGetSymbolTag(level, receiverType, out var wrapperTag))
             {
+                Cover(coveredTypes, levelType);
                 if (seen.Add(wrapperTag))
                 {
                     memberTags.Add(wrapperTag);
@@ -1841,6 +2158,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 level is IPropertySymbol or IFieldSymbol &&
                 SuffixInference.TryMatch(level.ConventionName(), config.KnownTags.Value.All, out var suffixTag))
             {
+                Cover(coveredTypes, levelType);
                 if (seen.Add(suffixTag))
                 {
                     memberTags.Add(suffixTag);
@@ -1851,6 +2169,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
             if (TryGetConventionName(level, out var convName))
             {
+                Cover(coveredTypes, levelType);
                 if (seen.Add(convName))
                 {
                     memberTags.Add(convName);
@@ -1891,7 +2210,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     break;
                 }
 
-                if (!coveredTypes.Contains(current.OriginalDefinition) &&
+                // On an index hit the producer's own types are already accounted for;
+                // only receiver types it could not have seen contribute here.
+                var indexedHere = indexedAssembly is not null &&
+                                  SymbolEqualityComparer.Default.Equals(current.ContainingAssembly, indexedAssembly);
+
+                if (!indexedHere &&
+                    !coveredTypes.Contains(current.OriginalDefinition) &&
                     current.Name.Length > 0 &&
                     !config.Suppression.IsSuppressed(current) &&
                     seen.Add(current.Name))
@@ -2215,8 +2540,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         {
             foreach (var ifaceMember in iface.GetMembers(method.Name).OfType<IMethodSymbol>())
             {
+                // ConstructedFrom, not the symbol itself: a call to `Put<int>` carries
+                // the constructed method, while the implementation lookup returns the
+                // definition `Put<T>` the interface was matched against.
                 var impl = containingType.FindImplementationForInterfaceMember(ifaceMember);
-                if (!SymbolEqualityComparer.Default.Equals(impl, method))
+                if (!SymbolEqualityComparer.Default.Equals(impl, method.ConstructedFrom))
                 {
                     continue;
                 }
@@ -2363,8 +2691,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // is not a fix site unless it also carries an explicit attribute the user could change.
     static ISymbol? FixSite(ISymbol? symbol, IdInfo info, Config config)
     {
-        if (symbol is not null &&
-            info.ExplicitTags.IsDefaultOrEmpty &&
+        if (symbol is null ||
+            HasNoEditableDeclaration(symbol))
+        {
+            return null;
+        }
+
+        if (info.ExplicitTags.IsDefaultOrEmpty &&
             config.Wrappers.TryGetSymbolTag(symbol, receiverType: null, out _))
         {
             return null;
@@ -2372,6 +2705,22 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         return symbol;
     }
+
+    // Declarations no fix can be written against, so SIA002 / SIA003 stay silent and
+    // SIA001 reports with an empty slot rather than pointing at them.
+    //
+    // A lambda parameter only accepts an attribute inside a parenthesized parameter list,
+    // and even then not in an expression tree (CS8972). The bare form the fixer produces
+    // — `ids.Any([Id<Order>] x => ...)` — binds the attribute to the lambda instead,
+    // which is CS8916 plus CS0592. The annotation that helps is on the collection being
+    // queried, and that one the user writes.
+    //
+    // A tuple element's declaration lives inside a tuple TYPE, so every fix climbs out of
+    // it to the enclosing parameter: `[Id]` then describes the whole tuple and the
+    // diagnostic survives, while a rename silently rewrites the element.
+    static bool HasNoEditableDeclaration(ISymbol symbol) =>
+        symbol is IParameterSymbol { ContainingSymbol: IMethodSymbol { MethodKind: MethodKind.LambdaMethod } } or
+            IFieldSymbol { ContainingType.IsTupleType: true };
 
     static void Report(
         OperationAnalysisContext context,
@@ -2417,6 +2766,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // value could legitimately flow in. Intersection is symmetric, so it handles
             // both receiver-walked covariant sources (`child.Id` = {"Child","Base"}) and
             // union-tagged targets (`[UnionId("A","B")]` accepts "A" or "B") uniformly.
+            // The unwidened sets settle nearly every call, so they are compared first and
+            // the ancestor walk only runs for the ones that would otherwise be reported.
+            if (target.IntersectsWith(source))
+            {
+                return;
+            }
+
             // Widen the source only: a derived-tagged value can flow where a base-tagged
             // target is expected, but not the other way around.
             var widenedSource = Widen(source, config);
@@ -2451,25 +2807,34 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
+            if (HasNoEditableDeclaration(sourceSymbol))
+            {
+                return;
+            }
+
             if (config.Suppression.IsSuppressed(sourceSymbol))
             {
                 return;
             }
 
-            // Param-name ↔ property-name correspondence: a parameter whose name maps
-            // (first-char-upper) to the target property's name is the obvious carrier
-            // for that property's value. The user has already expressed the binding
-            // through naming — requiring an extra `[Id("X")]` on the parameter would be
-            // noise. Covers primary-ctor `Tenant(string id) { Id { get; } = id; }`,
-            // regular-ctor `Tenant(string id) => Id = id;`, and trivial setters
+            // Param-name ↔ member-name correspondence: a parameter whose name maps
+            // (first-char-upper) to the target's name is the obvious carrier for that
+            // member's value. The user has already expressed the binding through naming
+            // — requiring an extra `[Id("X")]` on the parameter would be noise. Covers
+            // primary-ctor `Tenant(string id) { Id { get; } = id; }`, regular-ctor
+            // `Tenant(string id) => Id = id;`, and trivial setters
             // `void Reset(string id) => Id = id;` uniformly.
+            //
+            // Backing fields count too, compared through ConventionName so the
+            // underscore prefix is not part of what is matched: `_id = id` is the same
+            // statement as `Id = id` and must read the same way.
             //
             // Tag mismatches via an explicit attribute on the parameter aren't silenced
             // here — those flow through the SIA001 branch above (source is Present),
             // not this one (source is NotPresent).
             if (sourceSymbol is IParameterSymbol parameter &&
-                targetSymbol is IPropertySymbol property &&
-                ParameterNameCorrespondsToProperty(parameter.Name, property.Name))
+                TargetConventionName(targetSymbol) is { } targetName &&
+                ParameterNameCorrespondsToProperty(parameter.Name, targetName))
             {
                 return;
             }
@@ -2498,6 +2863,11 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
+            if (HasNoEditableDeclaration(targetSymbol))
+            {
+                return;
+            }
+
             if (config.Suppression.IsSuppressed(targetSymbol))
             {
                 return;
@@ -2518,6 +2888,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             Rules.ReportDropped(context, location, sourceSymbol, source, targetSymbol);
         }
     }
+
+    static string? TargetConventionName(ISymbol target) =>
+        target switch
+        {
+            IPropertySymbol property => property.Name,
+            IFieldSymbol field => field.ConventionName(),
+            _ => null
+        };
 
     // Parameters are camelCase, properties PascalCase — so `id` ↔ `Id` and
     // `customerId` ↔ `CustomerId` should match. Compare ordinal after upper-casing
@@ -2552,16 +2930,17 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         // here. The remaining checks cover targets whose declared type can't meaningfully
         // hold a tag.
         //
-        // For parameters on a generic method, `.Type` is already substituted at the call
-        // site (T → Guid). Inspect the original definition so the type-parameter check
-        // actually catches `T`. Properties/fields declared inside a generic type carry
-        // the unsubstituted type parameter on `.Type` directly, so no original-definition
-        // hop is needed for them.
+        // Every one of these is already substituted at the access site: a parameter of a
+        // generic method (T → Guid), and equally a property or field reached through a
+        // constructed receiver (`Box<Guid>.Content`). Inspect the original definition so
+        // the type-parameter check sees the `T` the declaration actually wrote — the
+        // declaration is the fix site, and `[Id]` on `Box<T>.Content` would bind every
+        // other closing of T too.
         var type = target switch
         {
             IParameterSymbol parameter => parameter.OriginalDefinition.Type,
-            IPropertySymbol property => property.Type,
-            IFieldSymbol field => field.Type,
+            IPropertySymbol property => property.OriginalDefinition.Type,
+            IFieldSymbol field => field.OriginalDefinition.Type,
             _ => null
         };
 

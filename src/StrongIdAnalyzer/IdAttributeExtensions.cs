@@ -300,7 +300,10 @@ static class IdAttributeExtensions
         }
 
         var first = attribute.ConstructorArguments[0];
-        if (first.Kind != TypedConstantKind.Array)
+        // `[UnionId(null)]` binds null to the array parameter itself, not to one element.
+        // Its Values is an uninitialised ImmutableArray, so reading `.Length` throws.
+        if (first.Kind != TypedConstantKind.Array ||
+            first.IsNull)
         {
             return [];
         }

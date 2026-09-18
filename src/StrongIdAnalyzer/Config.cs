@@ -39,11 +39,23 @@ readonly struct Config(
     public ConcurrentDictionary<string, ImmutableArray<string>> AncestorTagCache { get; } =
         new(StringComparer.Ordinal);
 
+    // Simple type name → matching types, source assembly and references alike, minus the
+    // suppressed ones. Feeds ancestor widening; built on first use so a compilation that
+    // never widens never pays for it.
+    public Lazy<Dictionary<string, ImmutableArray<INamedTypeSymbol>>> TypesByName { get; } =
+        new(() => TypeEnumeration.BuildNameMap(compilation, suppression));
+
     // Per-assembly tag index loaded lazily from [assembly: StrongIdIndex(...)].
     // When a referenced assembly ships an index, per-symbol tag lookups skip the
     // inheritance walk entirely — a hit returns the pre-resolved tag set directly.
     // Null entries mean "this assembly has no index, fall back to the walk".
     public ConcurrentDictionary<IAssemblySymbol, Dictionary<ISymbol, ImmutableArray<string>>?> IndexCache { get; } =
+        new(SymbolEqualityComparer.Default);
+
+    // Local → "is written somewhere other than its declarator's initializer". Decides
+    // whether the initializer still describes the local at a later read; scanning the
+    // containing operation tree is linear in the method body, so the verdict is kept.
+    public ConcurrentDictionary<ILocalSymbol, bool> ReassignedLocals { get; } =
         new(SymbolEqualityComparer.Default);
 
     // Foreach loop variable → element tags, populated by the loop analysis action and

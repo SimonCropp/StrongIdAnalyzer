@@ -3,32 +3,56 @@
 // given simple name, then walk its base chain / interface list.
 static class TypeEnumeration
 {
-    // Finds every named type whose simple name equals `name` across the source assembly
-    // and every referenced assembly. Compilation.GetSymbolsWithName only searches source
-    // declarations — missing types defined in NuGet references or project dependencies.
-    public static IEnumerable<INamedTypeSymbol> FindByName(Compilation compilation, string name)
+    // Simple name → the types that carry it, across the source assembly and every
+    // referenced assembly. Compilation.GetSymbolsWithName only searches source
+    // declarations, missing types defined in NuGet references or project dependencies,
+    // so the walk is manual.
+    //
+    // Built once per compilation rather than per tag: the previous per-name search
+    // enumerated every type in every referenced assembly on the first use of each tag,
+    // which is the same work repeated once per domain in the codebase. Suppressed types
+    // are dropped while building — widening is the only consumer, and it never wants
+    // them — which also keeps the map to the user's own domain.
+    public static Dictionary<string, ImmutableArray<INamedTypeSymbol>> BuildNameMap(
+        Compilation compilation,
+        Suppression suppression)
     {
-        foreach (var type in EnumerateAll(compilation.Assembly.GlobalNamespace))
+        var builders = new Dictionary<string, ImmutableArray<INamedTypeSymbol>.Builder>(StringComparer.Ordinal);
+
+        Add(compilation.Assembly.GlobalNamespace);
+        foreach (var reference in compilation.References)
         {
-            if (string.Equals(type.Name, name, StringComparison.Ordinal))
+            if (compilation.GetAssemblyOrModuleSymbol(reference) is IAssemblySymbol assembly)
             {
-                yield return type;
+                Add(assembly.GlobalNamespace);
             }
         }
 
-        foreach (var reference in compilation.References)
+        var map = new Dictionary<string, ImmutableArray<INamedTypeSymbol>>(builders.Count, StringComparer.Ordinal);
+        foreach (var entry in builders)
         {
-            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
-            {
-                continue;
-            }
+            map.Add(entry.Key, entry.Value.ToImmutable());
+        }
 
-            foreach (var type in EnumerateAll(assembly.GlobalNamespace))
+        return map;
+
+        void Add(INamespaceSymbol ns)
+        {
+            foreach (var type in EnumerateAll(ns))
             {
-                if (string.Equals(type.Name, name, StringComparison.Ordinal))
+                if (type.Name.Length == 0 ||
+                    suppression.IsSuppressed(type))
                 {
-                    yield return type;
+                    continue;
                 }
+
+                if (!builders.TryGetValue(type.Name, out var builder))
+                {
+                    builder = ImmutableArray.CreateBuilder<INamedTypeSymbol>();
+                    builders.Add(type.Name, builder);
+                }
+
+                builder.Add(type);
             }
         }
     }

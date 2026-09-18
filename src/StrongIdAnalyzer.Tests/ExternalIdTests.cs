@@ -504,6 +504,43 @@ public class ExternalIdTests
         await Assert.That(diagnostics[0].GetMessage()).Contains("""property 'Process.Id' is [Id("Process")]""");
     }
 
+    // `null` binds to the params array itself, and reading Values.Length on that constant
+    // throws. That happened while building the ExternalIds map at compilation start,
+    // before any action was registered — so the analyzer reported AD0001 and every rule
+    // went silent for the whole project. A null id list is an empty one: SIA008, and the
+    // rest of the analysis carries on.
+    [Test]
+    public async Task SIA008_NullIdArray_FiresErrorAndLeavesAnalysisRunning()
+    {
+        var source =
+            """
+            using System;
+
+            [assembly: ExternalId(typeof(Holder), "Value", null)]
+
+            public class Holder
+            {
+                public Guid Value { get; set; }
+            }
+
+            public class Other
+            {
+                [Id("Order")]
+                public Guid Target { get; set; }
+
+                [Id("Customer")]
+                public Guid Source { get; set; }
+
+                public void Copy() => Target = Source;
+            }
+            """;
+
+        var diagnostics = await Analyze(null, source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id).OrderBy(_ => _))
+            .IsEquivalentTo(["SIA001", "SIA008"]);
+    }
+
     // Compiles `library` (null: none) into an in-memory assembly named `Messages`,
     // references it from `consumer`, and returns the analyzer's diagnostics on the
     // consumer only.

@@ -1495,6 +1495,63 @@ public class WrapperTests
         await Assert.That(diagnostics[0].GetMessage().Contains("CustomerKey")).IsTrue();
     }
 
+    // Recognition recurses through the value member's type and through type arguments,
+    // so `UserId` wrapping `Id<UserId>` reaches itself. Before the cycle guard this was
+    // an unbounded recursion on code that compiles perfectly well — the stack ran out and
+    // took the compiler process with it. Every type in the cycle is "not a wrapper",
+    // whichever one is asked about first, so the answer does not depend on entry order.
+    [Test]
+    public async Task SelfReferentialWrapper_DoesNotRecurse()
+    {
+        var source =
+            """
+            using System;
+
+            public readonly record struct Id<T>(Guid Value);
+
+            public readonly record struct UserId(Id<UserId> Value);
+
+            public class Holder
+            {
+                public Guid Use(UserId id) => id.Value.Value;
+            }
+            """;
+
+        var diagnostics = await Analyze(source, wrapperOn);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    // The cycle must not poison a wrapper that merely mentions one of its members.
+    [Test]
+    public async Task WrapperAlongsideCycle_StillRecognised()
+    {
+        var source =
+            """
+            using System;
+
+            public readonly record struct Id<T>(Guid Value);
+
+            public readonly record struct UserId(Id<UserId> Value);
+
+            public readonly record struct OrderId(Guid Value);
+
+            public class Holder
+            {
+                public void Use(OrderId orderId) => TakeCustomer(orderId.Value);
+
+                static void TakeCustomer([Id("Customer")] Guid value)
+                {
+                }
+            }
+            """;
+
+        var diagnostics = await Analyze(source, wrapperOn);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+        await Assert.That(diagnostics[0].GetMessage().Contains("Order")).IsTrue();
+    }
+
     static readonly IReadOnlyList<MetadataReference> references = TrustedReferences.Where(_ =>
         !_.EndsWith("StrongIdAnalyzer.Tests.dll", StringComparison.OrdinalIgnoreCase));
 

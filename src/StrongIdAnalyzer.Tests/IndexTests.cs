@@ -347,6 +347,62 @@ public class IndexTests
         await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
     }
 
+    // An index hit stood in for the whole resolution, receiver-type walk included. But a
+    // subclass declared in the CONSUMING project is something the producer could not have
+    // indexed: `invoice.Id` read as "Entity" alone, so assigning it to an `[Id("Invoice")]`
+    // target was a false SIA001 that appeared only once the index shipped.
+    [Test]
+    public async Task IndexEntry_StillWalksConsumerSideReceiverTypes()
+    {
+        var library =
+            """
+            using System;
+            namespace StrongIdAnalyzer
+            {
+                [AttributeUsage(
+                    AttributeTargets.Property | AttributeTargets.Field |
+                    AttributeTargets.Parameter | AttributeTargets.ReturnValue,
+                    Inherited = false)]
+                internal sealed class IdAttribute(string type) : Attribute;
+            }
+            public class Entity
+            {
+                public Guid Id { get; set; }
+            }
+            public static class Methods
+            {
+                public static void TakeInvoice([StrongIdAnalyzer.Id("Invoice")] Guid value) { }
+
+                public static void TakeCustomer([StrongIdAnalyzer.Id("Customer")] Guid value) { }
+            }
+            """;
+
+        var consumer =
+            """
+            public class Invoice : Entity
+            {
+            }
+
+            public class CallSite
+            {
+                public void Run(Invoice invoice)
+                {
+                    // The consumer's own subclass contributes "Invoice" …
+                    Methods.TakeInvoice(invoice.Id);
+
+                    // … and the indexed "Entity" is still in the set, so an unrelated
+                    // domain is still reported.
+                    Methods.TakeCustomer(invoice.Id);
+                }
+            }
+            """;
+
+        var diagnostics = await GetCrossAssemblyDiagnostics(library, index: "P:Entity.Id=Entity", consumer);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+        await Assert.That(diagnostics[0].GetMessage()).Contains("Customer");
+    }
+
     static Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnostics(
         string library,
         string? index,

@@ -128,9 +128,14 @@ sealed class ExternalIds
 
     // `params string[] ids` arrives as one Array constant. Blank entries are dropped here
     // (as ExtractUnionOptions does) and reported by validation, not silently kept.
+    // A literal `null` for the array (`[assembly: ExternalId(typeof(C), "Value", null)]`)
+    // is an Array constant whose Values is an uninitialised ImmutableArray — reading
+    // `.Length` on it throws, which would take the whole compilation-start action down
+    // and silence every rule. Treat it as an empty list so SIA008 reports it instead.
     static ImmutableArray<string> ReadTags(TypedConstant constant)
     {
-        if (constant.Kind != TypedConstantKind.Array)
+        if (constant.Kind != TypedConstantKind.Array ||
+            constant.IsNull)
         {
             return [];
         }

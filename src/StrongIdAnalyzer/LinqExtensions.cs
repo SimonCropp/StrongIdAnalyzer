@@ -42,20 +42,39 @@ static class LinqExtensions
     // The selector sits after the source in Enumerable/Queryable.Select; for extension
     // calls the source is Arguments[0] and the selector Arguments[1]. For instance-form
     // Select (custom providers), Instance is the source and Arguments[0] is the selector.
+    //
+    // The three-argument SelectMany overload is the exception: there Arguments[1] is the
+    // collection selector and Arguments[2] the result selector, and it is the result
+    // selector that decides the element type the call produces.
     public static IOperation? FindSelectorArgument(this IInvocationOperation invocation)
     {
-        if (invocation.Instance is not null)
+        var arguments = invocation.Arguments;
+        var offset = invocation.Instance is not null ? 0 : 1;
+        var index = offset + (HasResultSelector(invocation, offset) ? 1 : 0);
+
+        if (invocation.Instance is null &&
+            !invocation.TargetMethod.IsExtensionMethod)
         {
-            return invocation.Arguments.Length > 0 ? invocation.Arguments[0].Value : null;
+            return null;
         }
 
-        if (invocation.TargetMethod.IsExtensionMethod &&
-            invocation.Arguments.Length > 1)
-        {
-            return invocation.Arguments[1].Value;
-        }
+        return arguments.Length > index ? arguments[index].Value : null;
+    }
 
-        return null;
+    // `SelectMany(source, collectionSelector, resultSelector)` — the shape is recognised
+    // by the argument count rather than by the selector's own type, which for an
+    // expression-tree query is wrapped and not directly comparable.
+    static bool HasResultSelector(IInvocationOperation invocation, int offset) =>
+        invocation.TargetMethod.Name == "SelectMany" &&
+        invocation.Arguments.Length == offset + 2;
+
+    // True when the selector's result is itself a collection — SelectMany's two-argument
+    // form, whose body produces the inner sequence rather than one element.
+    public static bool IsCollectionSelector(this IInvocationOperation invocation)
+    {
+        var offset = invocation.Instance is not null ? 0 : 1;
+        return invocation.TargetMethod.Name == "SelectMany" &&
+               !HasResultSelector(invocation, offset);
     }
     // Lambda bodies surface as a synthesised block with a single return — both for
     // expression-bodied and brace-bodied single-return lambdas. Anything with more than
@@ -117,6 +136,13 @@ static class LinqExtensions
     // `T Foo<T>(IEnumerable<T>) → IEnumerable<T>` match — without OriginalDefinition
     // the input type parameter and return type parameter are distinct symbols after
     // construction, which would defeat the check.
+    //
+    // The element type has to BE one of the method's own type parameters. A method that
+    // names a concrete element type on both sides — `IEnumerable<Guid> OrdersOf(this
+    // IEnumerable<Guid>)` — has the right shape by coincidence and is free to map one
+    // domain to another, which is exactly what such a helper is usually for. Treating it
+    // as element-preserving handed the receiver's tag to its result and made every use
+    // of its return value a false SIA001.
     public static bool IsElementPreserving(this IMethodSymbol method)
     {
         if (method.IsLinqMethod() && IsElementPreservingLinq(method.Name))
@@ -137,7 +163,7 @@ static class LinqExtensions
 
         var inputElement = definition.Parameters[0].Type.TryGetEnumerableElementType();
         var outputElement = definition.ReturnType.UnwrapTaskType().TryGetEnumerableElementType();
-        return inputElement is not null &&
+        return inputElement is ITypeParameterSymbol &&
                outputElement is not null &&
                SymbolEqualityComparer.Default.Equals(inputElement, outputElement);
     }
@@ -172,6 +198,13 @@ static class LinqExtensions
         method.GetExtensionReceiverType() is { } receiverType &&
         receiverType.TryGetEnumerableElementType() is not null;
 
+    // The instance-method counterpart: `customerIds.ForEach(id => ...)` binds its lambda
+    // to the receiver exactly as `customerIds.Any(id => ...)` does, but List<T>.ForEach
+    // is declared on the collection rather than as an extension. Without this the lambda
+    // parameter resolved to nothing and the tagged collection's element tag was lost.
+    public static bool IsEnumerableShapeInstanceCall(this IInvocationOperation invocation) =>
+        invocation.Instance?.Type.TryGetEnumerableElementType() is not null;
+
     // For a reduced extension-method call (`x.Ext(...)`), `method.Parameters` excludes
     // the receiver — the "this" parameter only appears on the unreduced symbol, which
     // ReducedFrom surfaces. For calls written in static form (`Ext(x, ...)`) the method
@@ -199,6 +232,27 @@ static class LinqExtensions
         while (current is not null)
         {
             if (current is IAnonymousFunctionOperation)
+            {
+                return current;
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
+    }
+
+    // The anonymous function `param` is a parameter OF, which is not necessarily the
+    // innermost one enclosing the reference — nested lambdas over collections with the
+    // same element type are the case that tells them apart.
+    public static IOperation? FindDeclaringAnonymousFunction(this IParameterReferenceOperation param)
+    {
+        var owner = param.Parameter.ContainingSymbol;
+        var current = param.Parent;
+        while (current is not null)
+        {
+            if (current is IAnonymousFunctionOperation lambda &&
+                SymbolEqualityComparer.Default.Equals(lambda.Symbol, owner))
             {
                 return current;
             }
@@ -280,7 +334,12 @@ static class LinqExtensions
             return null;
         }
 
-        var anonymous = param.FindEnclosingAnonymousFunction();
+        // The lambda that DECLARES the parameter, not the nearest one around this
+        // reference. `customerIds.Any(c => orderIds.Any(o => IsCustomer(c)))` reads `c`
+        // from inside the inner lambda, and binding it to the inner receiver made `c` an
+        // order id — a false SIA001 on the call, and silence on `o == c`. Only shows up
+        // when both collections share an element type, which is every id-list pair.
+        var anonymous = param.FindDeclaringAnonymousFunction();
         if (anonymous is null)
         {
             return null;
@@ -292,7 +351,8 @@ static class LinqExtensions
             return null;
         }
 
-        if (!invocation.TargetMethod.IsEnumerableShapeExtension())
+        if (!invocation.TargetMethod.IsEnumerableShapeExtension() &&
+            !invocation.IsEnumerableShapeInstanceCall())
         {
             return null;
         }

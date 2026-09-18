@@ -8,6 +8,15 @@ static class AttributeHost
     // FieldDeclarationSyntax, which would apply the attribute to *all* declarators.
     public static SyntaxNode? Find(SyntaxNode node)
     {
+        // A tuple element declares no attribute host of its own: it lives inside a tuple
+        // TYPE, so climbing out of it lands on whatever parameter or property that type
+        // annotates. `[Id]` there describes the whole tuple (leaving the diagnostic in
+        // place) and a rename rewrites the element while the title says "parameter".
+        if (node.FirstAncestorOrSelf<TupleElementSyntax>() is not null)
+        {
+            return null;
+        }
+
         var declarator = node.FirstAncestorOrSelf<VariableDeclaratorSyntax>();
         if (declarator is not null)
         {
@@ -146,7 +155,43 @@ static class AttributeHost
         var adjusted = firstIsLower
             ? char.ToLowerInvariant(tag[0]) + tag.Substring(1)
             : char.ToUpperInvariant(tag[0]) + tag.Substring(1);
-        newName = prefix + adjusted + "Id";
-        return newName != currentName;
+        var candidate = prefix + adjusted + "Id";
+        if (candidate == currentName)
+        {
+            return false;
+        }
+
+        // The rename is only a fix if the naming convention reads the new name back as
+        // the same tag. It cannot for a tag that starts lower-case: the convention
+        // upper-cases the first character, so `[Id("customer")]` renamed to `customerId`
+        // infers "Customer", the tags still differ ordinally, and the user is left with
+        // an SIA001 where they had an SIA003.
+        if (!ConventionReadsBack(candidate, tag))
+        {
+            return false;
+        }
+
+        newName = candidate;
+        return true;
+    }
+
+    // Mirror of the analyzer's `<Xxx>Id` rule — the two projects share no code, so the
+    // round-trip is checked against a local copy rather than assumed.
+    static bool ConventionReadsBack(string name, string tag)
+    {
+        var bare = name.TrimStart('_');
+        if (bare.Length <= 2 ||
+            !bare.EndsWith("Id", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var inferred = bare.Substring(0, bare.Length - 2);
+        if (char.IsLower(inferred[0]))
+        {
+            inferred = char.ToUpperInvariant(inferred[0]) + inferred.Substring(1);
+        }
+
+        return string.Equals(inferred, tag, StringComparison.Ordinal);
     }
 }
