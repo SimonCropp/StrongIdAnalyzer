@@ -5,8 +5,21 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+    <!-- The Roslyn floor: a shipping contract, not a dependency to keep current. Any
+         compiler older than the one an analyzer was built against skips it with CS9057 —
+         a warning, so the symptom is every diagnostic silently disappearing. The generator
+         goes with it, so consumers also lose [Id] / [UnionId] and get a CS0246 cascade.
+
+         4.11 is the .NET 8 SDK's compiler, so this loads on .NET 8, 9 and 10. It is also
+         the practical lower bound: Roslyn 4.8 and below bundle a System.Collections.
+         Immutable predating CollectionBuilderAttribute, and the collection expressions
+         over ImmutableArray in this repo fail there with CS9210.
+
+         Raising this drops every toolchain below the new value. RoslynFloorTests pins the
+         version actually compiled into the shipped assemblies so it cannot happen by
+         accident — the build stays green either way. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" Pinned="true" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.11.0" Pinned="true" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
     <PackageVersion Include="MarkdownSnippets.MsBuild" Version="28.4.2" />
     <PackageVersion Include="Polyfill" Version="11.3.0" />
