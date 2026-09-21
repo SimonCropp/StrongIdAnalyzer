@@ -69,11 +69,11 @@ static class Rules
     static readonly DiagnosticDescriptor redundantId = new(
         id: "SIA005",
         title: "Redundant [Id] attribute",
-        messageFormat: "[Id(\"{0}\")] on {1} is redundant: the naming convention already infers \"{0}\". Fix: remove the attribute.",
+        messageFormat: "[Id(\"{0}\")] on {1} is redundant: {2}. Fix: remove the attribute.",
         category: "IdAttribute.Usage",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "The explicit [Id] repeats exactly what the naming convention infers from the member and type names. Remove the attribute. Apply mechanically with: dotnet format analyzers --diagnostics SIA005.",
+        description: "The explicit [Id] repeats a tag the member would carry without it: from the naming convention, a member it overrides or implements, the record primary-constructor parameter it was declared with, its wrapper type, or an [assembly: ExternalId] mapping. Remove the attribute. Apply mechanically with: dotnet format analyzers --diagnostics SIA005.",
         helpLinkUri: helpRoot + "SIA005.md",
         customTags: [WellKnownDiagnosticTags.CompilationEnd]);
 
@@ -244,13 +244,26 @@ static class Rules
             string.Join(", ", others.Select(_ => Describe(_, qualifiedFormat))),
             conventionName));
 
-    // SIA005. Compilation-end: an explicit [Id] repeating what convention already infers.
+    // SIA005. Compilation-end: an explicit [Id] repeating a tag the member would carry
+    // anyway. The message names what supplies it — "the naming convention" is only one of
+    // the possibilities, and naming the wrong one sends the reader looking in the wrong place.
     public static void ReportRedundant(
         CompilationAnalysisContext context,
         Location location,
         ISymbol symbol,
-        string value) =>
-        context.ReportDiagnostic(Diagnostic.Create(redundantId, location, value, Describe(symbol)));
+        string value,
+        RedundancyReason reason) =>
+        context.ReportDiagnostic(Diagnostic.Create(redundantId, location, value, Describe(symbol), Because(reason, value)));
+
+    static string Because(RedundancyReason reason, string value) =>
+        reason switch
+        {
+            RedundancyReason.Inherited => $"it already inherits \"{value}\" from the member it overrides or implements",
+            RedundancyReason.RecordParameter => $"the record primary-constructor parameter already carries \"{value}\"",
+            RedundancyReason.Wrapper => $"its wrapper type already carries \"{value}\"",
+            RedundancyReason.External => $"[assembly: ExternalId] already maps it to \"{value}\"",
+            _ => $"the naming convention already infers \"{value}\""
+        };
 
     // SIA006. The single option travels in the property bag so the fixer can rewrite
     // [UnionId("X")] to [Id("X")] without re-parsing the attribute.

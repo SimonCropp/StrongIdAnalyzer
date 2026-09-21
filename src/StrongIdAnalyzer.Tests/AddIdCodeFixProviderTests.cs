@@ -886,6 +886,95 @@ public class AddIdCodeFixProviderTests
         await Contains(fixedSource, "Obsolete");
     }
 
+    // The redundant list is the second one on the declaration, so nothing that sits before the
+    // declaration belongs to it. Only the list goes: the parameter keeps its indentation, and
+    // the space before the type — which travelled with the removed list — is put back.
+    [Test]
+    public async Task SIA005_RemovesPropertyTargetedTwin_KeepingLayout()
+    {
+        var source =
+            """
+            using System;
+
+            public record Change(
+                Guid Other,
+                [Id("User")][property: Id("User")] Guid? PerformedById);
+            """;
+
+        var fixedSource = await ApplyFix(source, "SIA005");
+
+        await Assert.That(fixedSource).IsEqualTo(
+            """
+            using System;
+
+            public record Change(
+                Guid Other,
+                [Id("User")] Guid? PerformedById);
+            """);
+    }
+
+    [Test]
+    public async Task SIA005_RemovesPropertyTargetedTwin_SpacedLists()
+    {
+        var source =
+            """
+            using System;
+
+            public record Change(
+                Guid Other,
+                [Id("User")] [property: Id("User")] Guid? PerformedById);
+            """;
+
+        var fixedSource = await ApplyFix(source, "SIA005");
+
+        await Assert.That(fixedSource).IsEqualTo(
+            """
+            using System;
+
+            public record Change(
+                Guid Other,
+                [Id("User")] Guid? PerformedById);
+            """);
+    }
+
+    // A later list on its own line: the comment written above it survives, and so does the
+    // blank line separating the member from the one before it — the declaration's own leading
+    // trivia is not this list's to rearrange.
+    [Test]
+    public async Task SIA005_RemovesLaterListOnItsOwnLine_KeepingCommentsAndSpacing()
+    {
+        var source =
+            """
+            using System;
+
+            public class Order
+            {
+                public Guid Other { get; set; }
+
+                [Obsolete]
+                // why this is here
+                [Id("Customer")]
+                public Guid CustomerId { get; set; }
+            }
+            """;
+
+        var fixedSource = await ApplyFix(source, "SIA005");
+
+        await Assert.That(fixedSource).IsEqualTo(
+            """
+            using System;
+
+            public class Order
+            {
+                public Guid Other { get; set; }
+
+                [Obsolete]
+                // why this is here
+                public Guid CustomerId { get; set; }
+            }
+            """);
+    }
+
     [Test]
     public async Task SIA003_UnionSource_OffersUnionAndPerValueFixes()
     {

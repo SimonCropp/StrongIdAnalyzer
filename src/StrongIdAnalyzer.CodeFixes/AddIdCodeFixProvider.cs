@@ -724,7 +724,13 @@ public class AddIdCodeFixProvider : CodeFixProvider
 
         SyntaxNode newRoot;
         if (attribute.Parent is AttributeListSyntax { Attributes.Count: 1 } list &&
-            list.Parent is { } owner)
+            list.Parent is { } owner &&
+            owner.GetFirstToken() != list.OpenBracketToken)
+        {
+            newRoot = RemoveLaterList(root, list);
+        }
+        else if (attribute.Parent is AttributeListSyntax { Attributes.Count: 1 } firstList &&
+                 firstList.Parent is { } firstOwner)
         {
             // Whole list (e.g. `[Id("Order")]`) is just this attribute — drop the list so we
             // don't leave behind empty brackets on the declaration.
@@ -738,11 +744,11 @@ public class AddIdCodeFixProvider : CodeFixProvider
             // that second part is dropped: the list's own trivia already ends with the
             // indentation the declaration needs, so keeping it would leave behind the
             // empty line the attribute used to occupy.
-            var stripped = owner.RemoveNode(list, SyntaxRemoveOptions.KeepNoTrivia)!;
-            var leading = list
+            var stripped = firstOwner.RemoveNode(firstList, SyntaxRemoveOptions.KeepNoTrivia)!;
+            var leading = firstList
                 .GetLeadingTrivia()
                 .AddRange(stripped.GetLeadingTrivia().SkipWhile(IsBlank));
-            newRoot = root.ReplaceNode(owner, stripped.WithLeadingTrivia(leading));
+            newRoot = root.ReplaceNode(firstOwner, stripped.WithLeadingTrivia(leading));
         }
         else
         {
@@ -750,6 +756,45 @@ public class AddIdCodeFixProvider : CodeFixProvider
         }
 
         return document.WithSyntaxRoot(newRoot);
+    }
+
+    // A list that is not the first on its declaration — the record twin
+    // `[Id("User")][property: Id("User")] Guid? PerformedById`, or `[Obsolete]` then `[Id(...)]`
+    // on separate lines. Everything written above the declaration belongs to the first list, so
+    // the declaration's own leading trivia is left alone: rebuilding it, as the first-list path
+    // does, dropped the indentation and any blank line above the member. Only this list and its
+    // trivia go, keeping two things:
+    //  * comments or directives written above it, which move onto the next token;
+    //  * the space before the next token when this list sat flush against the previous one,
+    //    `[A][B] T x`, since that space was B's trailing trivia.
+    static SyntaxNode RemoveLaterList(SyntaxNode root, AttributeListSyntax list)
+    {
+        var previous = list.OpenBracketToken.GetPreviousToken();
+        var next = list.CloseBracketToken.GetNextToken();
+
+        var leading = list.GetLeadingTrivia();
+        var nextLeading = next.LeadingTrivia;
+        if (leading.Any(_ => !IsBlank(_)))
+        {
+            nextLeading = leading.AddRange(nextLeading.SkipWhile(IsBlank));
+        }
+
+        if (previous.TrailingTrivia.Count == 0 &&
+            nextLeading.Count == 0)
+        {
+            nextLeading = SyntaxFactory.TriviaList(SyntaxFactory.Space);
+        }
+
+        // Mark the next token so it can be found again once the list is gone. An annotation
+        // does not change the text, so the list's span still locates it in the marked tree.
+        var annotation = new SyntaxAnnotation();
+        var marked = root.ReplaceToken(next, next.WithAdditionalAnnotations(annotation));
+        var markedList = marked
+            .FindNode(list.Span)
+            .FirstAncestorOrSelf<AttributeListSyntax>()!;
+        var removed = marked.RemoveNode(markedList, SyntaxRemoveOptions.KeepNoTrivia)!;
+        var markedNext = removed.GetAnnotatedTokens(annotation).Single();
+        return removed.ReplaceToken(markedNext, markedNext.WithLeadingTrivia(nextLeading));
     }
 
     static bool IsBlank(SyntaxTrivia trivia) =>

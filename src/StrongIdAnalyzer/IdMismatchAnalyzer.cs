@@ -67,7 +67,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 string,
                 ConcurrentBag<ISymbol>>(StringComparer.Ordinal);
             var redundantCandidates = new ConcurrentBag<
-                (ISymbol Symbol, string Value, SyntaxReference Reference, bool JoinsAmbiguity)>();
+                (ISymbol Symbol, string Value, RedundancyReason Reason, SyntaxReference Reference, bool JoinsAmbiguity)>();
 
             start.RegisterSymbolAction(
                 _ => CollectConvention(_, config, ambiguity, redundantCandidates),
@@ -234,7 +234,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         SymbolAnalysisContext context,
         Config config,
         ConcurrentDictionary<string, ConcurrentBag<ISymbol>> ambiguity,
-        ConcurrentBag<(ISymbol Symbol, string Value, SyntaxReference Reference, bool JoinsAmbiguity)> redundantCandidates)
+        ConcurrentBag<(ISymbol Symbol, string Value, RedundancyReason Reason, SyntaxReference Reference, bool JoinsAmbiguity)> redundantCandidates)
     {
         var symbol = context.Symbol;
         if (symbol.DeclaringSyntaxReferences.IsEmpty)
@@ -301,7 +301,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         if (TagWithoutAttribute(symbol, config, explicitValue, conventionName, hasWrapperTag, wrapperTag) is not { } effective ||
-            !string.Equals(explicitValue, effective, StringComparison.Ordinal))
+            !string.Equals(explicitValue, effective.Tag, StringComparison.Ordinal))
         {
             return;
         }
@@ -312,7 +312,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        redundantCandidates.Add((symbol, effective, syntaxRef, joinsAmbiguity));
+        redundantCandidates.Add((symbol, effective.Tag, effective.Reason, syntaxRef, joinsAmbiguity));
     }
 
     // The single tag `symbol` would resolve to with its explicit attribute deleted, or
@@ -327,7 +327,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // The suffix probe runs against the index minus this attribute's own tag: an explicit
     // attribute contributes to KnownTags, so matching against the whole index would let
     // the attribute vouch for the very candidate it is being compared with.
-    static string? TagWithoutAttribute(
+    //
+    // Returns which step supplied the tag as well, so the message can say why the attribute
+    // is redundant rather than always blaming the naming convention.
+    static (string Tag, RedundancyReason Reason)? TagWithoutAttribute(
         ISymbol symbol,
         Config config,
         string explicitValue,
@@ -337,18 +340,19 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         if (config.ExternalIds.TryGetSymbolTags(symbol, receiverType: null, out var external))
         {
-            return OnlyTag(external);
+            return Because(OnlyTag(external), RedundancyReason.External);
         }
 
-        var inherited = InheritedId(symbol);
+        var inherited = InheritedId(symbol, out var fromRecordParameter);
         if (inherited.State == IdState.Present)
         {
-            return OnlyTag(inherited.Tags);
+            var reason = fromRecordParameter ? RedundancyReason.RecordParameter : RedundancyReason.Inherited;
+            return Because(OnlyTag(inherited.Tags), reason);
         }
 
         if (hasWrapperTag)
         {
-            return wrapperTag;
+            return (wrapperTag, RedundancyReason.Wrapper);
         }
 
         if (config.InferSuffixTags &&
@@ -357,17 +361,39 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 config.KnownTags.Value.Without(explicitValue),
                 out var suffixTag))
         {
-            return suffixTag;
+            return (suffixTag, RedundancyReason.Convention);
         }
 
-        return conventionName.Length == 0 ? null : conventionName;
+        if (conventionName.Length == 0)
+        {
+            return null;
+        }
+
+        return (conventionName, RedundancyReason.Convention);
+    }
+
+    static (string Tag, RedundancyReason Reason)? Because(string? tag, RedundancyReason reason)
+    {
+        if (tag is null)
+        {
+            return null;
+        }
+
+        return (tag, reason);
     }
 
     // Tags a member would still carry from somewhere other than its own attribute:
     // an override / interface-implementation chain, or — for a record's synthesized
     // property — the primary-constructor parameter the compiler left the attribute on.
-    static IdInfo InheritedId(ISymbol symbol)
+    //
+    // Deliberately one-way. A parameter does resolve a `[property: Id]` from its
+    // synthesized property (GetIdWithInheritance), but that must not count here: with
+    // `[Id("X")][property: Id("X")]` each half would vouch for the other, SIA005 would
+    // call both redundant, and fixing both would strip the tag. The parameter is the
+    // attribute's default target, so it is the half that stays.
+    static IdInfo InheritedId(ISymbol symbol, out bool fromRecordParameter)
     {
+        fromRecordParameter = false;
         if (symbol is IParameterSymbol parameter)
         {
             return GetParameterIdFromHierarchy(parameter);
@@ -386,7 +412,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         if (property.FindRecordPrimaryParameter() is { } recordParameter)
         {
-            return GetIdFromAttributes(recordParameter.GetAttributes());
+            var fromParameter = GetIdFromAttributes(recordParameter.GetAttributes());
+            fromRecordParameter = fromParameter.State == IdState.Present;
+            return fromParameter;
         }
 
         return IdInfo.NotPresent;
@@ -398,7 +426,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     static void ReportConventionDiagnostics(
         CompilationAnalysisContext context,
         ConcurrentDictionary<string, ConcurrentBag<ISymbol>> ambiguity,
-        ConcurrentBag<(ISymbol Symbol, string Value, SyntaxReference Reference, bool JoinsAmbiguity)> redundantCandidates)
+        ConcurrentBag<(ISymbol Symbol, string Value, RedundancyReason Reason, SyntaxReference Reference, bool JoinsAmbiguity)> redundantCandidates)
     {
         foreach (var entry in ambiguity)
         {
@@ -459,7 +487,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            Rules.ReportRedundant(context, candidate.Reference.ToLocation(), candidate.Symbol, candidate.Value);
+            Rules.ReportRedundant(context, candidate.Reference.ToLocation(), candidate.Symbol, candidate.Value, candidate.Reason);
         }
     }
 
@@ -1642,6 +1670,17 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             {
                 return inherited;
             }
+
+            // A record primary-ctor parameter carries a `[property: Id]` written on the
+            // property it synthesizes — the mirror of the property branch above.
+            if (parameter.FindRecordPrimaryProperty() is { } recordProperty)
+            {
+                var fromProperty = GetIdFromAttributes(recordProperty.GetAttributes());
+                if (fromProperty.State == IdState.Present)
+                {
+                    return fromProperty;
+                }
+            }
         }
 
         var implicitTags = symbol.GetImplicitTagsFromContainingGenerics();
@@ -2313,6 +2352,17 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             if (inherited.State == IdState.Present)
             {
                 return inherited;
+            }
+
+            // A record primary-ctor parameter carries a `[property: Id]` written on the
+            // property it synthesizes — the mirror of the property branch above.
+            if (parameter.FindRecordPrimaryProperty() is { } recordProperty)
+            {
+                var fromProperty = GetIdFromAttributes(recordProperty.GetAttributes());
+                if (fromProperty.State == IdState.Present)
+                {
+                    return fromProperty;
+                }
             }
         }
 
