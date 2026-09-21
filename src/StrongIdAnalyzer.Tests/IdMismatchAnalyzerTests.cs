@@ -6239,6 +6239,217 @@ public class IdMismatchAnalyzerTests
         await Assert.That(diagnostics).IsEmpty();
     }
 
+    // A setter's `value` is the property's value. Read as a bare parameter it had no
+    // attribute, no convention tag and no declaration, so it was treated like metadata and
+    // every flow out of a setter went unchecked. The C# 14 `field` half of the same fix is
+    // covered in IntegrationTests: these tests compile against the Roslyn floor (4.11),
+    // which cannot parse `field`.
+    const string setterTargets =
+        """
+        public static class Target
+        {
+            public static void TakeCustomer([Id("Customer")] Guid customer) { }
+            public static void TakeProduct([Id("Product")] Guid product) { }
+        }
+        """;
+
+    [Test]
+    public async Task SetterValue_CarriesExplicitPropertyTag()
+    {
+        var source =
+            $$"""
+            using System;
+
+            {{setterTargets}}
+
+            public class Order
+            {
+                [Id("Product")]
+                public Guid Item
+                {
+                    get => default;
+                    set => Target.TakeCustomer(value);
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
+    [Test]
+    public async Task SetterValue_CarriesConventionPropertyTag()
+    {
+        var source =
+            $$"""
+            using System;
+
+            {{setterTargets}}
+
+            public class Order
+            {
+                public Guid CustomerId
+                {
+                    get => default;
+                    set => Target.TakeProduct(value);
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
+    [Test]
+    public async Task SetterValue_UntaggedProperty_FixSiteIsTheProperty()
+    {
+        var source =
+            $$"""
+            using System;
+
+            {{setterTargets}}
+
+            public class Order
+            {
+                public Guid Plain
+                {
+                    get => default;
+                    set => Target.TakeCustomer(value);
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA002"]);
+        await Assert.That(diagnostics[0].GetMessage()).StartsWith("property 'Order.Plain' has no [Id]");
+    }
+
+    [Test]
+    public async Task SetterValue_TaggedPropertyOverUntaggedField_FiresSia003()
+    {
+        var source =
+            """
+            using System;
+
+            public class Order
+            {
+                Guid buyer;
+
+                [Id("Customer")]
+                public Guid Buyer
+                {
+                    get => buyer;
+                    set => buyer = value;
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA003"]);
+    }
+
+    [Test]
+    public async Task SetterValue_TaggedPropertyOverTaggedField_IsSilent()
+    {
+        var source =
+            """
+            using System;
+
+            public class Order
+            {
+                [Id("Customer")]
+                Guid buyer;
+
+                [Id("Customer")]
+                public Guid Buyer
+                {
+                    get => buyer;
+                    set
+                    {
+                        if (buyer == value)
+                        {
+                            return;
+                        }
+
+                        buyer = value;
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEmpty();
+    }
+
+    // An indexer's set accessor takes its index parameters before `value`. Only the last
+    // parameter is the assigned value; binding `index` to the indexer would read it as a
+    // Customer id.
+    [Test]
+    public async Task IndexerSetter_IndexParameterKeepsItsOwnTag()
+    {
+        var source =
+            $$"""
+            using System;
+
+            {{setterTargets}}
+
+            public class Orders
+            {
+                [Id("Customer")]
+                public Guid this[[Id("Product")] Guid index]
+                {
+                    get => default;
+                    set
+                    {
+                        Target.TakeProduct(index);
+                        Target.TakeCustomer(value);
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEmpty();
+    }
+
+    [Test]
+    public async Task CollectionSetterValue_ForeachBindsElementTags()
+    {
+        var source =
+            $$"""
+            using System;
+            using System.Collections.Generic;
+
+            {{setterTargets}}
+
+            public class Order
+            {
+                [Id("Product")]
+                public List<Guid> Items
+                {
+                    get => [];
+                    set
+                    {
+                        foreach (var id in value)
+                        {
+                            Target.TakeCustomer(id);
+                        }
+                    }
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
+    }
+
     // `[UnionId(null)]` binds null to the params array itself. Reading Values.Length on
     // that constant throws, which surfaced as AD0001 rather than a diagnostic.
     [Test]

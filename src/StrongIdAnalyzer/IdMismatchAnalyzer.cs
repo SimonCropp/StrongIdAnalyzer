@@ -1155,15 +1155,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     return anonInfo;
                 }
 
-                if (TryResolveWrapperReceiver(prop.Property, prop.Instance, config, out var propReceiverInfo))
+                return ResolvePropertyInfo(prop.Property, prop.Instance, prop.Instance?.Type, config);
+            case IFieldReferenceOperation field:
+                // `field` inside a property's accessors reads as the property itself — see
+                // Extensions.ResolveBackingField. Its instance is the implicit `this`, so the
+                // receiver walk sees the same type `this.Property` would.
+                if (field.Field.ResolveBackingField() is IPropertySymbol backedProperty)
                 {
-                    return propReceiverInfo;
+                    return ResolvePropertyInfo(backedProperty, field.Instance, field.Instance?.Type, config);
                 }
 
-                return SuppressCollectionTag(
-                    prop.Property.Type,
-                    GetMemberAccessInfo(prop.Property, prop.Instance?.Type, config));
-            case IFieldReferenceOperation field:
                 if (TryResolveWrapperReceiver(field.Field, field.Instance, config, out var fieldReceiverInfo))
                 {
                     return fieldReceiverInfo;
@@ -1176,6 +1177,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 if (TryResolveLambdaParameterFromLinq(param, config, out var lambdaInfo))
                 {
                     return lambdaInfo;
+                }
+
+                // A setter's `value` reads as the property it assigns — see
+                // Extensions.ResolveAccessorValue. There is no receiver operation, so the
+                // containing type stands in for the implicit `this`.
+                if (param.Parameter.ResolveAccessorValue() is IPropertySymbol assignedProperty)
+                {
+                    var receiverType = assignedProperty.IsStatic ? null : assignedProperty.ContainingType;
+                    return ResolvePropertyInfo(assignedProperty, null, receiverType, config);
                 }
 
                 return SuppressCollectionTag(
@@ -1211,6 +1221,24 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             default:
                 return IdInfo.Unknown;
         }
+    }
+
+    // Shared by a property read and by the two accessor symbols that stand for the property
+    // (`value`, `field`), so all three resolve through the same receiver walk.
+    static IdInfo ResolvePropertyInfo(
+        IPropertySymbol property,
+        IOperation? instance,
+        ITypeSymbol? receiverType,
+        Config config)
+    {
+        if (TryResolveWrapperReceiver(property, instance, config, out var receiverInfo))
+        {
+            return receiverInfo;
+        }
+
+        return SuppressCollectionTag(
+            property.Type,
+            GetMemberAccessInfo(property, receiverType, config));
     }
 
     // Unwrapping a wrapper whose receiver carries an explicit tag: `[Id("Payer")] UserId

@@ -15,6 +15,13 @@ public class ConsumeTests
     }
 
     [Test]
+    public void FieldKeywordBuildsClean()
+    {
+        var sample = new FieldKeywordSample();
+        sample.AssignMatching();
+    }
+
+    [Test]
     public void GeneratedIdAttribute_IsAvailable() =>
         // Compile-time: this line fails to build if the source generator did not emit
         // IdAttribute into the consumer compilation.
@@ -79,4 +86,29 @@ public class IdSample
     public void AssignSuppressedMismatch() =>
         ConsumeOrderId(CustomerId);
 #pragma warning restore SIA001
+}
+
+// C# 14's `field` keyword and a setter's `value` both read as the property itself, so the
+// guard, the store and the matching call below all agree with OrderId's convention tag.
+// Any SIA001/002/003 is an error here, given WarningsAsErrors. The src/ unit tests
+// compile against the Roslyn floor (4.11), which cannot parse `field`.
+public class FieldKeywordSample
+{
+    public System.Guid OrderId
+    {
+        get;
+        set
+        {
+            if (field == value)
+            {
+                return;
+            }
+
+            field = value;
+            IdSample.ConsumeOrderId(field);
+        }
+    }
+
+    public void AssignMatching() =>
+        OrderId = System.Guid.NewGuid();
 }
