@@ -4233,9 +4233,10 @@ public class IdMismatchAnalyzerTests
         await Assert.That(sia005.Length).IsEqualTo(1);
         // The parameter's `[Id("User")]` precedes `[property: ...]`, so a span starting
         // past that point is the property-targeted attribute.
-        var text = sia005[0].Location.SourceTree!.GetText().ToString();
+        var location = sia005[0].Location;
+        var text = (await location.SourceTree!.GetTextAsync()).ToString();
         var propertyTarget = text.IndexOf("[property:", StringComparison.Ordinal);
-        await Assert.That(sia005[0].Location.SourceSpan.Start).IsGreaterThan(propertyTarget);
+        await Assert.That(location.SourceSpan.Start).IsGreaterThan(propertyTarget);
     }
 
     // A plain class's property is not the same declaration as a constructor parameter,
