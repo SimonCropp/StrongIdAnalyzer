@@ -36,11 +36,51 @@ static class Extensions
         operation.Unwrap() switch
         {
             IPropertyReferenceOperation prop => prop.Property,
-            IFieldReferenceOperation field => field.Field,
-            IParameterReferenceOperation param => param.Parameter,
+            IFieldReferenceOperation field => field.Field.ResolveBackingField(),
+            IParameterReferenceOperation param => param.Parameter.ResolveAccessorValue(),
             IInvocationOperation invocation => invocation.TargetMethod,
             _ => null
         };
+
+    // The implicit `value` of a set or init accessor *is* the property's value: assigning
+    // to `[Id("Customer")] Guid Buyer` means what is assigned is a Customer id. Read as a
+    // bare parameter it carries no attribute, no naming-convention tag and no
+    // DeclaringSyntaxReferences, so it was treated like a metadata symbol and every flow
+    // out of a setter went unchecked — a Product property's `value` passed to a Customer
+    // parameter, or stored into an untagged backing field, reported nothing.
+    public static ISymbol ResolveAccessorValue(this IParameterSymbol parameter)
+    {
+        // An indexer's set accessor takes its index parameters *before* `value`, so only
+        // the last one is the assigned value — binding `index` to the indexer would claim
+        // the index carries the indexer's tag.
+        if (parameter.ContainingSymbol is IMethodSymbol
+            {
+                MethodKind: MethodKind.PropertySet,
+                AssociatedSymbol: IPropertySymbol property
+            } setter &&
+            parameter.Ordinal == setter.Parameters.Length - 1)
+        {
+            return property;
+        }
+
+        return parameter;
+    }
+
+    // C# 14's `field` keyword reads and writes a property's synthesized backing field. That
+    // field is the property's storage, not a declaration of its own: it carries none of the
+    // property's attributes, is implicitly declared (so gets no naming-convention tag) and
+    // has no DeclaringSyntaxReferences, so every flow through it went unchecked the same
+    // way `value` did. Resolved to the property, both sides of `field = value` name the
+    // same symbol and agree, and `Take(field)` carries the property's tag.
+    public static ISymbol ResolveBackingField(this IFieldSymbol field)
+    {
+        if (field.AssociatedSymbol is IPropertySymbol property)
+        {
+            return property;
+        }
+
+        return field;
+    }
 
     // Returns the declared type of a value-producing symbol: property / field /
     // parameter / local → its Type; method → ReturnType. Other symbol kinds don't

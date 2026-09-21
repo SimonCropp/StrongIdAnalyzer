@@ -150,6 +150,85 @@ public class CodeFixConsumeTests
         await Assert.That(diagnostics.Any(_ => _.Id == "SIA001")).IsTrue();
     }
 
+    // C# 14's `field` keyword is the property's synthesized backing field: no attribute,
+    // no convention tag, no declaration. Read as itself, every flow through it went
+    // unchecked. These two are the only coverage of that shape — the src/ unit tests
+    // compile against the Roslyn floor (4.11), which cannot parse `field`.
+    [Test]
+    public async Task PackagedAnalyzer_Raises_SIA001_ThroughFieldKeyword()
+    {
+        var (analyzer, _) = await LoadAnalyzerAndCodeFixFromPackage();
+
+        var source =
+            """
+            using StrongIdAnalyzer;
+
+            public class Target
+            {
+                public static void Consume([Id("Order")] System.Guid value) { }
+            }
+
+            public class Holder
+            {
+                public System.Guid CustomerId
+                {
+                    get;
+                    set
+                    {
+                        field = value;
+                        Target.Consume(field);
+                    }
+                }
+            }
+            """;
+
+        var (_, diagnostic) = await CompileAndAnalyzeSingle(source, analyzer);
+
+        await Assert.That(diagnostic.Id).IsEqualTo("SIA001");
+        await Assert.That(diagnostic.GetMessage()).StartsWith("property 'Holder.CustomerId'");
+    }
+
+    [Test]
+    public async Task PackagedCodeFixProvider_AddsIdToProperty_ForFieldKeyword()
+    {
+        var (analyzer, codeFix) = await LoadAnalyzerAndCodeFixFromPackage();
+
+        var source =
+            """
+            using StrongIdAnalyzer;
+
+            public class Target
+            {
+                public static void Consume([Id("Order")] System.Guid value) { }
+            }
+
+            public class Holder
+            {
+                public System.Guid Value
+                {
+                    get;
+                    set
+                    {
+                        field = value;
+                        Target.Consume(field);
+                    }
+                }
+            }
+            """;
+
+        var (document, diagnostic) = await CompileAndAnalyzeSingle(source, analyzer);
+
+        await Assert.That(diagnostic.Id).IsEqualTo("SIA002");
+        await Assert.That(diagnostic.GetMessage()).StartsWith("property 'Holder.Value' has no [Id]");
+
+        var actions = await RegisterActions(codeFix, document, diagnostic);
+
+        var action = actions.Single(_ => _.EquivalenceKey!.StartsWith("AddId:"));
+        var fixedText = await ApplyAction(action, document);
+
+        await Assert.That(fixedText.Contains("[Id(\"Order\")]")).IsTrue();
+    }
+
     static async Task<ImmutableArray<CodeAction>> RegisterActions(
         CodeFixProvider codeFix,
         Document document,
