@@ -49,6 +49,14 @@ static class IdAttributeExtensions
             return parameter.GetAttributes().HasIdFamilyAttribute();
         }
 
+        // And the reverse: `[property: Id]` is physically on the synthesized property,
+        // but the parameter is the same declaration.
+        if (symbol is IParameterSymbol recordParameter &&
+            recordParameter.FindRecordPrimaryProperty() is { } recordProperty)
+        {
+            return recordProperty.GetAttributes().HasIdFamilyAttribute();
+        }
+
         return false;
     }
 
@@ -87,6 +95,30 @@ static class IdAttributeExtensions
                 {
                     return parameter;
                 }
+            }
+        }
+
+        return null;
+    }
+
+    // The mirror of FindRecordPrimaryParameter: the property a record's primary-ctor
+    // parameter produces. `[property: Id]` puts the attribute on that property only, and
+    // without this lookup a value passed into the constructor is checked against the
+    // parameter's name-inferred tag instead — which forced users to write the tag twice.
+    public static IPropertySymbol? FindRecordPrimaryProperty(this IParameterSymbol parameter)
+    {
+        if (parameter.ContainingSymbol is not IMethodSymbol { MethodKind: MethodKind.Constructor } constructor ||
+            constructor.ContainingType is not { IsRecord: true } type)
+        {
+            return null;
+        }
+
+        foreach (var member in type.GetMembers(parameter.Name))
+        {
+            if (member is IPropertySymbol property &&
+                SymbolEqualityComparer.Default.Equals(property.Type, parameter.Type))
+            {
+                return property;
             }
         }
 

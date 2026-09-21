@@ -267,7 +267,7 @@ When resolving a symbol's id set, the analyzer consults these sources in order a
 1. **`[assembly: ExternalId(...)]` mapping** for the symbol's declaring type, one of its bases, or one of its interfaces (see "Tagging members of referenced assemblies" below) — the consumer's own word about a member it does not own, so it precedes even an attribute on the member.
 2. **Explicit `[Id]` / `[UnionId]`** directly on the symbol.
 3. **Inherited explicit attribute** via the property's override / interface-implementation chain, or the parameter's matching slot on overridden / implemented methods.
-4. **Record primary-constructor parameter attribute** bridged onto the synthesized property (see "Record primary-constructor parameters" below).
+4. **Record primary-constructor bridge** — a synthesized property takes its parameter's attribute, and the parameter takes a `[property: Id]` written on its synthesized property (see "Record primary-constructor parameters" below).
 5. **Wrapper type** (opt-in, see "Wrapper types" below) — the symbol's declared type is a recognised wrapper, it is a wrapper's value member, or it is a wrapper's constructor / factory parameter.
 6. **Naming convention** (rules 1 and 2 above).
 
@@ -277,7 +277,7 @@ At access sites (`child.Id`), covariant receiver-type walking unions the current
 ### Interaction with diagnostics
 
 - **SIA004** only fires for rule 1 collisions — two `public Guid Id` declarations on different types both claiming the same type name. Rule 2 collisions across types are the *intended* matching behavior (`Order.CustomerId` and `Invoice.CustomerId` both referring to "Customer").
-- **SIA005** (redundant `[Id]`) fires only when an explicit `[Id("X")]` exactly equals what the convention would infer — including the suffix rule when it is enabled, and never when the attribute is what makes the inference land on `"X"` in the first place (see "Suffix inference and SIA005"). It ships a fixer that removes the attribute.
+- **SIA005** (redundant `[Id]`) fires only when an explicit `[Id("X")]` exactly equals the id the member would resolve to without it — including the suffix rule when it is enabled, and never when the attribute is what makes the inference land on `"X"` in the first place (see "Suffix inference and SIA005"). It ships a fixer that removes the attribute.
 
 ### Overriding the convention
 
@@ -407,7 +407,7 @@ Each rule has its own page with the message anatomy, every fix option, and the c
 | [SIA002](docs/SIA002.md)  | Warning  | Yes      | Source missing `[Id]`; target has one                                   |
 | [SIA003](docs/SIA003.md)  | Warning  | Yes      | Source has `[Id]`; target missing one                                   |
 | [SIA004](docs/SIA004.md)  | Error    | —        | Two `public Guid Id` declarations collide under the naming convention   |
-| [SIA005](docs/SIA005.md)  | Warning  | Yes      | `[Id("x")]` is redundant — the naming convention already infers `"x"`   |
+| [SIA005](docs/SIA005.md)  | Warning  | Yes      | `[Id("x")]` is redundant — the member already carries `"x"` without it   |
 | [SIA006](docs/SIA006.md)  | Warning  | Yes      | `[UnionId("x")]` with a single option should be `[Id("x")]`             |
 | [SIA007](docs/SIA007.md)  | Error    | —        | `[Id]` / `[UnionId]` tag is empty or whitespace                         |
 | [SIA008](docs/SIA008.md)  | Error    | —        | `[assembly: ExternalId]` names a missing member or supplies no id       |
@@ -1138,6 +1138,17 @@ public static class RecordUsage
 <!-- endSnippet -->
 
 An explicit `[property: Id(...)]` on the property still wins — if both targets are attributed, the property's own attribute is used. Naming-convention inference (for properties named `Id` or `XxxId`) is only consulted after both the property's and the parameter's explicit attributes come up empty.
+
+The bridge runs both ways. A `[property: Id(...)]` alone also tags the parameter, so a value passed into the primary constructor is checked against it rather than against the parameter's naming-convention tag:
+
+```cs
+public record Holder([property: Id("User")] Guid OwnerId);
+
+// no diagnostic — the parameter carries "User", not the "Owner" its name would infer
+new Holder(userId);
+```
+
+So write the tag once. Writing it on both targets — `[Id("User")][property: Id("User")]` — is reported as SIA005 on the `[property: ...]` half only: the parameter is the attribute's default target and already covers the property, so that is the half to keep.
 
 
 ## Wrapper types (opt-in)
