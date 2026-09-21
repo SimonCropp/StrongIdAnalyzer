@@ -107,8 +107,15 @@ static class IdAttributeExtensions
     // parameter's name-inferred tag instead — which forced users to write the tag twice.
     public static IPropertySymbol? FindRecordPrimaryProperty(this IParameterSymbol parameter)
     {
-        if (parameter.ContainingSymbol is not IMethodSymbol { MethodKind: MethodKind.Constructor } constructor ||
-            constructor.ContainingType is not { IsRecord: true } type)
+        if (parameter.ContainingSymbol
+            is not IMethodSymbol
+            {
+                MethodKind: MethodKind.Constructor,
+                ContainingType:
+                {
+                    IsRecord: true
+                } type
+            })
         {
             return null;
         }

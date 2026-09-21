@@ -197,7 +197,7 @@ public class IdAttributeGeneratorTests
 
         var driver = CSharpGeneratorDriver.Create(
             [new IdAttributeGenerator().AsSourceGenerator()],
-            parseOptions: new CSharpParseOptions(version));
+            parseOptions: new(version));
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
@@ -207,7 +207,7 @@ public class IdAttributeGeneratorTests
     static CSharpCompilation BuildCompilation(string source, LanguageVersion version) =>
         CSharpCompilation.Create(
             "Tests",
-            [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(version))],
+            [CSharpSyntaxTree.ParseText(source, new(version))],
             TrustedReferences.All,
             new(OutputKind.DynamicallyLinkedLibrary));
 }

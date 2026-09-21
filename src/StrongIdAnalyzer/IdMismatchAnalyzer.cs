@@ -1429,7 +1429,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             return cached;
         }
 
-        var root = (IOperation)localRef;
+        IOperation root = localRef;
         while (root.Parent is { } parent)
         {
             root = parent;

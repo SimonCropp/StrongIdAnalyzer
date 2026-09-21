@@ -31,10 +31,7 @@ public class IdAttributeGenerator : IIncrementalGenerator
 
         """;
 
-    const string sourceFooter =
-        """
-        }
-        """;
+    const string sourceFooter = "}";
 
     const string baseSource =
         """

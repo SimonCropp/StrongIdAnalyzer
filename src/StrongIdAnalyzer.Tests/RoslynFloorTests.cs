@@ -1,4 +1,4 @@
-using System.Reflection;
+
 
 // The Roslyn version an analyzer is compiled against is a shipping contract: any compiler
 // older than it skips the assembly with CS9057. That is a warning, not an error, so the

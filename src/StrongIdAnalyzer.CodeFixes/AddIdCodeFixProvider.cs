@@ -723,14 +723,22 @@ public class AddIdCodeFixProvider : CodeFixProvider
         }
 
         SyntaxNode newRoot;
-        if (attribute.Parent is AttributeListSyntax { Attributes.Count: 1 } list &&
-            list.Parent is { } owner &&
+        if (attribute.Parent
+                is AttributeListSyntax
+                {
+                    Attributes.Count: 1,
+                    Parent: { } owner
+                } list &&
             owner.GetFirstToken() != list.OpenBracketToken)
         {
             newRoot = RemoveLaterList(root, list);
         }
-        else if (attribute.Parent is AttributeListSyntax { Attributes.Count: 1 } firstList &&
-                 firstList.Parent is { } firstOwner)
+        else if (attribute.Parent
+                 is AttributeListSyntax
+                 {
+                     Attributes.Count: 1,
+                     Parent: { } firstOwner
+                 } firstList)
         {
             // Whole list (e.g. `[Id("Order")]`) is just this attribute — drop the list so we
             // don't leave behind empty brackets on the declaration.
@@ -782,7 +790,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         if (previous.TrailingTrivia.Count == 0 &&
             nextLeading.Count == 0)
         {
-            nextLeading = SyntaxFactory.TriviaList(SyntaxFactory.Space);
+            nextLeading = TriviaList(Space);
         }
 
         // Mark the next token so it can be found again once the list is gone. An annotation
