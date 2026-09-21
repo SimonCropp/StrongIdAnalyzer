@@ -304,6 +304,48 @@ public class MessageTests
             """[Id("Customer")] on property 'Customer.Id' is redundant: the naming convention already infers "Customer". Fix: remove the attribute.""");
     }
 
+    // The name would infer "PerformedBy", so blaming the naming convention here would send the
+    // reader looking in the wrong place. The parameter's own attribute is what makes the
+    // property-targeted one redundant.
+    [Test]
+    public async Task SIA005_RecordPrimaryConstructorParameter()
+    {
+        var source =
+            """
+            using System;
+            public record Change([Id("User")][property: Id("User")] Guid PerformedById);
+            """;
+
+        var diagnostic = await Single(source, "SIA005");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """[Id("User")] on property 'Change.PerformedById' is redundant: the record primary-constructor parameter already carries "User". Fix: remove the attribute.""");
+    }
+
+    [Test]
+    public async Task SIA005_Inherited()
+    {
+        var source =
+            """
+            using System;
+            public interface IOwned
+            {
+                [Id("User")]
+                Guid OwnerId { get; }
+            }
+            public class Thing : IOwned
+            {
+                [Id("User")]
+                public Guid OwnerId { get; set; }
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA005");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """[Id("User")] on property 'Thing.OwnerId' is redundant: it already inherits "User" from the member it overrides or implements. Fix: remove the attribute.""");
+    }
+
     [Test]
     public async Task SIA006()
     {

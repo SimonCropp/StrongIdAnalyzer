@@ -4163,6 +4163,113 @@ public class IdMismatchAnalyzerTests
         await Assert.That(message.Contains("Order")).IsTrue();
     }
 
+    // The mirror of RecordPrimaryCtorParameterAttribute_AppliesToGeneratedProperty.
+    // `[property: Id]` puts the attribute on the synthesized property only, but the
+    // parameter and property are one declaration, so a value passed into the primary
+    // constructor carries the same tag. Without this the parameter falls back to the
+    // naming convention ("Owner") and every construction site reports SIA001, which
+    // forced users to write the tag twice: `[Id("User")][property: Id("User")]`.
+    [Test]
+    public async Task RecordPropertyTargetedAttribute_AppliesToPrimaryCtorParameter()
+    {
+        var source =
+            """
+            using System;
+
+            public record Holder([property: Id("User")] Guid OwnerId);
+
+            public class Producer
+            {
+                public Holder Make([Id("User")] Guid owner) => new Holder(owner);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task RecordPropertyTargetedAttribute_ParameterMismatchAgainstSource()
+    {
+        var source =
+            """
+            using System;
+
+            public record Holder([property: Id("User")] Guid OwnerId);
+
+            public class Producer
+            {
+                public Holder Make([Id("Order")] Guid order) => new Holder(order);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+        var message = diagnostics[0].GetMessage();
+        await Assert.That(message.Contains("User")).IsTrue();
+        await Assert.That(message.Contains("Order")).IsTrue();
+    }
+
+    // Writing the tag twice is now redundant, and exactly one half must say so: the
+    // property-targeted one, since the parameter is the attribute's default target and
+    // already covers the property. If each half vouched for the other, both would be
+    // reported and fixing both would strip the tag.
+    [Test]
+    public async Task SIA005_RecordTagWrittenTwice_FlagsOnlyThePropertyTarget()
+    {
+        var source =
+            """
+            using System;
+
+            public record Holder([Id("User")][property: Id("User")] Guid OwnerId);
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+        var sia005 = diagnostics.Where(_ => _.Id == "SIA005").ToArray();
+
+        await Assert.That(sia005.Length).IsEqualTo(1);
+        // The parameter's `[Id("User")]` precedes `[property: ...]`, so a span starting
+        // past that point is the property-targeted attribute.
+        var text = sia005[0].Location.SourceTree!.GetText().ToString();
+        var propertyTarget = text.IndexOf("[property:", StringComparison.Ordinal);
+        await Assert.That(sia005[0].Location.SourceSpan.Start).IsGreaterThan(propertyTarget);
+    }
+
+    // A plain class's property is not the same declaration as a constructor parameter,
+    // even one spelled identically, so the mapping must stay limited to records. The
+    // parameter keeps its naming-rule tag ("Owner"), and the "User" value passed into it
+    // is a mismatch; had the property's tag leaked across, there would be no diagnostic.
+    [Test]
+    public async Task ClassPropertyAttribute_DoesNotApplyToSameNamedConstructorParameter()
+    {
+        var source =
+            """
+            using System;
+
+            public class Holder
+            {
+                public Holder(Guid OwnerId) { }
+
+                [Id("User")]
+                public Guid OwnerId { get; set; }
+            }
+
+            public class Producer
+            {
+                public Holder Make([Id("User")] Guid owner) => new Holder(owner);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+        var sia001 = diagnostics.Where(_ => _.Id == "SIA001").ToArray();
+
+        await Assert.That(sia001.Length).IsEqualTo(1);
+        await Assert.That(sia001[0].GetMessage().Contains("\"Owner\"")).IsTrue();
+    }
+
     [Test]
     public async Task CrossAssembly_UnionIdOnReferencedProperty_FiresSIA003()
     {
