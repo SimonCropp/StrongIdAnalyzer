@@ -5262,6 +5262,28 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task RecordCollectionProperty_MismatchAgainstConstructorParameter()
+    {
+        var source =
+            """
+            using System.Collections.Generic;
+
+            public record Customer([property: Id("Customer")] IReadOnlyCollection<int> CustomerIds);
+            public record Order([property: Id("Order")] IReadOnlyCollection<int> OrderIds);
+
+            public class Factory
+            {
+                public Order Create(Customer customer) => new(customer.CustomerIds);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
+    }
+
+    [Test]
     public async Task LinqSelect_ChangingElementType_DropsTag_NoChainLeak()
     {
         // `.Select(id => id.ToString())` changes element type Guid → string.

@@ -1024,6 +1024,14 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var targetInfo = GetIdWithInheritance(parameter, config);
         var sourceSymbol = argument.Value.GetReferencedSymbol();
         var sourceInfo = GetAccessInfo(argument.Value, config);
+        if (sourceInfo.State != IdState.Present &&
+            targetInfo.State == IdState.Present &&
+            parameter.Type.TryGetEnumerableElementType() is not null &&
+            argument.Value.Type.TryGetEnumerableElementType() is not null)
+        {
+            sourceInfo = GetReceiverElementTags(argument.Value, config);
+        }
+
         Report(
             context,
             argument.Value.Syntax.GetLocation(),
