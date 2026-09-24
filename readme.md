@@ -1,6 +1,6 @@
 # <img src="/src/icon.png" height="30px"> StrongIdAnalyzer
 
-[![Build status](https://img.shields.io/appveyor/build/SimonCropp/StrongIdAnalyzer)](https://ci.appveyor.com/project/SimonCropp/StrongIdAnalyzer)
+[![Build status](https://github.com/SimonCropp/StrongIdAnalyzer/actions/workflows/build.yml/badge.svg)](https://github.com/SimonCropp/StrongIdAnalyzer/actions/workflows/build.yml)
 [![NuGet Status](https://img.shields.io/nuget/v/StrongIdAnalyzer.svg?label=StrongIdAnalyzer)](https://www.nuget.org/packages/StrongIdAnalyzer/)
 
 Roslyn analyzer that prevents primitive ID values (`Guid`, `int`, `string`, etc.) from being crossed between domain types at compile time. Tag each ID declaration with `[Id("Customer")]`, `[Id("Order")]`, ... and the analyzer flags any assignment or argument that mixes them up.

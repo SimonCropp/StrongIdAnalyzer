@@ -15,7 +15,7 @@ Diagnostic prefix `SIA` — SIA001 (mismatch, fix: change attr or rename target)
 - Tests use **TUnit** on top of Microsoft.Testing.Platform (MTP). Each test project is `OutputType=Exe`. The `dotnet test` MTP runner is opted in via `"test": { "runner": "Microsoft.Testing.Platform" }` in the repo-root `global.json` (and `IntegrationTests/global.json`).
 - `dotnet test --solution src/StrongIdAnalyzer.slnx -c Release` — unit tests against the analyzer (fast).
 - `dotnet test --solution IntegrationTests/IntegrationTests.slnx -c Release` — end-to-end against the packaged analyzer.
-- Alternatively, invoke the test executable directly: `src\StrongIdAnalyzer.Tests\bin\Release\net10.0\StrongIdAnalyzer.Tests.exe` — this is what `src/appveyor.yml` does so it can pass `--report-trx` and `--coverage` flags straight through.
+- Alternatively, invoke the test executable directly: `src\StrongIdAnalyzer.Tests\bin\Release\net10.0\StrongIdAnalyzer.Tests.exe` — this is what `.github/workflows/build.yml` does so it can pass `--report-trx` and `--coverage` flags straight through.
 - Single test: `src\…\StrongIdAnalyzer.Tests.exe --treenode-filter "/*/*/*/NameOfTest*"` (Microsoft.Testing.Platform tree filter: assembly/namespace/class/method; `--filter-method` is not supported by the TUnit version in use).
 - Code coverage: append `--coverage --coverage-output-format cobertura` when invoking the exe (the `Microsoft.Testing.Extensions.CodeCoverage` extension ships as part of TUnit). Output lands in `TestResults/`.
 

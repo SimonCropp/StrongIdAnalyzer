@@ -1,0 +1,198 @@
+name: milestone-release
+
+on:
+  push:
+    tags:
+      - '*'
+  milestone:
+    types: [created, edited, closed, opened]
+  issues:
+    types: [opened, edited, closed, reopened, deleted, milestoned, demilestoned]
+  pull_request:
+    types: [opened, edited, closed, reopened, milestoned, demilestoned]
+  workflow_dispatch:
+    inputs:
+      milestone:
+        description: 'Milestone title to rebuild (leave empty to rebuild all)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  sync-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync Release with Milestone
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            // Helper: Find release by tag name
+            async function findRelease(tagName) {
+              for await (const response of github.paginate.iterator(
+                github.rest.repos.listReleases,
+                { owner, repo, per_page: 100 }
+              )) {
+                const release = response.data.find(r => r.tag_name === tagName);
+                if (release) return release;
+              }
+              return null;
+            }
+
+            // Helper: Find milestone by title
+            async function findMilestone(title) {
+              for await (const response of github.paginate.iterator(
+                github.rest.issues.listMilestones,
+                { owner, repo, state: 'all', per_page: 100 }
+              )) {
+                const milestone = response.data.find(m => m.title === title);
+                if (milestone) return milestone;
+              }
+              return null;
+            }
+
+            // Helper: Generate release body from milestone
+            async function generateBody(milestoneNumber) {
+              const items = [];
+              for await (const response of github.paginate.iterator(
+                github.rest.issues.listForRepo,
+                { owner, repo, milestone: milestoneNumber, state: 'all', per_page: 100 }
+              )) {
+                items.push(...response.data);
+              }
+              items.sort((a, b) => a.number - b.number);
+              return items.map(item => {
+                const checkbox = item.state === 'closed' ? '[x]' : '[ ]';
+                return `- ${checkbox} [#${item.number}](${item.html_url}) ${item.title}`;
+              }).join('\n') || 'No issues in this milestone yet.';
+            }
+
+            // Helper: Does a tag with this name exist
+            async function tagExists(tagName) {
+              try {
+                await github.rest.git.getRef({ owner, repo, ref: `tags/${tagName}` });
+                return true;
+              } catch (error) {
+                if (error.status === 404) return false;
+                throw error;
+              }
+            }
+
+            // Helper: Update the milestone's release, creating it when the tag already exists
+            async function updateReleaseIfExists(milestone) {
+              const release = await findRelease(milestone.title);
+              if (!release) {
+                if (await tagExists(milestone.title)) {
+                  try {
+                    await github.rest.repos.createRelease({
+                      owner, repo,
+                      tag_name: milestone.title,
+                      name: milestone.title,
+                      body: await generateBody(milestone.number),
+                      draft: false
+                    });
+                    core.notice(`Created missing release for existing tag: ${milestone.title}`);
+                  } catch (error) {
+                    // The tag push run created it at the same moment
+                    if (error.status !== 422) throw error;
+                    console.log(`Release was created concurrently: ${milestone.title}`);
+                  }
+                  return;
+                }
+                core.notice(`No release or tag for ${milestone.title} yet; the release is created when the tag is pushed`);
+                return;
+              }
+              const body = await generateBody(milestone.number);
+              await github.rest.repos.updateRelease({
+                owner, repo,
+                release_id: release.id,
+                body: body
+              });
+              console.log(`Updated release: ${milestone.title}`);
+            }
+
+            // Handle tag push events
+            if (context.eventName === 'push' && context.ref.startsWith('refs/tags/')) {
+              const tagName = context.ref.replace('refs/tags/', '');
+
+              // Tag deleted
+              if (context.payload.deleted) {
+                const release = await findRelease(tagName);
+                if (release) {
+                  await github.rest.repos.deleteRelease({
+                    owner, repo, release_id: release.id
+                  });
+                  console.log(`Deleted release for tag: ${tagName}`);
+                }
+                return;
+              }
+
+              // Tag created - create release
+              const milestone = await findMilestone(tagName);
+              const body = milestone
+                ? await generateBody(milestone.number)
+                : '';
+
+              const existing = await findRelease(tagName);
+              if (existing) {
+                await github.rest.repos.updateRelease({
+                  owner, repo,
+                  release_id: existing.id,
+                  body: body
+                });
+                console.log(`Release already existed, updated: ${tagName}`);
+                return;
+              }
+
+              try {
+                await github.rest.repos.createRelease({
+                  owner, repo,
+                  tag_name: tagName,
+                  name: tagName,
+                  body: body,
+                  draft: false
+                });
+                console.log(`Created release for tag: ${tagName}`);
+              } catch (error) {
+                // A milestone event running at the same moment created it first
+                if (error.status !== 422) throw error;
+                console.log(`Release was created concurrently: ${tagName}`);
+              }
+              return;
+            }
+
+            // Handle workflow_dispatch - update only
+            if (context.eventName === 'workflow_dispatch') {
+              const inputMilestone = context.payload.inputs?.milestone;
+              const milestones = [];
+              for await (const response of github.paginate.iterator(
+                github.rest.issues.listMilestones,
+                { owner, repo, state: 'all', per_page: 100 }
+              )) {
+                milestones.push(...response.data);
+              }
+              for (const ms of milestones) {
+                if (!inputMilestone || ms.title === inputMilestone) {
+                  await updateReleaseIfExists(ms);
+                }
+              }
+              return;
+            }
+
+            // Handle milestone/issue/PR events - update only
+            let milestone = context.payload.milestone;
+            if (!milestone && context.payload.issue?.milestone) {
+              milestone = context.payload.issue.milestone;
+            }
+            if (!milestone && context.payload.pull_request?.milestone) {
+              milestone = context.payload.pull_request.milestone;
+            }
+            if (!milestone) {
+              console.log('No milestone associated with this event');
+              return;
+            }
+
+            await updateReleaseIfExists(milestone);
