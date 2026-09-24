@@ -1024,8 +1024,13 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         var targetInfo = GetIdWithInheritance(parameter, config);
         var sourceSymbol = argument.Value.GetReferencedSymbol();
         var sourceInfo = GetAccessInfo(argument.Value, config);
+        // Only a direct symbol reference falls back to element tags: literals, untagged
+        // calls and explicit casts stay Unknown, and string is excluded because
+        // IEnumerable<char> is not a collection of ids.
         if (sourceInfo.State != IdState.Present &&
+            sourceSymbol is not null &&
             targetInfo.State == IdState.Present &&
+            parameter.Type.SpecialType != SpecialType.System_String &&
             parameter.Type.TryGetEnumerableElementType() is not null &&
             argument.Value.Type.TryGetEnumerableElementType() is not null)
         {

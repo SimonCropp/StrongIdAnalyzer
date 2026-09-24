@@ -5284,6 +5284,56 @@ public class IdMismatchAnalyzerTests
     }
 
     [Test]
+    public async Task CollectionArgument_ExplicitCast_StaysUnknown()
+    {
+        var source =
+            """
+            using System.Collections.Generic;
+
+            public record Customer([property: Id("Customer")] IReadOnlyCollection<int> CustomerIds);
+            public record Order([property: Id("Order")] IReadOnlyCollection<int> OrderIds);
+
+            public class Factory
+            {
+                public Order Create(Customer customer) =>
+                    new((IReadOnlyCollection<int>)(object)customer.CustomerIds);
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    [Test]
+    public async Task StringArgument_NotTreatedAsCollection()
+    {
+        var source =
+            """
+            public class Holder
+            {
+                [Id("Customer")]
+                public string CustomerKey { get; set; }
+            }
+
+            public class Consumer
+            {
+                public void Load([Id("Customer")] string id) { }
+
+                public void Run(Holder holder, string other)
+                {
+                    Load("abc");
+                    Load(holder.CustomerKey);
+                }
+            }
+            """;
+
+        var diagnostics = await GetDiagnostics(source);
+
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    [Test]
     public async Task LinqSelect_ChangingElementType_DropsTag_NoChainLeak()
     {
         // `.Select(id => id.ToString())` changes element type Guid → string.
