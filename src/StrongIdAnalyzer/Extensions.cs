@@ -252,7 +252,9 @@ static class Extensions
             // a name lookup anyway, so this costs an iteration, not extra symbol loading.
             foreach (var member in current.GetMembers())
             {
-                if (member is IPropertySymbol { IsIndexer: false } or IFieldSymbol { IsImplicitlyDeclared: false } &&
+                if (member is
+                        IPropertySymbol { IsIndexer: false } or
+                        IFieldSymbol { IsImplicitlyDeclared: false } &&
                     member.ConventionName() == "Id")
                 {
                     return true;
