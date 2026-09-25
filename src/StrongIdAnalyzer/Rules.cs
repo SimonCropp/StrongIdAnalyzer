@@ -129,6 +129,9 @@ static class Rules
     // `sourceSymbol` / `targetSymbol` are what the message names; `sourceFixSite` /
     // `targetFixSite` are the declarations the fixer may edit (null when the tag came
     // from a wrapper type rather than a declaration).
+    //
+    // `suffixRetags` is non-empty only when suffix inference is off and turning it on
+    // would re-read those names into tags that resolve the mismatch.
     public static void ReportMismatch(
         OperationAnalysisContext context,
         Location location,
@@ -138,6 +141,7 @@ static class Rules
         ISymbol? targetSymbol,
         ISymbol? targetFixSite,
         IdInfo target,
+        ImmutableArray<(ISymbol Symbol, string Tag)> suffixRetags,
         string relation = "flows to") =>
         context.ReportDiagnostic(Diagnostic.Create(
             idMismatch,
@@ -160,8 +164,27 @@ static class Rules
                 relation,
                 Describe(targetSymbol),
                 DisplayAttribute(target.Tags, context.Compilation, location),
-                MismatchFix(context.Compilation, location, sourceSymbol, sourceFixSite, source, targetSymbol, targetFixSite, target)
+                MismatchFix(context.Compilation, location, sourceSymbol, sourceFixSite, source, targetSymbol, targetFixSite, target) +
+                SuffixHint(context.Compilation, location, suffixRetags)
             ]));
+
+    // `templateCustomerId` reads as "TemplateCustomer" under the whole-name rule, so a
+    // qualifier word in the name surfaces as a mismatch whose Fix clause (retag the
+    // target to "TemplateCustomer") is the wrong advice. Nothing else in the message
+    // points at the option that was built for exactly this naming shape.
+    static string SuffixHint(
+        Compilation compilation,
+        Location location,
+        ImmutableArray<(ISymbol Symbol, string Tag)> retags)
+    {
+        if (retags.IsDefaultOrEmpty)
+        {
+            return "";
+        }
+
+        var inferred = string.Join(" and ", retags.Select(_ => $"{DisplayAttribute([_.Tag], compilation, location)} from '{_.Symbol.Name}'"));
+        return $". Alternatively, set strongidanalyzer.infer_suffix_ids = true in .editorconfig, which infers {inferred}";
+    }
 
     // The fix clause prefers retagging the target (matches the fixer's default), falls
     // back to the source when only that side is editable, and otherwise can only ask

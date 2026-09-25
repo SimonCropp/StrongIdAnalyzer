@@ -156,6 +156,113 @@ public class MessageTests
             "property 'Customer.Id' is [Id<Customer>] and flows to parameter 'key' of 'Service.Lookup', which is [UnionId<Order, Product>]. Fix: apply [Id<Customer>] to parameter 'key' of 'Service.Lookup' (line 5), or pass a value tagged [UnionId<Order, Product>].");
     }
 
+    // With suffix inference off, a qualifier word in the name ("template") becomes part of
+    // the tag. The option exists for exactly this shape, so the message names it.
+    [Test]
+    public async Task SIA001_SuffixInferenceWouldResolve_HintsTheOption()
+    {
+        var source =
+            """
+            public class ExternalObject { public int Id { get; set; } }
+            public class Service
+            {
+                public static void Get(int externalObjectId) { }
+                public void Copy(int templateExternalObjectId) => Get(templateExternalObjectId);
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA001");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """parameter 'templateExternalObjectId' of 'Service.Copy' is [Id("TemplateExternalObject")] and flows to parameter 'externalObjectId' of 'Service.Get', which is [Id<ExternalObject>]. Fix: apply [Id("TemplateExternalObject")] to parameter 'externalObjectId' of 'Service.Get' (line 4), or pass a value tagged [Id<ExternalObject>]. Alternatively, set strongidanalyzer.infer_suffix_ids = true in .editorconfig, which infers [Id<ExternalObject>] from 'templateExternalObjectId'.""");
+    }
+
+    // Neither side alone clears the mismatch; both re-read together do.
+    [Test]
+    public async Task SIA001_SuffixInferenceWouldResolve_BothSides()
+    {
+        var source =
+            """
+            using System;
+            public class Product { public Guid Id { get; set; } }
+            public class Service
+            {
+                public static void Copy(Guid targetProductId) { }
+                public void Run(Guid sourceProductId) => Copy(sourceProductId);
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA001");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """parameter 'sourceProductId' of 'Service.Run' is [Id("SourceProduct")] and flows to parameter 'targetProductId' of 'Service.Copy', which is [Id("TargetProduct")]. Fix: apply [Id("SourceProduct")] to parameter 'targetProductId' of 'Service.Copy' (line 5), or pass a value tagged [Id("TargetProduct")]. Alternatively, set strongidanalyzer.infer_suffix_ids = true in .editorconfig, which infers [Id<Product>] from 'sourceProductId' and [Id<Product>] from 'targetProductId'.""");
+    }
+
+    [Test]
+    public async Task SIA001_SuffixInferenceWouldResolve_Equality()
+    {
+        var source =
+            """
+            using System;
+            public class Customer { public Guid Id { get; set; } }
+            public class Checks
+            {
+                public static bool Same(Customer customer, Guid templateCustomerId) => customer.Id == templateCustomerId;
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA001");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """property 'Customer.Id' is [Id<Customer>] and is compared with parameter 'templateCustomerId' of 'Checks.Same', which is [Id("TemplateCustomer")]. Fix: apply [Id<Customer>] to parameter 'templateCustomerId' of 'Checks.Same' (line 5), or pass a value tagged [Id("TemplateCustomer")]. Alternatively, set strongidanalyzer.infer_suffix_ids = true in .editorconfig, which infers [Id<Customer>] from 'templateCustomerId'.""");
+    }
+
+    // The suffix rule would read `templateCustomerId` as "Customer", which still is not
+    // "Order" — the hint would send the reader to an option that changes nothing.
+    [Test]
+    public async Task SIA001_SuffixInferenceWouldNotResolve_NoHint()
+    {
+        var source =
+            """
+            using System;
+            public class Customer { public Guid Id { get; set; } }
+            public class Order { public Guid Id { get; set; } }
+            public class Service
+            {
+                public static void Place(Guid orderId) { }
+                public void Run(Guid templateCustomerId) => Place(templateCustomerId);
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA001");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """parameter 'templateCustomerId' of 'Service.Run' is [Id("TemplateCustomer")] and flows to parameter 'orderId' of 'Service.Place', which is [Id<Order>]. Fix: apply [Id("TemplateCustomer")] to parameter 'orderId' of 'Service.Place' (line 6), or pass a value tagged [Id<Order>].""");
+    }
+
+    // With the option on, a name it could not re-read is reported as before, and no
+    // hint points at an option that is already set.
+    [Test]
+    public async Task SIA001_SuffixInferenceOn_NoHint()
+    {
+        var source =
+            """
+            using System;
+            public class Customer { public Guid Id { get; set; } }
+            public class Service
+            {
+                public static void Place(Guid orderId) { }
+                public void Run(Guid templateCustomerId) => Place(templateCustomerId);
+            }
+            """;
+
+        var diagnostics = await Run([("Sample.cs", source)], wrappers: false, suffix: true);
+        var sia001 = diagnostics.Where(_ => _.Id == "SIA001").ToArray();
+
+        await Assert.That(sia001.Length).IsEqualTo(1);
+        await Assert.That(sia001[0].GetMessage()).DoesNotContain("infer_suffix_ids");
+    }
+
     [Test]
     public async Task SIA002_SingleTag()
     {
@@ -507,7 +614,7 @@ public class MessageTests
     static Task<ImmutableArray<Diagnostic>> Run((string Path, string Source) file, bool wrappers) =>
         Run([file], wrappers);
 
-    static Task<ImmutableArray<Diagnostic>> Run((string Path, string Source)[] files, bool wrappers)
+    static Task<ImmutableArray<Diagnostic>> Run((string Path, string Source)[] files, bool wrappers, bool suffix = false)
     {
         var compilation = CSharpCompilation.Create(
             "Tests",
@@ -528,6 +635,11 @@ public class MessageTests
         if (wrappers)
         {
             options["strongidanalyzer.infer_wrapper_ids"] = "true";
+        }
+
+        if (suffix)
+        {
+            options["strongidanalyzer.infer_suffix_ids"] = "true";
         }
 
         var analyzerOptions = new AnalyzerOptions([], new TestAnalyzerConfigOptionsProvider(options));
