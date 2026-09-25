@@ -225,23 +225,6 @@ static class LinqExtensions
         return full.Parameters[0].Type;
     }
 
-
-    public static IOperation? FindEnclosingAnonymousFunction(this IOperation operation)
-    {
-        var current = operation.Parent;
-        while (current is not null)
-        {
-            if (current is IAnonymousFunctionOperation)
-            {
-                return current;
-            }
-
-            current = current.Parent;
-        }
-
-        return null;
-    }
-
     // The anonymous function `param` is a parameter OF, which is not necessarily the
     // innermost one enclosing the reference — nested lambdas over collections with the
     // same element type are the case that tells them apart.
