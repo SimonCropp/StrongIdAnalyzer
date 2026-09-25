@@ -325,6 +325,26 @@ public class MessageTests
             """[Id("Customer")] on property 'Customer.Id' is redundant: the naming convention already infers "Customer". Fix: remove the attribute.""");
     }
 
+    // The message quotes the attribute as written, since that is the text to delete.
+    [Test]
+    public async Task SIA005_GenericForm()
+    {
+        var source =
+            """
+            using System;
+            public class Customer
+            {
+                [Id<Customer>]
+                public Guid Id { get; set; }
+            }
+            """;
+
+        var diagnostic = await Single(source, "SIA005");
+
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            """[Id<Customer>] on property 'Customer.Id' is redundant: the naming convention already infers "Customer". Fix: remove the attribute.""");
+    }
+
     // The name would infer "PerformedBy", so blaming the naming convention here would send the
     // reader looking in the wrong place. The parameter's own attribute is what makes the
     // property-targeted one redundant.

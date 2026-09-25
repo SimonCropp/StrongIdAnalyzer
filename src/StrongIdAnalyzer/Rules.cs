@@ -69,7 +69,7 @@ static class Rules
     static readonly DiagnosticDescriptor redundantId = new(
         id: "SIA005",
         title: "Redundant [Id] attribute",
-        messageFormat: "[Id(\"{0}\")] on {1} is redundant: {2}. Fix: remove the attribute.",
+        messageFormat: "{0} on {1} is redundant: {2}. Fix: remove the attribute.",
         category: "IdAttribute.Usage",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -266,7 +266,21 @@ static class Rules
         ISymbol symbol,
         string value,
         RedundancyReason reason) =>
-        context.ReportDiagnostic(Diagnostic.Create(redundantId, location, value, Describe(symbol), Because(reason, value)));
+        context.ReportDiagnostic(Diagnostic.Create(redundantId, location, AsWritten(location, value), Describe(symbol), Because(reason, value)));
+
+    // The redundant attribute as it appears in source — `[Id<Customer>]` or
+    // `[Id("Customer")]` — since the reader is being told to delete that exact text.
+    static string AsWritten(Location location, string value)
+    {
+        var node = location.SourceTree?.GetRoot().FindNode(location.SourceSpan);
+        if (node?.FirstAncestorOrSelf<AttributeSyntax>()?.Name
+            is GenericNameSyntax or QualifiedNameSyntax { Right: GenericNameSyntax })
+        {
+            return $"[Id<{value}>]";
+        }
+
+        return $"[Id(\"{value}\")]";
+    }
 
     static string Because(RedundancyReason reason, string value) =>
         reason switch
