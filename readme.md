@@ -366,6 +366,8 @@ The known-id constraint is deliberate — without it, every `hashedId`, `rawId`,
 
 Explicit `[Id("...")]` / `[UnionId(...)]` on the member still wins over the suffix rule — same precedence as the other naming-convention rules.
 
+With the flag off, a SIA001 that the suffix rule would clear says so. The message ends with `Alternatively, set strongidanalyzer.infer_suffix_ids = true in .editorconfig, which infers [Id<ExternalObject>] from 'templateExternalObjectId'.` The hint appears only when the re-read ids actually resolve the mismatch.
+
 #### Suffix inference and SIA005
 
 SIA005 asks one question: *would deleting this attribute leave the same id behind?* With the flag on, that has to be answered against the suffix rule too, and an explicit attribute is itself part of the known-id set — so the check evaluates the id as if the attribute were already gone.

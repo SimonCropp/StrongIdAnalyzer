@@ -1007,6 +1007,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 rightSymbol,
                 FixSite(rightSymbol, rightInfo, config),
                 rightInfo,
+                SuffixRetags(leftSymbol, leftInfo, rightSymbol, rightInfo, symmetric: true, config),
                 relation: "is compared with");
             return;
         }
@@ -2861,6 +2862,100 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return symbol;
     }
 
+    // With suffix inference off, the names on either side of a SIA001 that the suffix
+    // rule would re-read into a different tag — returned only when those re-read tags
+    // clear the mismatch, so the message's hint is never a dead end. Both sides are
+    // re-read together: `sourceProductId` into `targetProductId` needs both.
+    // Only reported mismatches get here, so the lazy known-tag set is built for
+    // compilations that already have one, never for clean ones.
+    static ImmutableArray<(ISymbol Symbol, string Tag)> SuffixRetags(
+        ISymbol? sourceSymbol,
+        IdInfo source,
+        ISymbol? targetSymbol,
+        IdInfo target,
+        bool symmetric,
+        Config config)
+    {
+        if (config.InferSuffixTags)
+        {
+            return [];
+        }
+
+        var sourceRetagged = TrySuffixRetag(sourceSymbol, source, config, out var sourceTag);
+        var targetRetagged = TrySuffixRetag(targetSymbol, target, config, out var targetTag);
+        if (!sourceRetagged && !targetRetagged)
+        {
+            return [];
+        }
+
+        var newSource = source;
+        if (sourceRetagged)
+        {
+            newSource = IdInfo.Present(sourceTag);
+        }
+
+        var newTarget = target;
+        if (targetRetagged)
+        {
+            newTarget = IdInfo.Present(targetTag);
+        }
+
+        if (!Accepts(newSource, newTarget, symmetric, config))
+        {
+            return [];
+        }
+
+        var retags = ImmutableArray.CreateBuilder<(ISymbol Symbol, string Tag)>();
+        if (sourceRetagged)
+        {
+            retags.Add((sourceSymbol!, sourceTag));
+        }
+
+        if (targetRetagged)
+        {
+            retags.Add((targetSymbol!, targetTag));
+        }
+
+        return retags.ToImmutable();
+    }
+
+    // Same acceptance rule Report / AnalyzeBinaryOperator apply: a flow widens the source
+    // only, equality widens both.
+    static bool Accepts(IdInfo source, IdInfo target, bool symmetric, Config config)
+    {
+        if (target.IntersectsWith(source))
+        {
+            return true;
+        }
+
+        if (symmetric)
+        {
+            return Widen(target, config).IntersectsWith(Widen(source, config));
+        }
+
+        return target.IntersectsWith(Widen(source, config));
+    }
+
+    // A side qualifies only when its tag is exactly the whole-name convention tag — the
+    // one step the suffix rule would have run ahead of. Anything explicit, inherited,
+    // wrapper-derived or receiver-walked keeps its tag with the option on too.
+    static bool TrySuffixRetag(ISymbol? symbol, IdInfo info, Config config, out string tag)
+    {
+        tag = "";
+        if (symbol is not (IPropertySymbol or IFieldSymbol or IParameterSymbol) ||
+            symbol.DeclaringSyntaxReferences.IsEmpty ||
+            !info.ExplicitTags.IsDefaultOrEmpty ||
+            info.Tags.Length != 1 ||
+            !TryGetConventionName(symbol, out var conventionName) ||
+            info.Tags[0] != conventionName ||
+            !SuffixInference.TryMatch(symbol.ConventionName(), config.KnownTags.Value.All, out tag))
+        {
+            return false;
+        }
+
+        return tag != conventionName;
+    }
+
     // Declarations no fix can be written against, so SIA002 / SIA003 stay silent and
     // SIA001 reports with an empty slot rather than pointing at them.
     //
@@ -2944,7 +3039,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                     source,
                     targetSymbol,
                     FixSite(targetSymbol, target, config),
-                    target);
+                    target,
+                    SuffixRetags(sourceSymbol, source, targetSymbol, target, symmetric: false, config));
             }
 
             return;
