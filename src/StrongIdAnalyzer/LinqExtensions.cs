@@ -145,7 +145,8 @@ static class LinqExtensions
     // of its return value a false SIA001.
     public static bool IsElementPreserving(this IMethodSymbol method)
     {
-        if (method.IsLinqMethod() && IsElementPreservingLinq(method.Name))
+        if (method.IsLinqMethod() &&
+            IsElementPreservingLinq(method.Name))
         {
             return true;
         }
@@ -172,7 +173,7 @@ static class LinqExtensions
     // Task<List<T>> / ValueTask<T[]> — same element as the receiver, one wrapper deeper.
     // Callers always reach these through an `await` that Unwrap has already peeled from
     // the operation tree, so for shape purposes the Task layer is transparent.
-    public static ITypeSymbol UnwrapTaskType(this ITypeSymbol type)
+    static ITypeSymbol UnwrapTaskType(this ITypeSymbol type)
     {
         if (type is INamedTypeSymbol
             {
@@ -228,7 +229,7 @@ static class LinqExtensions
     // The anonymous function `param` is a parameter OF, which is not necessarily the
     // innermost one enclosing the reference — nested lambdas over collections with the
     // same element type are the case that tells them apart.
-    public static IOperation? FindDeclaringAnonymousFunction(this IParameterReferenceOperation param)
+    static IOperation? FindDeclaringAnonymousFunction(this IParameterReferenceOperation param)
     {
         var owner = param.Parameter.ContainingSymbol;
         var current = param.Parent;
