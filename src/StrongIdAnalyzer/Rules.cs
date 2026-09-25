@@ -156,10 +156,10 @@ static class Rules
             messageArgs:
             [
                 Describe(sourceSymbol),
-                FormatAttribute(source.Tags),
+                DisplayAttribute(source.Tags, context.Compilation, location),
                 relation,
                 Describe(targetSymbol),
-                FormatAttribute(target.Tags),
+                DisplayAttribute(target.Tags, context.Compilation, location),
                 MismatchFix(context.Compilation, location, sourceSymbol, sourceFixSite, source, targetSymbol, targetFixSite, target)
             ]));
 
@@ -180,15 +180,15 @@ static class Rules
     {
         if (targetFixSite.IsEditable())
         {
-            return $"Fix: apply {FixAttribute(source, compilation, targetFixSite)} to {Describe(targetSymbol)}{Site(location, targetFixSite)}, or pass a value tagged {FormatAttribute(target.Tags)}";
+            return $"Fix: apply {FixAttribute(source, compilation, targetFixSite)} to {Describe(targetSymbol)}{Site(location, targetFixSite)}, or pass a value tagged {DisplayAttribute(target.Tags, compilation, location)}";
         }
 
         if (sourceFixSite.IsEditable())
         {
-            return $"Fix: apply {FixAttribute(target, compilation, sourceFixSite)} to {Describe(sourceSymbol)}{Site(location, sourceFixSite)}, or pass a value tagged {FormatAttribute(target.Tags)}";
+            return $"Fix: apply {FixAttribute(target, compilation, sourceFixSite)} to {Describe(sourceSymbol)}{Site(location, sourceFixSite)}, or pass a value tagged {DisplayAttribute(target.Tags, compilation, location)}";
         }
 
-        return $"Fix: pass a value tagged {FormatAttribute(target.Tags)}";
+        return $"Fix: pass a value tagged {DisplayAttribute(target.Tags, compilation, location)}";
     }
 
     // SIA002. `fixTarget` is the untagged side's declaration — the codefix adds an [Id]
@@ -202,6 +202,7 @@ static class Rules
         IdInfo info,
         string relation = "flows to") =>
         context.ReportDiagnostic(CreateFixable(
+            context.Compilation,
             missingSourceId,
             location,
             fixTarget,
@@ -225,6 +226,7 @@ static class Rules
         IdInfo info,
         ISymbol fixTarget) =>
         context.ReportDiagnostic(CreateFixable(
+            context.Compilation,
             droppedId,
             location,
             fixTarget,
@@ -338,6 +340,7 @@ static class Rules
     // Shared shape for SIA002/SIA003: the diagnostic carries the tags to apply plus the
     // declaration to apply them to.
     static Diagnostic CreateFixable(
+        Compilation compilation,
         DiagnosticDescriptor rule,
         Location location,
         ISymbol? fixTarget,
@@ -362,7 +365,7 @@ static class Rules
             location,
             additionalLocations: GetAdditionalLocations(fixTarget),
             properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, joined),
-            messageArgs: messageArgs(fixTags, FormatAttribute(info.Tags)));
+            messageArgs: messageArgs(fixTags, DisplayAttribute(info.Tags, compilation, location)));
     }
 
     // SIA001's fixer applies a single tag — source.FirstValue onto the target,
@@ -377,11 +380,20 @@ static class Rules
     // tag names a type that `[Id<X>]` could reference at the fix site — the same test the
     // fixer makes, so the message and the lightbulb agree — otherwise the string form.
     // Anything else would steer the reader straight into SIA009.
-    static string FixAttribute(ImmutableArray<string> tags, Compilation compilation, ISymbol? fixSite)
+    static string FixAttribute(ImmutableArray<string> tags, Compilation compilation, ISymbol? fixSite) =>
+        RenderAttribute(tags, _ => GenericTag.Compiles(compilation, fixSite, _));
+
+    // What a side currently carries (`is [Id<Customer>]`, `pass a value tagged ...`),
+    // rendered the way the reader would write it at the diagnostic's position. A tag
+    // with no type in scope there keeps the string form.
+    static string DisplayAttribute(ImmutableArray<string> tags, Compilation compilation, Location location) =>
+        RenderAttribute(tags, _ => GenericTag.Compiles(compilation, location, _));
+
+    static string RenderAttribute(ImmutableArray<string> tags, Func<string, bool> compiles)
     {
         if (tags.IsDefaultOrEmpty ||
             tags.Length > 5 ||
-            !tags.All(_ => GenericTag.Compiles(compilation, fixSite, _)))
+            !tags.All(compiles))
         {
             return FormatAttribute(tags);
         }

@@ -421,10 +421,10 @@ Each rule has its own page with the message anatomy, every fix option, and the c
 Every message names both declarations involved, states the attribute to write, and says where to write it, so the build log alone is enough to act on — no IDE hover required:
 
 ```
-SIA002: property 'Order.CustomerRef' has no [Id] but flows to parameter 'customerId' of 'Customers.Load', which is [Id("Customer")]. Fix: add [Id<Customer>] to property 'Order.CustomerRef' (line 12).
+SIA002: property 'Order.CustomerRef' has no [Id] but flows to parameter 'customerId' of 'Customers.Load', which is [Id<Customer>]. Fix: add [Id<Customer>] to property 'Order.CustomerRef' (line 12).
 ```
 
-The location in the `Fix:` clause is the *declaration* to edit, which is often not where the warning is reported. `(line 12)` means the same file as the warning; a declaration elsewhere is given as `(D:\src\Order.cs:12)`. Equality checks read `is compared with` instead of `flows to`. The attribute in the `Fix:` clause is the generic form when it would compile at the declaration (C# 11+, and the id names exactly one non-generic, non-static type in scope there), otherwise the string form; the descriptions of what each side currently carries always use the string form. MSBuild appends each rule's help link after the message, so the build log also carries the URL of the rule's page.
+The location in the `Fix:` clause is the *declaration* to edit, which is often not where the warning is reported. `(line 12)` means the same file as the warning; a declaration elsewhere is given as `(D:\src\Order.cs:12)`. Equality checks read `is compared with` instead of `flows to`. The attribute in the `Fix:` clause is the generic form when it would compile at the declaration (C# 11+, and the id names exactly one non-generic, non-static type in scope there), otherwise the string form. The ids each side currently carries are rendered the same way, checked at the warning's position, so an id with no type in scope (an external system's, or one from `[assembly: ExternalId]`) stays `[Id("…")]`. MSBuild appends each rule's help link after the message, so the build log also carries the URL of the rule's page.
 
 The mechanically-fixable rules can be applied across a project from the command line, without an IDE, because the code fixes ship inside the analyzer package:
 

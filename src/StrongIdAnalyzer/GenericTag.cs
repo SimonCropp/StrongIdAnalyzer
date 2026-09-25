@@ -22,6 +22,20 @@ static class GenericTag
         return Compiles(compilation.GetSemanticModel(tree), reference.Span.Start, tag);
     }
 
+    // At a location rather than a declaration: the diagnostic's own position, used when
+    // rendering what a side currently carries.
+    public static bool Compiles(Compilation compilation, Location location, string tag)
+    {
+        var tree = location.SourceTree;
+        if (tree is null ||
+            !compilation.ContainsSyntaxTree(tree))
+        {
+            return false;
+        }
+
+        return Compiles(compilation.GetSemanticModel(tree), location.SourceSpan.Start, tag);
+    }
+
     public static bool Compiles(SemanticModel model, int position, string tag)
     {
         if (model.SyntaxTree.Options is not CSharpParseOptions { LanguageVersion: >= LanguageVersion.CSharp11 } ||

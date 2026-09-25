@@ -42,7 +42,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA001");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """property 'Customer.Id' is [Id("Customer")] and flows to parameter 'orderId' of 'OrderService.Place', which is [Id("Order")]. Fix: apply [Id<Customer>] to parameter 'orderId' of 'OrderService.Place' (line 5), or pass a value tagged [Id("Order")].""");
+            """property 'Customer.Id' is [Id<Customer>] and flows to parameter 'orderId' of 'OrderService.Place', which is [Id<Order>]. Fix: apply [Id<Customer>] to parameter 'orderId' of 'OrderService.Place' (line 5), or pass a value tagged [Id<Order>].""");
     }
 
     [Test]
@@ -61,7 +61,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA001");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """property 'Customer.Id' is [Id("Customer")] and is compared with parameter 'orderId' of 'Checks.Same', which is [Id("Order")]. Fix: apply [Id<Customer>] to parameter 'orderId' of 'Checks.Same' (line 5), or pass a value tagged [Id("Order")].""");
+            """property 'Customer.Id' is [Id<Customer>] and is compared with parameter 'orderId' of 'Checks.Same', which is [Id<Order>]. Fix: apply [Id<Customer>] to parameter 'orderId' of 'Checks.Same' (line 5), or pass a value tagged [Id<Order>].""");
     }
 
     [Test]
@@ -86,7 +86,7 @@ public class MessageTests
 
         await Assert.That(sia001.Length).IsEqualTo(1);
         await Assert.That(sia001[0].GetMessage()).IsEqualTo(
-            """property 'CustomerId.Value' is [Id("Customer")] and flows to parameter 'Value' of 'OrderId.OrderId', which is [Id("Order")]. Fix: pass a value tagged [Id("Order")].""");
+            """property 'CustomerId.Value' is [Id<Customer>] and flows to parameter 'Value' of 'OrderId.OrderId', which is [Id<Order>]. Fix: pass a value tagged [Id<Order>].""");
     }
 
     [Test]
@@ -111,7 +111,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA001");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """property 'Root.Id' is [UnionId("Leaf", "Mid", "Root")] and flows to parameter 'otherId' of 'Service.TakeOther', which is [Id("Other")]. Fix: apply [Id<Leaf>] to parameter 'otherId' of 'Service.TakeOther' (line 7), or pass a value tagged [Id("Other")].""");
+            """property 'Root.Id' is [UnionId<Leaf, Mid, Root>] and flows to parameter 'otherId' of 'Service.TakeOther', which is [Id("Other")]. Fix: apply [Id<Leaf>] to parameter 'otherId' of 'Service.TakeOther' (line 7), or pass a value tagged [Id("Other")].""");
     }
 
     [Test]
@@ -130,7 +130,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA001");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """parameter 'key' of 'Service.Run' is [UnionId("Customer", "Product")] and flows to parameter 'orderId' of 'Service.Place', which is [Id("Order")]. Fix: apply [Id<Customer>] to parameter 'orderId' of 'Service.Place' (line 4), or pass a value tagged [Id("Order")].""");
+            """parameter 'key' of 'Service.Run' is [UnionId<Customer, Product>] and flows to parameter 'orderId' of 'Service.Place', which is [Id<Order>]. Fix: apply [Id<Customer>] to parameter 'orderId' of 'Service.Place' (line 4), or pass a value tagged [Id<Order>].""");
     }
 
     [Test]
@@ -151,7 +151,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA001");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """property 'Customer.Id' is [Id("Customer")] and flows to parameter 'key' of 'Service.Lookup', which is [UnionId("Order", "Product")]. Fix: apply [Id<Customer>] to parameter 'key' of 'Service.Lookup' (line 5), or pass a value tagged [UnionId("Order", "Product")].""");
+            """property 'Customer.Id' is [Id<Customer>] and flows to parameter 'key' of 'Service.Lookup', which is [UnionId<Order, Product>]. Fix: apply [Id<Customer>] to parameter 'key' of 'Service.Lookup' (line 5), or pass a value tagged [UnionId<Order, Product>].""");
     }
 
     [Test]
@@ -171,7 +171,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA002");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """property 'Sample.Raw' has no [Id] but flows to parameter 'orderId' of 'Sample.Place', which is [Id("Order")]. Fix: add [Id<Order>] to property 'Sample.Raw' (line 4).""");
+            """property 'Sample.Raw' has no [Id] but flows to parameter 'orderId' of 'Sample.Place', which is [Id<Order>]. Fix: add [Id<Order>] to property 'Sample.Raw' (line 4).""");
     }
 
     [Test]
@@ -191,7 +191,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA002");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """property 'Sample.Raw' has no [Id] but flows to parameter 'key' of 'Sample.Lookup', which is [UnionId("Customer", "Product")]. Fix: add [UnionId<Customer, Product>] to property 'Sample.Raw' (line 4).""");
+            """property 'Sample.Raw' has no [Id] but flows to parameter 'key' of 'Sample.Lookup', which is [UnionId<Customer, Product>]. Fix: add [UnionId<Customer, Product>] to property 'Sample.Raw' (line 4).""");
     }
 
     [Test]
@@ -211,7 +211,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA002");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """property 'Sample.Raw' has no [Id] but is compared with property 'Sample.OrderId', which is [Id("Order")]. Fix: add [Id<Order>] to property 'Sample.Raw' (line 4).""");
+            """property 'Sample.Raw' has no [Id] but is compared with property 'Sample.OrderId', which is [Id<Order>]. Fix: add [Id<Order>] to property 'Sample.Raw' (line 4).""");
     }
 
     [Test]
@@ -231,7 +231,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA003");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """property 'Sample.OrderId' is [Id("Order")] but flows to parameter 'value' of 'Sample.Consume', which has no [Id]. Fix: add [Id<Order>] to parameter 'value' of 'Sample.Consume' (line 5).""");
+            """property 'Sample.OrderId' is [Id<Order>] but flows to parameter 'value' of 'Sample.Consume', which has no [Id]. Fix: add [Id<Order>] to parameter 'value' of 'Sample.Consume' (line 5).""");
     }
 
     [Test]
@@ -250,7 +250,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA003");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """parameter 'key' of 'Service.Run' is [UnionId("Customer", "Product")] but flows to parameter 'value' of 'Service.Consume', which has no [Id]. Fix: add [UnionId<Customer, Product>] to parameter 'value' of 'Service.Consume' (line 4).""");
+            """parameter 'key' of 'Service.Run' is [UnionId<Customer, Product>] but flows to parameter 'value' of 'Service.Consume', which has no [Id]. Fix: add [UnionId<Customer, Product>] to parameter 'value' of 'Service.Consume' (line 4).""");
     }
 
     [Test]
@@ -279,7 +279,7 @@ public class MessageTests
 
         await Assert.That(sia003.Length).IsEqualTo(1);
         await Assert.That(sia003[0].GetMessage()).IsEqualTo(
-            """property 'Sample.OrderId' is [Id("Order")] but flows to parameter 'value' of 'Sink.Consume', which has no [Id]. Fix: add [Id<Order>] to parameter 'value' of 'Sink.Consume' (Sink.cs:4).""");
+            """property 'Sample.OrderId' is [Id<Order>] but flows to parameter 'value' of 'Sink.Consume', which has no [Id]. Fix: add [Id<Order>] to parameter 'value' of 'Sink.Consume' (Sink.cs:4).""");
     }
 
     [Test]
@@ -457,7 +457,7 @@ public class MessageTests
         var diagnostic = await Single(source, "SIA001");
 
         await Assert.That(diagnostic.GetMessage()).IsEqualTo(
-            """property 'Process.Id' is [Id("Process")] and flows to property 'Sample.JobId', which is [Id("Job")]. Fix: apply [Id<Process>] to property 'Sample.JobId' (line 5), or pass a value tagged [Id("Job")].""");
+            """property 'Process.Id' is [Id<Process>] and flows to property 'Sample.JobId', which is [Id("Job")]. Fix: apply [Id<Process>] to property 'Sample.JobId' (line 5), or pass a value tagged [Id("Job")].""");
     }
 
     [Test]

@@ -418,7 +418,7 @@ public class SuppressionTests
         var diagnostics = await Analyze(library, consumer);
 
         await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
-        await Assert.That(diagnostics[0].GetMessage()).Contains("""[Id("Product")]""");
+        await Assert.That(diagnostics[0].GetMessage()).Contains("""[Id<Product>]""");
     }
 
     // Ancestor widening searched every type in every referenced assembly by simple name,
