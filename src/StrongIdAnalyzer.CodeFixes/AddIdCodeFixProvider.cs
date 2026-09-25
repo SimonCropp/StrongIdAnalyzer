@@ -14,6 +14,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
     const string droppedIdId = "SIA003";
     const string redundantIdId = "SIA005";
     const string singletonUnionId = "SIA006";
+    const string stringTagNamesTypeId = "SIA009";
 
     public override ImmutableArray<string> FixableDiagnosticIds =>
     [
@@ -21,7 +22,8 @@ public class AddIdCodeFixProvider : CodeFixProvider
         missingSourceIdId,
         droppedIdId,
         redundantIdId,
-        singletonUnionId
+        singletonUnionId,
+        stringTagNamesTypeId
     ];
 
     public override FixAllProvider GetFixAllProvider() =>
@@ -41,6 +43,13 @@ public class AddIdCodeFixProvider : CodeFixProvider
             if (diagnostic.Id == singletonUnionId)
             {
                 await RegisterReplaceUnionWithIdFix(context, diagnostic)
+                    .ConfigureAwait(false);
+                continue;
+            }
+
+            if (diagnostic.Id == stringTagNamesTypeId)
+            {
+                await RegisterUseGenericFix(context, diagnostic)
                     .ConfigureAwait(false);
                 continue;
             }
@@ -559,8 +568,45 @@ public class AddIdCodeFixProvider : CodeFixProvider
         context.RegisterCodeFix(
             CodeAction.Create(
                 title,
-                cancel => ReplaceUnionWithIdAsync(context.Document, location, value, preferGeneric, cancel),
+                cancel => ReplaceWithIdAsync(context.Document, location, value, preferGeneric, cancel),
                 equivalenceKey: $"ReplaceUnionWithId:{value}"),
+            diagnostic);
+    }
+
+    // SIA009. The analyzer already checked `[Id<X>]` compiles at this position, so the
+    // rewrite is unconditional — no ShouldUseGenericAsync round trip.
+    static async Task RegisterUseGenericFix(CodeFixContext context, Diagnostic diagnostic)
+    {
+        if (!diagnostic.Properties.TryGetValue(valueKey, out var value) || value is null)
+        {
+            return;
+        }
+
+        var location = diagnostic.Location;
+        var tree = location.SourceTree;
+        if (tree is null)
+        {
+            return;
+        }
+
+        var root = await tree
+            .GetRootAsync(context.CancellationToken)
+            .ConfigureAwait(false);
+        var attribute = root.FindNode(location.SourceSpan).FirstAncestorOrSelf<AttributeSyntax>();
+        if (attribute is null)
+        {
+            return;
+        }
+
+        var title = AttributeHost.FindOwner(attribute) is { } owner
+            ? $"Replace [Id(\"{value}\")] on {AttributeHost.Describe(owner)} with [Id<{value}>]"
+            : $"Replace [Id(\"{value}\")] with [Id<{value}>]";
+
+        context.RegisterCodeFix(
+            CodeAction.Create(
+                title,
+                cancel => ReplaceWithIdAsync(context.Document, location, value, preferGeneric: true, cancel),
+                equivalenceKey: "UseGenericId"),
             diagnostic);
     }
 
@@ -673,7 +719,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
         return newDocument.Project.Solution;
     }
 
-    static async Task<Document> ReplaceUnionWithIdAsync(
+    static async Task<Document> ReplaceWithIdAsync(
         Document document,
         Location location,
         string value,

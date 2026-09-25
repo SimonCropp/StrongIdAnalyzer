@@ -1007,10 +1007,39 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA009_ReplacesStringTagWithGenericForm()
+    {
+        var source =
+            """
+            using System.Linq;
+
+            public class ConfigEntry
+            {
+                public string Id { get; set; }
+            }
+
+            public static class Queries
+            {
+                public static string Find(ConfigEntry[] entries, [Id("ConfigEntry")] string wellKnownConfigEntry) =>
+                    entries.Where(_ => _.Id == wellKnownConfigEntry).Select(_ => _.Id).Single();
+            }
+            """;
+
+        var actions = await GetCodeActions(source, "SIA009", null);
+        await Assert.That(actions.Single().Title)
+            .IsEqualTo("Replace [Id(\"ConfigEntry\")] on parameter 'wellKnownConfigEntry' with [Id<ConfigEntry>]");
+
+        var fixedSource = await ApplyFix(source, "SIA009");
+
+        await Contains(fixedSource, "[Id<ConfigEntry>] string wellKnownConfigEntry");
+        await DoesNotContain(fixedSource, "[Id(\"ConfigEntry\")]");
+    }
+
+    [Test]
     public async Task Provider_Exposes_AllFixableDiagnosticIds()
     {
         var ids = new AddIdCodeFixProvider().FixableDiagnosticIds.OrderBy(_ => _).ToArray();
-        var expected = new[] { "SIA001", "SIA002", "SIA003", "SIA005", "SIA006" };
+        var expected = new[] { "SIA001", "SIA002", "SIA003", "SIA005", "SIA006", "SIA009" };
         await Assert.That(ids.Length).IsEqualTo(expected.Length);
         for (var i = 0; i < expected.Length; i++)
         {
@@ -1234,6 +1263,7 @@ public class AddIdCodeFixProviderTests
 
         var compilation = (await solution.GetProject(projectInfo.Id)!.GetCompilationAsync())!;
         var diagnostics = await compilation
+            .SuppressStringTagHint()
             .WithAnalyzers([new IdMismatchAnalyzer()])
             .GetAnalyzerDiagnosticsAsync();
         var diagnostic = diagnostics.Single(_ => _.Id == "SIA002");
@@ -1306,6 +1336,7 @@ public class AddIdCodeFixProviderTests
 
         var compilation = (await solution.GetProject(projectInfo.Id)!.GetCompilationAsync())!;
         var diagnostics = await compilation
+            .SuppressStringTagHint()
             .WithAnalyzers([new IdMismatchAnalyzer()])
             .GetAnalyzerDiagnosticsAsync();
         var diagnostic = diagnostics.Single(_ => _.Id == "SIA002");
@@ -1382,6 +1413,7 @@ public class AddIdCodeFixProviderTests
 
         var compilation = (await solution.GetProject(projectInfo.Id)!.GetCompilationAsync())!;
         var diagnostics = await compilation
+            .SuppressStringTagHint()
             .WithAnalyzers([new IdMismatchAnalyzer()])
             .GetAnalyzerDiagnosticsAsync();
         var diagnostic = diagnostics.Single(_ => _.Id == "SIA003");
@@ -1883,6 +1915,11 @@ public class AddIdCodeFixProviderTests
         var analyzerOptions = options is null
             ? null
             : new AnalyzerOptions([], new TestAnalyzerConfigOptionsProvider(options));
+        if (id != "SIA009")
+        {
+            compilation = compilation.SuppressStringTagHint();
+        }
+
         var diagnostics = await compilation
             .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
             .GetAnalyzerDiagnosticsAsync();

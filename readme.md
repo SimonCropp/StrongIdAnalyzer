@@ -3,7 +3,7 @@
 [![Build status](https://github.com/SimonCropp/StrongIdAnalyzer/actions/workflows/build.yml/badge.svg)](https://github.com/SimonCropp/StrongIdAnalyzer/actions/workflows/build.yml)
 [![NuGet Status](https://img.shields.io/nuget/v/StrongIdAnalyzer.svg?label=StrongIdAnalyzer)](https://www.nuget.org/packages/StrongIdAnalyzer/)
 
-Roslyn analyzer that prevents primitive ID values (`Guid`, `int`, `string`, etc.) from being crossed between domain types at compile time. Tag each ID declaration with `[Id("Customer")]`, `[Id("Order")]`, ... and the analyzer flags any assignment or argument that mixes them up.
+Roslyn analyzer that prevents primitive ID values (`Guid`, `int`, `string`, etc.) from being crossed between domain types at compile time. Tag each ID declaration with `[Id<Customer>]`, `[Id<Order>]`, ... and the analyzer flags any assignment or argument that mixes them up.
 
 This targets the same problem as [`StronglyTypedId`](https://github.com/andrewlock/StronglyTypedId) but without generating wrapper struct types — the runtime type stays as the primitive, so serializers, ORMs, and transport layers need no changes. The whole enforcement lives in a compile-time attribute or a naming convention.
 
@@ -93,14 +93,14 @@ public class EntityLookup
 
 ## The fix
 
-Tag every primitive ID with `[Id("<type>")]`. The analyzer then refuses to cross the streams:
+Tag every primitive ID with `[Id<TDomain>]`, naming the domain type it identifies. The analyzer then refuses to cross the streams:
 
 <!-- snippet: FixedExample -->
 <a id='snippet-FixedExample'></a>
 ```cs
 public class TypedCustomer
 {
-    [Id("Customer")]
+    [Id<Customer>]
     public Guid Id { get; set; }
 
     public string Name { get; set; } = "";
@@ -139,7 +139,9 @@ The `IdAttribute` is source-generated into the consuming compilation — no runt
 The generated declarations are written in syntax any C# compiler accepts, so a project on an older `LangVersion` — including the C# 7.3 that `netstandard2.0` and .NET Framework target frameworks default to — compiles as-is. Two conveniences are language-version gated:
 
  * **C# 10+** gets a `global using StrongIdAnalyzer;`. Below that, add `using StrongIdAnalyzer;` to the files that tag declarations.
- * **C# 11+** gets the generic attribute forms, `[Id<Customer>]` and `[UnionId<Customer, Order>]`. The string forms work everywhere.
+ * **C# 11+** gets the generic attribute forms, `[Id<Customer>]` and `[UnionId<Customer, Order>]`. These are the preferred forms: the compiler checks the type exists, and renaming it updates every tag. [SIA009](docs/SIA009.md) flags a string tag that names a type in scope.
+
+The string forms, `[Id("Customer")]` and `[UnionId("Customer", "Order")]`, work at every language version. Use them below C# 11, or for a domain that has no type to name (an id from an external system, or a tag like `"Person"` deliberately broader than any one type).
 
 
 ## Alternatives, and why this one
@@ -178,7 +180,7 @@ C# 12 `using CustomerId = System.Guid;` at file scope, or generic `Id<Customer>`
 
 ### 4. This project — compile-time tagging
 
-`[Id("Customer")]` on the primitive itself. The analyzer enforces separation at build time; the runtime type stays `Guid`/`int`/`string`.
+`[Id<Customer>]` on the primitive itself. The analyzer enforces separation at build time; the runtime type stays `Guid`/`int`/`string`.
 
 * **Pros:**
    * **No new runtime type — the primitive stays a primitive.** EF Core columns, JSON payloads, ASP.NET binders, Dapper parameters, `Dictionary<Guid, …>`, and every serializer, logger, cache, and message bus already in the stack keep working unchanged. No `ValueConverter`s, no `JsonConverter`s, no `IModelBinder`s, no per-wrapper-type adapters.
@@ -252,7 +254,7 @@ This applies to fields only: a leading underscore has no established meaning on 
 
 ### What does *not* get a convention id
 
-- **Parameters named exactly `id`** — rule 1 doesn't apply to parameters (a bare `id` has no containing-type equivalent, and parameters should be name-driven so method signatures read cleanly). Write `orderId`, or add `[Id("Order")]` explicitly.
+- **Parameters named exactly `id`** — rule 1 doesn't apply to parameters (a bare `id` has no containing-type equivalent, and parameters should be name-driven so method signatures read cleanly). Write `orderId`, or add `[Id<Order>]` explicitly.
 - **Names that are exactly `Id`** (on parameters) or shorter than 3 characters under rule 2 — so a property literally named `Id` only matches rule 1, never rule 2.
 - **Anonymous-type properties under rule 1** — a bare `Id` on `new { Id = x }` would map to a synthesized `<>f__AnonymousType*` name, which is meaningless as an id. Rule 2 still applies (`new { CustomerId = x }` reads as `"Customer"`), so values projected through anonymous types in LINQ pipelines or EF `HasIndex` expressions keep flowing the right id downstream. Writes **into** anonymous-type properties never produce a diagnostic — there's no fix site, since anon members can't carry `[Id]`.
 - **Indexers** — `this[Guid id]` never participates.
@@ -281,12 +283,12 @@ At access sites (`child.Id`), covariant receiver-type walking unions the current
 
 ### Overriding the convention
 
-Any `[Id("...")]` / `[UnionId("...")]` on the symbol wins over the convention, so the id can be broadened, narrowed, or renamed at will:
+Any `[Id<T>]` / `[UnionId<T1, T2>]` (or string form) on the symbol wins over the convention, so the id can be broadened, narrowed, or renamed at will:
 
 ```cs
 public class Customer
 {
-    // overrides the "Customer" convention id
+    // overrides the "Customer" convention id; the string form, as no Person type exists
     [Id("Person")]
     public Guid Id { get; set; }
 }
@@ -411,6 +413,7 @@ Each rule has its own page with the message anatomy, every fix option, and the c
 | [SIA006](docs/SIA006.md)  | Warning  | Yes      | `[UnionId("x")]` with a single option should be `[Id("x")]`             |
 | [SIA007](docs/SIA007.md)  | Error    | —        | `[Id]` / `[UnionId]` tag is empty or whitespace                         |
 | [SIA008](docs/SIA008.md)  | Error    | —        | `[assembly: ExternalId]` names a missing member or supplies no id       |
+| [SIA009](docs/SIA009.md)  | Warning  | Yes      | `[Id("X")]` names a type in scope and should be `[Id<X>]`               |
 
 
 ### Reading a diagnostic
@@ -418,15 +421,15 @@ Each rule has its own page with the message anatomy, every fix option, and the c
 Every message names both declarations involved, states the attribute to write, and says where to write it, so the build log alone is enough to act on — no IDE hover required:
 
 ```
-SIA002: property 'Order.CustomerRef' has no [Id] but flows to parameter 'customerId' of 'Customers.Load', which is [Id("Customer")]. Fix: add [Id("Customer")] to property 'Order.CustomerRef' (line 12).
+SIA002: property 'Order.CustomerRef' has no [Id] but flows to parameter 'customerId' of 'Customers.Load', which is [Id("Customer")]. Fix: add [Id<Customer>] to property 'Order.CustomerRef' (line 12).
 ```
 
-The location in the `Fix:` clause is the *declaration* to edit, which is often not where the warning is reported. `(line 12)` means the same file as the warning; a declaration elsewhere is given as `(D:\src\Order.cs:12)`. Equality checks read `is compared with` instead of `flows to`. MSBuild appends each rule's help link after the message, so the build log also carries the URL of the rule's page.
+The location in the `Fix:` clause is the *declaration* to edit, which is often not where the warning is reported. `(line 12)` means the same file as the warning; a declaration elsewhere is given as `(D:\src\Order.cs:12)`. Equality checks read `is compared with` instead of `flows to`. The attribute in the `Fix:` clause is the generic form when it would compile at the declaration (C# 11+, and the id names exactly one non-generic, non-static type in scope there), otherwise the string form; the descriptions of what each side currently carries always use the string form. MSBuild appends each rule's help link after the message, so the build log also carries the URL of the rule's page.
 
 The mechanically-fixable rules can be applied across a project from the command line, without an IDE, because the code fixes ship inside the analyzer package:
 
 ```
-dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006
+dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006 SIA009
 ```
 
 SIA001 is left out on purpose: it has two competing fixes (retag the target, or pass a different value) and only a human can tell which one is the bug. See [SIA001](docs/SIA001.md).
@@ -437,11 +440,11 @@ SIA001 is left out on purpose: it has two competing fixes (retag the target, or 
 The messages and the per-rule pages are written so an agent reading a build log can act without further context. The failure mode to guard against is an agent making a warning disappear rather than fixing the bug it reports: suppressing with `#pragma`, deleting the `[Id]` from the tagged side, or widening to `[UnionId]`. The block below is ready to paste into a consumer repository's `AGENTS.md` or `CLAUDE.md` to head that off:
 
 ```md
-## StrongIdAnalyzer (SIA001–SIA008)
+## StrongIdAnalyzer (SIA001–SIA009)
 
 This project uses StrongIdAnalyzer to stop primitive ids (Guid/int/string) from
-being mixed between domains. Ids are tagged with `[Id("Customer")]` or inferred
-from names: a member named `Id` takes its declaring type's name, `CustomerId`
+being mixed between domains. Ids are tagged with `[Id<Customer>]` (or
+`[Id("Customer")]` when no `Customer` type is in scope) or inferred from names: a member named `Id` takes its declaring type's name, `CustomerId`
 takes `Customer`. Each warning names both declarations, ends with a `Fix:`
 clause giving the attribute to write and the line to write it on, and links to
 https://github.com/SimonCropp/StrongIdAnalyzer/blob/main/docs/<ID>.md.
@@ -462,10 +465,11 @@ https://github.com/SimonCropp/StrongIdAnalyzer/blob/main/docs/<ID>.md.
 - SIA007 (empty tag): supply the domain name.
 - SIA008 (`[assembly: ExternalId]` cannot apply): fix the member name (prefer
   `nameof`) or supply the domain name.
+- SIA009 (`[Id("X")]` where `X` is a type): replace with `[Id<X>]`.
 
 Apply the mechanical fixes without an IDE:
 
-    dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006
+    dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006 SIA009
 
 Literals, locals, and untagged method results (`Guid.NewGuid()`, `Guid.Empty`)
 are deliberately not tracked; do not add tags to make them tracked.
@@ -519,19 +523,19 @@ namespace InheritanceAbstractClassExplicit
     // would warn on each one.
     public abstract class Base
     {
-        [Id("Base")]
+        [Id<Base>]
         public abstract Guid Id { get; set; }
     }
 
     public class Child1 : Base
     {
-        [Id("Child1")]
+        [Id<Child1>]
         public override Guid Id { get; set; }
     }
 
     public class Child2 : Base
     {
-        [Id("Child2")]
+        [Id<Child2>]
         public override Guid Id { get; set; }
     }
 
@@ -609,19 +613,19 @@ namespace InheritanceInterfaceExplicit
 {
     public interface Base
     {
-        [Id("Base")]
+        [Id<Base>]
         Guid Id { get; set; }
     }
 
     public class Child1 : Base
     {
-        [Id("Child1")]
+        [Id<Child1>]
         public Guid Id { get; set; }
     }
 
     public class Child2 : Base
     {
-        [Id("Child2")]
+        [Id<Child2>]
         public Guid Id { get; set; }
     }
 
@@ -816,7 +820,7 @@ Other sources are treated as **unknown** and suppress all three diagnostics. Thi
 No `[Id]` can be attached to a literal, so there is nothing to compare against.
 
 ```cs
-void Consume([Id("Order")] Guid value) { }
+void Consume([Id<Order>] Guid value) { }
 
 // unknown — literal-like
 Consume(Guid.Empty);
@@ -830,7 +834,7 @@ Consume(new Guid("00000000-0000-0000-0000-000000000000"));
 Locals don't support attributes in C#, but the analyzer resolves the initializer expression and propagates a Present id through the local when one is found. A local initialised from a tagged field / property / parameter / return value / element-returning LINQ chain carries that id forward; a local initialised from a literal, an untagged call, or any other expression that resolves to Unknown stays Unknown.
 
 ```cs
-[Id("Customer")] Guid source = default;
+[Id<Customer>] Guid source = default;
 
 // id flows — copy is Customer
 var copy = source;
@@ -847,7 +851,7 @@ Consume(fresh);
 The initializer only speaks for the local while nothing else writes to it. A local that is later assigned to, incremented, or passed as a `ref` / `out` argument is Unknown on every read — including the reads before the write. Tracking which reads come after which write would mean flow analysis; refusing to guess is the same policy the analyzer applies to every other expression it cannot resolve exactly.
 
 ```cs
-[Id("Customer")] Guid source = default;
+[Id<Customer>] Guid source = default;
 
 var copy = source;
 copy = other;
@@ -858,7 +862,7 @@ Consume(copy);
 
 ### Method invocations
 
-Untagged return values stay **unknown** — no noise on `Guid.NewGuid()` and friends. To flow an id through a return value, annotate the method with `[return: Id("...")]` or `[return: UnionId("...", "...")]`. The id is read from the method's own return attributes, plus any method it overrides or interface member it implements.
+Untagged return values stay **unknown** — no noise on `Guid.NewGuid()` and friends. To flow an id through a return value, annotate the method with `[return: Id<T>]` or `[return: UnionId<T1, T2>]` (or their string forms). The id is read from the method's own return attributes, plus any method it overrides or interface member it implements.
 
 ```cs
 Guid GetOrderId() => Guid.NewGuid();
@@ -869,7 +873,7 @@ Consume(GetOrderId());
 // unknown — untagged return
 Consume(Guid.NewGuid());
 
-[return: Id("Order")]
+[return: Id<Order>]
 Guid LoadOrderId() => Guid.NewGuid();
 
 // OK — id matches
@@ -886,7 +890,7 @@ Task<Guid> LoadOrderIdAsync() => Task.FromResult(Guid.NewGuid());
 // unknown — untagged async return
 Consume(await LoadOrderIdAsync());
 
-[return: Id("Order")]
+[return: Id<Order>]
 Task<Guid> LoadTaggedOrderIdAsync() => Task.FromResult(Guid.NewGuid());
 
 // OK — id flows through await
@@ -898,8 +902,8 @@ Consume(await LoadTaggedOrderIdAsync());
 Conditionals, casts, pattern results, null-coalescing, and any other expression shape collapse to "unknown" — even when every operand would individually resolve.
 
 ```cs
-[Id("Order")]    Guid a = default;
-[Id("Customer")] Guid b = default;
+[Id<Order>]    Guid a = default;
+[Id<Customer>] Guid b = default;
 
 // unknown — ternary
 Consume(condition ? a : b);
@@ -926,13 +930,13 @@ public class CustomerList
     // [Id] on a single-T collection describes its elements. The tag flows into any
     // site that extracts an element: lambda parameters, foreach variables, .First()
     // results, and through chains of LINQ-shape element-preserving calls.
-    [Id("Customer")]
+    [Id<Customer>]
     public IEnumerable<Guid> Ids { get; set; } = [];
 }
 
 public class OrderWriter
 {
-    public void Consume([Id("Order")] Guid value) { }
+    public void Consume([Id<Order>] Guid value) { }
 
     public void Go(CustomerList list) =>
         // SIA001 on the argument: `id` inherits "Customer" from list.Ids, which is
@@ -999,10 +1003,10 @@ The loop variable inherits the collection's element id for the body of the loop.
 ```cs
 public class CustomerScan
 {
-    [Id("Customer")]
+    [Id<Customer>]
     public IEnumerable<Guid> Ids { get; set; } = [];
 
-    public void ConsumeOrder([Id("Order")] Guid value) { }
+    public void ConsumeOrder([Id<Order>] Guid value) { }
 
     public void Go()
     {
@@ -1036,10 +1040,10 @@ public static class Paged
 
 public class PagedReader
 {
-    [Id("Customer")]
+    [Id<Customer>]
     public IEnumerable<Guid> Ids { get; set; } = [];
 
-    [Id("Order")]
+    [Id<Order>]
     public Guid LatestId { get; set; }
 
     // SIA001 on the assignment: .First() returns a Customer-tagged Guid after
@@ -1075,10 +1079,10 @@ public static class WellKnownId<[IdTag] T>
 
 public class OperationIndex
 {
-    [Id("Operation")]
+    [Id<Operation>]
     static Guid[] blocked = [];
 
-    [Id("Customer")]
+    [Id<Customer>]
     public Guid LatestCustomerId { get; set; }
 
     // SIA001: .Except is element-preserving, so the walk terminates at
@@ -1106,7 +1110,7 @@ public class CustomerOrderMap
     // [Id] on a Dictionary/KeyValuePair/tuple/grouping carries no element id —
     // the analyzer can't tell whether the id applies to K, V, or both. Flows
     // through these containers stay "unknown" and produce no diagnostics.
-    [Id("Customer")]
+    [Id<Customer>]
     public Dictionary<Guid, string> OrdersByCustomer { get; set; } = [];
 }
 ```
@@ -1123,11 +1127,11 @@ When a record is declared with a primary constructor, `[Id(...)]` / `[UnionId(..
 <!-- snippet: RecordPrimaryCtorParameter -->
 <a id='snippet-RecordPrimaryCtorParameter'></a>
 ```cs
-public record Holder([Id("Order")] Guid Value);
+public record Holder([Id<Order>] Guid Value);
 
 public static class RecordUsage
 {
-    public static void Consume([Id("Order")] Guid value) { }
+    public static void Consume([Id<Order>] Guid value) { }
 
     public static void Use(Holder holder) =>
         // no diagnostic — attribute flows to property
@@ -1195,7 +1199,7 @@ public class Registration
 {
     public Guid Raw { get; set; }
 
-    public static void Consume([Id("Order")] Guid value) { }
+    public static void Consume([Id<Order>] Guid value) { }
 
     public void Use(Customer customer, UserId userId)
     {

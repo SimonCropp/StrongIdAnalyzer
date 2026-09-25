@@ -571,6 +571,7 @@ public class ExternalIdTests
             new TestAnalyzerConfigOptionsProvider(options ?? new Dictionary<string, string>()));
 
         return consumerCompilation
+            .SuppressStringTagHint()
             .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
             .GetAnalyzerDiagnosticsAsync();
     }

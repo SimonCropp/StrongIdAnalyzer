@@ -469,6 +469,7 @@ public class IndexTests
             ? null
             : new AnalyzerOptions([], new TestAnalyzerConfigOptionsProvider(options));
         return consumerCompilation
+            .SuppressStringTagHint()
             .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
             .GetAnalyzerDiagnosticsAsync();
     }

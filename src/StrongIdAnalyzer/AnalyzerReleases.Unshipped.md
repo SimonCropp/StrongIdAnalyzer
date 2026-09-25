@@ -10,3 +10,4 @@ SIA005 | IdAttribute.Usage | Warning | [Id(...)] attribute matches the naming co
 SIA006 | IdAttribute.Usage | Warning | [UnionId("x")] with a single option should be [Id("x")]
 SIA007 | IdAttribute.Usage | Error | Id tag must not be empty or whitespace
 SIA008 | IdAttribute.Usage | Error | [assembly: ExternalId] names a missing member or supplies no id
+SIA009 | IdAttribute.Usage | Warning | [Id("X")] names a type and should be [Id<X>]

@@ -89,6 +89,10 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 SymbolKind.Parameter,
                 SymbolKind.Method);
 
+            start.RegisterSyntaxNodeAction(
+                AnalyzeStringTagNamingType,
+                SyntaxKind.Attribute);
+
             start.RegisterCompilationEndAction(end =>
             {
                 ReportConventionDiagnostics(end, ambiguity, redundantCandidates);
@@ -185,6 +189,71 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         }
 
         Rules.ReportEmptyTag(context, reference.ToLocation(), attributeName);
+    }
+
+    // SIA009: `[Id("ConfigEntry")]` where `ConfigEntry` is a type in scope. `[Id<ConfigEntry>]`
+    // carries the same tag but the compiler checks it, so a rename of the type follows it
+    // instead of silently leaving the string behind. Only offered when the generic form is
+    // emitted (C# 11+) and would compile at this position: exactly one non-generic,
+    // non-static type of that name — the same test the fixer's ShouldUseGenericAsync makes.
+    static void AnalyzeStringTagNamingType(SyntaxNodeAnalysisContext context)
+    {
+        var attribute = (AttributeSyntax) context.Node;
+        if (attribute.Name is GenericNameSyntax or QualifiedNameSyntax { Right: GenericNameSyntax } ||
+            attribute.ArgumentList is not { Arguments.Count: 1 } arguments ||
+            arguments.Arguments[0].NameEquals is not null ||
+            arguments.Arguments[0].NameColon is not null)
+        {
+            return;
+        }
+
+        if (attribute.SyntaxTree.Options is not CSharpParseOptions { LanguageVersion: >= LanguageVersion.CSharp11 })
+        {
+            return;
+        }
+
+        var model = context.SemanticModel;
+        var cancel = context.CancellationToken;
+        if (model.GetSymbolInfo(attribute, cancel).Symbol is not IMethodSymbol constructor ||
+            !IsIdAttributeType(constructor.ContainingType))
+        {
+            return;
+        }
+
+        if (model.GetConstantValue(arguments.Arguments[0].Expression, cancel).Value is not string { Length: > 0 } value ||
+            !GenericTag.Compiles(model, attribute.SpanStart, value))
+        {
+            return;
+        }
+
+        Rules.ReportStringTagNamesType(context, attribute.GetLocation(), value, FindAttributeOwner(attribute, model, cancel));
+    }
+
+    static bool IsIdAttributeType(INamedTypeSymbol? type) =>
+        type is
+        {
+            MetadataName: IdAttributeExtensions.IdMetadataName,
+            ContainingNamespace:
+            {
+                Name: "StrongIdAnalyzer",
+                ContainingNamespace.IsGlobalNamespace: true
+            }
+        };
+
+    static ISymbol? FindAttributeOwner(AttributeSyntax attribute, SemanticModel model, System.Threading.CancellationToken cancel)
+    {
+        var owner = attribute.Parent?.Parent;
+        if (owner is BaseFieldDeclarationSyntax field)
+        {
+            owner = field.Declaration.Variables.FirstOrDefault();
+        }
+
+        if (owner is null)
+        {
+            return null;
+        }
+
+        return model.GetDeclaredSymbol(owner, cancel);
     }
 
     static void AnalyzeSingletonUnion(SymbolAnalysisContext context)
