@@ -194,7 +194,7 @@ static class LinqExtensions
     // An extension method whose receiver carries a discoverable element type.
     // This is the gate for LINQ-shaped recognition — it lets `static T[] Custom<T>(this
     // IEnumerable<T> src, Func<T,bool> f)` flow tags without hardcoding the method name.
-    public static bool IsEnumerableShapeExtension(this IMethodSymbol method) =>
+    static bool IsEnumerableShapeExtension(this IMethodSymbol method) =>
         method.GetExtensionReceiverType() is { } receiverType &&
         receiverType.TryGetEnumerableElementType() is not null;
 
@@ -202,14 +202,14 @@ static class LinqExtensions
     // to the receiver exactly as `customerIds.Any(id => ...)` does, but List<T>.ForEach
     // is declared on the collection rather than as an extension. Without this the lambda
     // parameter resolved to nothing and the tagged collection's element tag was lost.
-    public static bool IsEnumerableShapeInstanceCall(this IInvocationOperation invocation) =>
+    static bool IsEnumerableShapeInstanceCall(this IInvocationOperation invocation) =>
         invocation.Instance?.Type.TryGetEnumerableElementType() is not null;
 
     // For a reduced extension-method call (`x.Ext(...)`), `method.Parameters` excludes
     // the receiver — the "this" parameter only appears on the unreduced symbol, which
     // ReducedFrom surfaces. For calls written in static form (`Ext(x, ...)`) the method
     // is already unreduced, so ReducedFrom is null and Parameters[0] is the receiver.
-    public static ITypeSymbol? GetExtensionReceiverType(this IMethodSymbol method)
+    static ITypeSymbol? GetExtensionReceiverType(this IMethodSymbol method)
     {
         if (!method.IsExtensionMethod)
         {
