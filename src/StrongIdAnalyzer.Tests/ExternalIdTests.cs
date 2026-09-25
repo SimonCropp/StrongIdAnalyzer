@@ -501,7 +501,7 @@ public class ExternalIdTests
         var diagnostics = await Analyze(null, source);
 
         await Assert.That(diagnostics.Select(_ => _.Id)).IsEquivalentTo(["SIA001"]);
-        await Assert.That(diagnostics[0].GetMessage()).Contains("""property 'Process.Id' is [Id("Process")]""");
+        await Assert.That(diagnostics[0].GetMessage()).Contains("""property 'Process.Id' is [Id<Process>]""");
     }
 
     // `null` binds to the params array itself, and reading Values.Length on that constant
@@ -571,6 +571,7 @@ public class ExternalIdTests
             new TestAnalyzerConfigOptionsProvider(options ?? new Dictionary<string, string>()));
 
         return consumerCompilation
+            .SuppressStringTagHint()
             .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
             .GetAnalyzerDiagnosticsAsync();
     }

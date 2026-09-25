@@ -1609,6 +1609,7 @@ public class WrapperTests
     {
         var analyzerOptions = new AnalyzerOptions([], new TestAnalyzerConfigOptionsProvider(options));
         return compilation
+            .SuppressStringTagHint()
             .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
             .GetAnalyzerDiagnosticsAsync();
     }

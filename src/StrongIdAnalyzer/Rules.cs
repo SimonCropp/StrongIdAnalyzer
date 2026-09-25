@@ -69,7 +69,7 @@ static class Rules
     static readonly DiagnosticDescriptor redundantId = new(
         id: "SIA005",
         title: "Redundant [Id] attribute",
-        messageFormat: "[Id(\"{0}\")] on {1} is redundant: {2}. Fix: remove the attribute.",
+        messageFormat: "{0} on {1} is redundant: {2}. Fix: remove the attribute.",
         category: "IdAttribute.Usage",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -80,7 +80,7 @@ static class Rules
     static readonly DiagnosticDescriptor singletonUnion = new(
         id: "SIA006",
         title: "[UnionId] with a single option should be [Id]",
-        messageFormat: "[UnionId(\"{0}\")] on {1} has only one option. Fix: replace it with [Id(\"{0}\")].",
+        messageFormat: "[UnionId(\"{0}\")] on {1} has only one option. Fix: replace it with {2}.",
         category: "IdAttribute.Usage",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -108,8 +108,18 @@ static class Rules
         helpLinkUri: helpRoot + "SIA008.md",
         customTags: [WellKnownDiagnosticTags.CompilationEnd]);
 
+    static readonly DiagnosticDescriptor stringTagNamesType = new(
+        id: "SIA009",
+        title: "[Id(\"X\")] names a type and should be [Id<X>]",
+        messageFormat: "[Id(\"{0}\")] on {1} names the type '{0}'. Fix: replace it with [Id<{0}>].",
+        category: "IdAttribute.Usage",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "The string tag matches a type in scope. The generic form carries the same tag but is checked by the compiler, so renaming the type updates it rather than leaving a stale string behind. Apply mechanically with: dotnet format analyzers --diagnostics SIA009.",
+        helpLinkUri: helpRoot + "SIA009.md");
+
     public static readonly ImmutableArray<DiagnosticDescriptor> All =
-        [idMismatch, missingSourceId, droppedId, ambiguousConvention, redundantId, singletonUnion, emptyTag, externalIdInvalid];
+        [idMismatch, missingSourceId, droppedId, ambiguousConvention, redundantId, singletonUnion, emptyTag, externalIdInvalid, stringTagNamesType];
 
     // SIA001. Both declarations ride along as additional locations so the code fix can
     // offer to fix either side — slot 0 is always the target, slot 1 the source. Slots
@@ -146,11 +156,11 @@ static class Rules
             messageArgs:
             [
                 Describe(sourceSymbol),
-                FormatAttribute(source.Tags),
+                DisplayAttribute(source.Tags, context.Compilation, location),
                 relation,
                 Describe(targetSymbol),
-                FormatAttribute(target.Tags),
-                MismatchFix(location, sourceSymbol, sourceFixSite, source, targetSymbol, targetFixSite, target)
+                DisplayAttribute(target.Tags, context.Compilation, location),
+                MismatchFix(context.Compilation, location, sourceSymbol, sourceFixSite, source, targetSymbol, targetFixSite, target)
             ]));
 
     // The fix clause prefers retagging the target (matches the fixer's default), falls
@@ -159,6 +169,7 @@ static class Rules
     // the other side's *first* tag (see FixAttribute), while "pass a value tagged"
     // shows the target's whole set because any tag in it satisfies the target.
     static string MismatchFix(
+        Compilation compilation,
         Location location,
         ISymbol? sourceSymbol,
         ISymbol? sourceFixSite,
@@ -169,15 +180,15 @@ static class Rules
     {
         if (targetFixSite.IsEditable())
         {
-            return $"Fix: apply {FixAttribute(source)} to {Describe(targetSymbol)}{Site(location, targetFixSite)}, or pass a value tagged {FormatAttribute(target.Tags)}";
+            return $"Fix: apply {FixAttribute(source, compilation, targetFixSite)} to {Describe(targetSymbol)}{Site(location, targetFixSite)}, or pass a value tagged {DisplayAttribute(target.Tags, compilation, location)}";
         }
 
         if (sourceFixSite.IsEditable())
         {
-            return $"Fix: apply {FixAttribute(target)} to {Describe(sourceSymbol)}{Site(location, sourceFixSite)}, or pass a value tagged {FormatAttribute(target.Tags)}";
+            return $"Fix: apply {FixAttribute(target, compilation, sourceFixSite)} to {Describe(sourceSymbol)}{Site(location, sourceFixSite)}, or pass a value tagged {DisplayAttribute(target.Tags, compilation, location)}";
         }
 
-        return $"Fix: pass a value tagged {FormatAttribute(target.Tags)}";
+        return $"Fix: pass a value tagged {DisplayAttribute(target.Tags, compilation, location)}";
     }
 
     // SIA002. `fixTarget` is the untagged side's declaration — the codefix adds an [Id]
@@ -191,6 +202,7 @@ static class Rules
         IdInfo info,
         string relation = "flows to") =>
         context.ReportDiagnostic(CreateFixable(
+            context.Compilation,
             missingSourceId,
             location,
             fixTarget,
@@ -201,7 +213,7 @@ static class Rules
                 relation,
                 Describe(taggedSymbol),
                 displayTags,
-                FormatAttribute(fixTags),
+                FixAttribute(fixTags, context.Compilation, fixTarget),
                 Site(location, fixTarget)
             ]));
 
@@ -214,6 +226,7 @@ static class Rules
         IdInfo info,
         ISymbol fixTarget) =>
         context.ReportDiagnostic(CreateFixable(
+            context.Compilation,
             droppedId,
             location,
             fixTarget,
@@ -224,7 +237,7 @@ static class Rules
                 displayTags,
                 "flows to",
                 Describe(fixTarget),
-                FormatAttribute(fixTags),
+                FixAttribute(fixTags, context.Compilation, fixTarget),
                 Site(location, fixTarget)
             ]));
 
@@ -253,7 +266,21 @@ static class Rules
         ISymbol symbol,
         string value,
         RedundancyReason reason) =>
-        context.ReportDiagnostic(Diagnostic.Create(redundantId, location, value, Describe(symbol), Because(reason, value)));
+        context.ReportDiagnostic(Diagnostic.Create(redundantId, location, AsWritten(location, value), Describe(symbol), Because(reason, value)));
+
+    // The redundant attribute as it appears in source — `[Id<Customer>]` or
+    // `[Id("Customer")]` — since the reader is being told to delete that exact text.
+    static string AsWritten(Location location, string value)
+    {
+        var node = location.SourceTree?.GetRoot().FindNode(location.SourceSpan);
+        if (node?.FirstAncestorOrSelf<AttributeSyntax>()?.Name
+            is GenericNameSyntax or QualifiedNameSyntax { Right: GenericNameSyntax })
+        {
+            return $"[Id<{value}>]";
+        }
+
+        return $"[Id(\"{value}\")]";
+    }
 
     static string Because(RedundancyReason reason, string value) =>
         reason switch
@@ -275,7 +302,19 @@ static class Rules
             singletonUnion,
             location,
             properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, singleValue),
-            messageArgs: [singleValue, Describe(context.Symbol)]));
+            messageArgs: [singleValue, Describe(context.Symbol), FixAttribute([singleValue], context.Compilation, context.Symbol)]));
+
+    // SIA009. On the attribute itself; the fixer rewrites it in place to the generic form.
+    public static void ReportStringTagNamesType(
+        SyntaxNodeAnalysisContext context,
+        Location location,
+        string value,
+        ISymbol? owner) =>
+        context.ReportDiagnostic(Diagnostic.Create(
+            stringTagNamesType,
+            location,
+            properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, value),
+            messageArgs: [value, Describe(owner)]));
 
     // SIA007. No codefix — an empty tag doesn't say what the user meant.
     public static void ReportEmptyTag(
@@ -315,6 +354,7 @@ static class Rules
     // Shared shape for SIA002/SIA003: the diagnostic carries the tags to apply plus the
     // declaration to apply them to.
     static Diagnostic CreateFixable(
+        Compilation compilation,
         DiagnosticDescriptor rule,
         Location location,
         ISymbol? fixTarget,
@@ -339,7 +379,7 @@ static class Rules
             location,
             additionalLocations: GetAdditionalLocations(fixTarget),
             properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, joined),
-            messageArgs: messageArgs(fixTags, FormatAttribute(info.Tags)));
+            messageArgs: messageArgs(fixTags, DisplayAttribute(info.Tags, compilation, location)));
     }
 
     // SIA001's fixer applies a single tag — source.FirstValue onto the target,
@@ -347,8 +387,38 @@ static class Rules
     // through a derived receiver, a [UnionId]) is reduced to its first tag here. That
     // keeps the Fix clause and the IDE action title in agreement; rendering the full
     // set as [UnionId(...)] would promise an attribute the fixer never writes.
-    static string FixAttribute(IdInfo info) =>
-        FormatAttribute(info.Tags.IsDefaultOrEmpty ? info.Tags : [info.Tags[0]]);
+    static string FixAttribute(IdInfo info, Compilation compilation, ISymbol? fixSite) =>
+        FixAttribute(info.Tags.IsDefaultOrEmpty ? info.Tags : [info.Tags[0]], compilation, fixSite);
+
+    // The attribute a Fix clause tells the reader to write. The generic form when every
+    // tag names a type that `[Id<X>]` could reference at the fix site — the same test the
+    // fixer makes, so the message and the lightbulb agree — otherwise the string form.
+    // Anything else would steer the reader straight into SIA009.
+    static string FixAttribute(ImmutableArray<string> tags, Compilation compilation, ISymbol? fixSite) =>
+        RenderAttribute(tags, _ => GenericTag.Compiles(compilation, fixSite, _));
+
+    // What a side currently carries (`is [Id<Customer>]`, `pass a value tagged ...`),
+    // rendered the way the reader would write it at the diagnostic's position. A tag
+    // with no type in scope there keeps the string form.
+    static string DisplayAttribute(ImmutableArray<string> tags, Compilation compilation, Location location) =>
+        RenderAttribute(tags, _ => GenericTag.Compiles(compilation, location, _));
+
+    static string RenderAttribute(ImmutableArray<string> tags, Func<string, bool> compiles)
+    {
+        if (tags.IsDefaultOrEmpty ||
+            tags.Length > 5 ||
+            !tags.All(compiles))
+        {
+            return FormatAttribute(tags);
+        }
+
+        if (tags.Length == 1)
+        {
+            return $"[Id<{tags[0]}>]";
+        }
+
+        return $"[UnionId<{string.Join(", ", tags)}>]";
+    }
 
     // The attribute the reader should write: one tag → [Id("X")], several → the
     // equivalent [UnionId("X", "Y")].

@@ -87,7 +87,7 @@ public class EntityLookup
 
 public class TypedCustomer
 {
-    [Id("Customer")]
+    [Id<Customer>]
     public Guid Id { get; set; }
 
     public string Name { get; set; } = "";
@@ -178,19 +178,19 @@ namespace InheritanceAbstractClassExplicit
     // would warn on each one.
     public abstract class Base
     {
-        [Id("Base")]
+        [Id<Base>]
         public abstract Guid Id { get; set; }
     }
 
     public class Child1 : Base
     {
-        [Id("Child1")]
+        [Id<Child1>]
         public override Guid Id { get; set; }
     }
 
     public class Child2 : Base
     {
-        [Id("Child2")]
+        [Id<Child2>]
         public override Guid Id { get; set; }
     }
 
@@ -260,19 +260,19 @@ namespace InheritanceInterfaceExplicit
 {
     public interface Base
     {
-        [Id("Base")]
+        [Id<Base>]
         Guid Id { get; set; }
     }
 
     public class Child1 : Base
     {
-        [Id("Child1")]
+        [Id<Child1>]
         public Guid Id { get; set; }
     }
 
     public class Child2 : Base
     {
-        [Id("Child2")]
+        [Id<Child2>]
         public Guid Id { get; set; }
     }
 
@@ -337,11 +337,11 @@ namespace InheritanceInterfaceConvention
 
 #region RecordPrimaryCtorParameter
 
-public record Holder([Id("Order")] Guid Value);
+public record Holder([Id<Order>] Guid Value);
 
 public static class RecordUsage
 {
-    public static void Consume([Id("Order")] Guid value) { }
+    public static void Consume([Id<Order>] Guid value) { }
 
     public static void Use(Holder holder) =>
         // no diagnostic — attribute flows to property
@@ -360,13 +360,13 @@ public class CustomerList
     // [Id] on a single-T collection describes its elements. The tag flows into any
     // site that extracts an element: lambda parameters, foreach variables, .First()
     // results, and through chains of LINQ-shape element-preserving calls.
-    [Id("Customer")]
+    [Id<Customer>]
     public IEnumerable<Guid> Ids { get; set; } = [];
 }
 
 public class OrderWriter
 {
-    public void Consume([Id("Order")] Guid value) { }
+    public void Consume([Id<Order>] Guid value) { }
 
     public void Go(CustomerList list) =>
         // SIA001 on the argument: `id` inherits "Customer" from list.Ids, which is
@@ -381,10 +381,10 @@ public class OrderWriter
 
 public class CustomerScan
 {
-    [Id("Customer")]
+    [Id<Customer>]
     public IEnumerable<Guid> Ids { get; set; } = [];
 
-    public void ConsumeOrder([Id("Order")] Guid value) { }
+    public void ConsumeOrder([Id<Order>] Guid value) { }
 
     public void Go()
     {
@@ -411,10 +411,10 @@ public static class Paged
 
 public class PagedReader
 {
-    [Id("Customer")]
+    [Id<Customer>]
     public IEnumerable<Guid> Ids { get; set; } = [];
 
-    [Id("Order")]
+    [Id<Order>]
     public Guid LatestId { get; set; }
 
     // SIA001 on the assignment: .First() returns a Customer-tagged Guid after
@@ -439,10 +439,10 @@ public static class WellKnownId<[IdTag] T>
 
 public class OperationIndex
 {
-    [Id("Operation")]
+    [Id<Operation>]
     static Guid[] blocked = [];
 
-    [Id("Customer")]
+    [Id<Customer>]
     public Guid LatestCustomerId { get; set; }
 
     // SIA001: .Except is element-preserving, so the walk terminates at
@@ -461,7 +461,7 @@ public class CustomerOrderMap
     // [Id] on a Dictionary/KeyValuePair/tuple/grouping carries no element id —
     // the analyzer can't tell whether the id applies to K, V, or both. Flows
     // through these containers stay "unknown" and produce no diagnostics.
-    [Id("Customer")]
+    [Id<Customer>]
     public Dictionary<Guid, string> OrdersByCustomer { get; set; } = [];
 }
 
@@ -495,7 +495,7 @@ namespace WrapperIdSamples
     {
         public Guid Raw { get; set; }
 
-        public static void Consume([Id("Order")] Guid value) { }
+        public static void Consume([Id<Order>] Guid value) { }
 
         public void Use(Customer customer, UserId userId)
         {
