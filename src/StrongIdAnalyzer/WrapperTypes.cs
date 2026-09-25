@@ -24,7 +24,9 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
         Compilation compilation)
     {
         var tree = compilation.SyntaxTrees.FirstOrDefault();
-        if (tree is null || !options.GetOptions(tree).TryGetValue(optionKey, out var raw))
+        if (tree is null ||
+            !options.GetOptions(tree)
+                .TryGetValue(optionKey, out var raw))
         {
             return false;
         }
@@ -58,7 +60,8 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
     public bool TryGet(ITypeSymbol? type, out WrapperInfo info)
     {
         info = null!;
-        if (!Enabled || UnwrapNullable(type) is not { } named)
+        if (!Enabled ||
+            UnwrapNullable(type) is not { } named)
         {
             return false;
         }
@@ -174,8 +177,14 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
         // Name check first: it is what lets the compilation-wide walk in CollectKnownTags
         // skip most types before touching their members or attributes.
         var hasSuffix = HasIdSuffix(type.Name);
-        var isGenericId = type is { Name: idSuffix, IsGenericType: true };
-        if (!hasSuffix && !isGenericId && !HasLibraryMarker(type))
+        var isGenericId = type is
+        {
+            Name: idSuffix,
+            IsGenericType: true
+        };
+        if (!hasSuffix &&
+            !isGenericId &&
+            !HasLibraryMarker(type))
         {
             return null;
         }
@@ -221,7 +230,10 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
 
         for (var current = type; current is not null; current = current.BaseType)
         {
-            if (current.SpecialType is SpecialType.System_Object or SpecialType.System_ValueType or SpecialType.System_Enum)
+            if (current.SpecialType is
+                SpecialType.System_Object or
+                SpecialType.System_ValueType or
+                SpecialType.System_Enum)
             {
                 break;
             }
@@ -259,7 +271,12 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
         ITypeSymbol memberType;
         switch (member)
         {
-            case IPropertySymbol { IsIndexer: false, GetMethod: not null, ExplicitInterfaceImplementations.IsEmpty: true } property:
+            case IPropertySymbol
+            {
+                IsIndexer: false,
+                GetMethod: not null,
+                ExplicitInterfaceImplementations.IsEmpty: true
+            } property:
                 memberType = property.Type;
                 break;
             case IFieldSymbol { IsConst: false } field:
@@ -270,7 +287,8 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
         }
 
         return memberType.SpecialType == SpecialType.System_String ||
-               (memberType.IsValueType && memberType.SpecialType != SpecialType.System_Boolean);
+               (memberType.IsValueType &&
+                memberType.SpecialType != SpecialType.System_Boolean);
     }
 
     // `UserId` -> "User". Generic shapes name the domain through a type argument:
@@ -373,7 +391,9 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
     {
         for (var index = segments.Length - 1; index >= 0; index--)
         {
-            if (namespaceSymbol is null || namespaceSymbol.IsGlobalNamespace || namespaceSymbol.Name != segments[index])
+            if (namespaceSymbol is null ||
+                namespaceSymbol.IsGlobalNamespace ||
+                namespaceSymbol.Name != segments[index])
             {
                 return false;
             }
@@ -381,7 +401,10 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
             namespaceSymbol = namespaceSymbol.ContainingNamespace;
         }
 
-        return namespaceSymbol is { IsGlobalNamespace: true };
+        return namespaceSymbol is
+        {
+            IsGlobalNamespace: true
+        };
     }
 
     // The tag a property / field / parameter carries because of a wrapper, in order:

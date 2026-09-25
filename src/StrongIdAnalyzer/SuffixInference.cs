@@ -13,7 +13,8 @@ static class SuffixInference
         Compilation compilation)
     {
         var tree = compilation.SyntaxTrees.FirstOrDefault();
-        if (tree is null || !options.GetOptions(tree).TryGetValue(optionKey, out var raw))
+        if (tree is null ||
+            !options.GetOptions(tree).TryGetValue(optionKey, out var raw))
         {
             return false;
         }
@@ -32,7 +33,8 @@ static class SuffixInference
     public static bool TryMatch(string name, ImmutableHashSet<string> knownTags, out string tag)
     {
         tag = "";
-        if (name.Length <= 2 || !name.EndsWith("Id", StringComparison.Ordinal))
+        if (name.Length <= 2 ||
+            !name.EndsWith("Id", StringComparison.Ordinal))
         {
             return false;
         }
@@ -51,7 +53,8 @@ static class SuffixInference
             }
 
             var word = name.Substring(wordStart, prefixLength - wordStart);
-            if (wordStart == 0 && char.IsLower(word[0]))
+            if (wordStart == 0 &&
+                char.IsLower(word[0]))
             {
                 word = char.ToUpperInvariant(word[0]) + word.Substring(1);
             }

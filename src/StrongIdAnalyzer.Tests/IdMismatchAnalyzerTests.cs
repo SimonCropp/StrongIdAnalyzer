@@ -2643,7 +2643,7 @@ public class IdMismatchAnalyzerTests
 
         await Assert.That(diagnostics.Length).IsEqualTo(1);
         var message = diagnostics[0].GetMessage();
-        await Assert.That(message.Contains("""UnionId<TreasuryBid, BaseEntity>""")).IsTrue();
+        await Assert.That(message.Contains("UnionId<TreasuryBid, BaseEntity>")).IsTrue();
     }
 
     [Test]
@@ -2670,7 +2670,7 @@ public class IdMismatchAnalyzerTests
         var diagnostics = (await GetDiagnostics(source)).Where(_ => _.Id == "SIA001").ToArray();
 
         await Assert.That(diagnostics.Length).IsEqualTo(1);
-        await Assert.That(diagnostics[0].GetMessage().Contains("""UnionId<Leaf, Mid, Root>""")).IsTrue();
+        await Assert.That(diagnostics[0].GetMessage().Contains("UnionId<Leaf, Mid, Root>")).IsTrue();
     }
 
     [Test]
@@ -3096,7 +3096,7 @@ public class IdMismatchAnalyzerTests
         await Assert.That(diagnostics.Length).IsEqualTo(1);
         await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
         await Assert.That(diagnostics[0].GetMessage()).IsEqualTo(
-            """property 'Group.Id' is [Id<Group>] and flows to field 'AccessRule._accessGroupId', which is [Id<AccessGroup>]. Fix: apply [Id<Group>] to field 'AccessRule._accessGroupId' (line 15), or pass a value tagged [Id<AccessGroup>].""");
+            "property 'Group.Id' is [Id<Group>] and flows to field 'AccessRule._accessGroupId', which is [Id<AccessGroup>]. Fix: apply [Id<Group>] to field 'AccessRule._accessGroupId' (line 15), or pass a value tagged [Id<AccessGroup>].");
     }
 
     [Test]
@@ -3139,7 +3139,7 @@ public class IdMismatchAnalyzerTests
         await Assert.That(diagnostics.Length).IsEqualTo(1);
         await Assert.That(diagnostics[0].Id).IsEqualTo("SIA001");
         await Assert.That(diagnostics[0].GetMessage()).IsEqualTo(
-            """property 'Group.Id' is [Id<Group>] and flows to field 'AccessRule._accessGroupId', which is [Id<AccessGroup>]. Fix: apply [Id<Group>] to field 'AccessRule._accessGroupId' (line 20), or pass a value tagged [Id<AccessGroup>].""");
+            "property 'Group.Id' is [Id<Group>] and flows to field 'AccessRule._accessGroupId', which is [Id<AccessGroup>]. Fix: apply [Id<Group>] to field 'AccessRule._accessGroupId' (line 20), or pass a value tagged [Id<AccessGroup>].");
     }
 
     [Test]

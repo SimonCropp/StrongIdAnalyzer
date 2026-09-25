@@ -240,7 +240,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
         };
 
-    static ISymbol? FindAttributeOwner(AttributeSyntax attribute, SemanticModel model, System.Threading.CancellationToken cancel)
+    static ISymbol? FindAttributeOwner(AttributeSyntax attribute, SemanticModel model, Cancel cancel)
     {
         var owner = attribute.Parent?.Parent;
         if (owner is BaseFieldDeclarationSyntax field)

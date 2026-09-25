@@ -7,13 +7,12 @@ public class IndexTests
 {
     const string indexAttributeDeclaration =
         """
-        namespace StrongIdAnalyzer
+        namespace StrongIdAnalyzer;
+
+        [System.AttributeUsage(System.AttributeTargets.Assembly)]
+        internal sealed class StrongIdIndexAttribute(string encoded) : System.Attribute
         {
-            [System.AttributeUsage(System.AttributeTargets.Assembly)]
-            internal sealed class StrongIdIndexAttribute(string encoded) : System.Attribute
-            {
-                public string Encoded { get; } = encoded;
-            }
+            public string Encoded { get; } = encoded;
         }
         """;
 

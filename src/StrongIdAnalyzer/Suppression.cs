@@ -17,19 +17,16 @@ sealed class Suppression(ImmutableArray<NamePattern> namespaces, ImmutableArray<
     // Library namespaces whose members we can't realistically tag. Noise for SIA002/SIA003
     // when a tagged id flows into BCL / framework APIs (e.g. logging, serialization,
     // dependency injection, Entity Framework). Users can override via .editorconfig.
-    public static readonly ImmutableArray<NamePattern> DefaultNamespaces =
+    static ImmutableArray<NamePattern> defaultNamespaces =
         [
             new(["System"], true),
             new(["Microsoft"], true)
         ];
 
-    public static readonly Suppression Default = new(DefaultNamespaces, []);
-
-    public ImmutableArray<NamePattern> Namespaces { get; } = namespaces;
-    public ImmutableArray<NamePattern> Assemblies { get; } = assemblies;
+    static Suppression @default = new(defaultNamespaces, []);
 
     // Assembly verdicts are per assembly, not per symbol, so the name split happens once.
-    readonly ConcurrentDictionary<IAssemblySymbol, bool> assemblyCache = new(SymbolEqualityComparer.Default);
+    ConcurrentDictionary<IAssemblySymbol, bool> assemblyCache = new(SymbolEqualityComparer.Default);
 
     public static Suppression Read(
         AnalyzerConfigOptionsProvider options,
@@ -42,13 +39,13 @@ sealed class Suppression(ImmutableArray<NamePattern> namespaces, ImmutableArray<
         var tree = compilation.SyntaxTrees.FirstOrDefault();
         if (tree is null)
         {
-            return Default;
+            return @default;
         }
 
         var treeOptions = options.GetOptions(tree);
         var namespaces = treeOptions.TryGetValue(namespacesKey, out var rawNamespaces)
             ? Parse(rawNamespaces)
-            : DefaultNamespaces;
+            : defaultNamespaces;
         var assemblies = treeOptions.TryGetValue(assembliesKey, out var rawAssemblies)
             ? Parse(rawAssemblies)
             : [];
@@ -97,7 +94,7 @@ sealed class Suppression(ImmutableArray<NamePattern> namespaces, ImmutableArray<
     // namespace chain segment-wise — no ToDisplayString, no string concatenation.
     bool IsNamespaceSuppressed(ISymbol symbol)
     {
-        if (Namespaces.IsEmpty)
+        if (namespaces.IsEmpty)
         {
             return false;
         }
@@ -114,7 +111,7 @@ sealed class Suppression(ImmutableArray<NamePattern> namespaces, ImmutableArray<
             depth++;
         }
 
-        foreach (var pattern in Namespaces)
+        foreach (var pattern in namespaces)
         {
             var segments = pattern.Segments;
             var segmentCount = segments.Length;
@@ -166,7 +163,7 @@ sealed class Suppression(ImmutableArray<NamePattern> namespaces, ImmutableArray<
 
     bool IsAssemblySuppressed(ISymbol symbol)
     {
-        if (Assemblies.IsEmpty)
+        if (assemblies.IsEmpty)
         {
             return false;
         }
@@ -192,7 +189,7 @@ sealed class Suppression(ImmutableArray<NamePattern> namespaces, ImmutableArray<
     // when they are the whole name.
     bool MatchesAssembly(string[] nameSegments)
     {
-        foreach (var pattern in Assemblies)
+        foreach (var pattern in assemblies)
         {
             var segments = pattern.Segments;
             var segmentCount = segments.Length;

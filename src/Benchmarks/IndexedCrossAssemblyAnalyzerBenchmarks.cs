@@ -40,13 +40,12 @@ public class IndexedCrossAssemblyAnalyzerBenchmarks
                 "M:Methods.TakeCustomerId(System.Guid)::id=Customer;" +
                 "M:Methods.TakeOrderId(System.Guid)::id=Order")]
 
-            namespace StrongIdAnalyzer
+            namespace StrongIdAnalyzer;
+
+            [AttributeUsage(AttributeTargets.Assembly)]
+            internal sealed class StrongIdIndexAttribute(string encoded) : Attribute
             {
-                [AttributeUsage(AttributeTargets.Assembly)]
-                internal sealed class StrongIdIndexAttribute(string encoded) : Attribute
-                {
-                    public string Encoded { get; } = encoded;
-                }
+                public string Encoded { get; } = encoded;
             }
             """);
 
