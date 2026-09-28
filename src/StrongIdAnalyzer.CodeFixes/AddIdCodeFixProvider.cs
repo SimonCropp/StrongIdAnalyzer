@@ -15,6 +15,7 @@ public class AddIdCodeFixProvider : CodeFixProvider
     const string redundantIdId = "SIA005";
     const string singletonUnionId = "SIA006";
     const string stringTagNamesTypeId = "SIA009";
+    const string stringTagsNameTypesId = "SIA010";
 
     public override ImmutableArray<string> FixableDiagnosticIds =>
     [
@@ -23,7 +24,8 @@ public class AddIdCodeFixProvider : CodeFixProvider
         droppedIdId,
         redundantIdId,
         singletonUnionId,
-        stringTagNamesTypeId
+        stringTagNamesTypeId,
+        stringTagsNameTypesId
     ];
 
     public override FixAllProvider GetFixAllProvider() =>
@@ -50,6 +52,13 @@ public class AddIdCodeFixProvider : CodeFixProvider
             if (diagnostic.Id == stringTagNamesTypeId)
             {
                 await RegisterUseGenericFix(context, diagnostic)
+                    .ConfigureAwait(false);
+                continue;
+            }
+
+            if (diagnostic.Id == stringTagsNameTypesId)
+            {
+                await RegisterUseGenericUnionFix(context, diagnostic)
                     .ConfigureAwait(false);
                 continue;
             }
@@ -608,6 +617,70 @@ public class AddIdCodeFixProvider : CodeFixProvider
                 cancel => ReplaceWithIdAsync(context.Document, location, value, preferGeneric: true, cancel),
                 equivalenceKey: "UseGenericId"),
             diagnostic);
+    }
+
+    // SIA010. As SIA009: the analyzer already checked every tag compiles as a type argument
+    // here and that the arity is one the generator emits.
+    static async Task RegisterUseGenericUnionFix(CodeFixContext context, Diagnostic diagnostic)
+    {
+        if (!diagnostic.Properties.TryGetValue(valueKey, out var joined) ||
+            string.IsNullOrEmpty(joined))
+        {
+            return;
+        }
+
+        var values = joined!.Split('|');
+        var location = diagnostic.Location;
+        var tree = location.SourceTree;
+        if (tree is null)
+        {
+            return;
+        }
+
+        var root = await tree
+            .GetRootAsync(context.CancellationToken)
+            .ConfigureAwait(false);
+        var attribute = root.FindNode(location.SourceSpan).FirstAncestorOrSelf<AttributeSyntax>();
+        if (attribute is null)
+        {
+            return;
+        }
+
+        var rendered = $"[UnionId<{string.Join(", ", values)}>]";
+        var title = AttributeHost.FindOwner(attribute) is { } owner
+            ? $"Replace [UnionId] on {AttributeHost.Describe(owner)} with {rendered}"
+            : $"Replace [UnionId] with {rendered}";
+
+        context.RegisterCodeFix(
+            CodeAction.Create(
+                title,
+                cancel => ReplaceWithGenericUnionAsync(context.Document, location, values, cancel),
+                equivalenceKey: "UseGenericUnionId"),
+            diagnostic);
+    }
+
+    static async Task<Document> ReplaceWithGenericUnionAsync(
+        Document document,
+        Location location,
+        string[] values,
+        Cancel cancel)
+    {
+        var root = await document
+            .GetSyntaxRootAsync(cancel)
+            .ConfigureAwait(false);
+        if (root is null)
+        {
+            return document;
+        }
+
+        var oldAttribute = root.FindNode(location.SourceSpan).FirstAncestorOrSelf<AttributeSyntax>();
+        if (oldAttribute is null)
+        {
+            return document;
+        }
+
+        var newAttribute = IdAttributeFactory.BuildGenericUnionReplacement(values, oldAttribute);
+        return document.WithSyntaxRoot(root.ReplaceNode(oldAttribute, newAttribute));
     }
 
     static async Task RegisterRemoveFix(CodeFixContext context, Diagnostic diagnostic)

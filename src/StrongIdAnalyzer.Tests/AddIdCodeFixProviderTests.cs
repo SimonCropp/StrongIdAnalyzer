@@ -1036,10 +1036,38 @@ public class AddIdCodeFixProviderTests
     }
 
     [Test]
+    public async Task SIA010_ReplacesStringTagsWithGenericUnion()
+    {
+        var source =
+            """
+            using System;
+
+            public class Customer;
+
+            public class Order;
+
+            public class Holder
+            {
+                [UnionId("Customer", "Order")]
+                public Guid Subject { get; set; }
+            }
+            """;
+
+        var actions = await GetCodeActions(source, "SIA010", null);
+        await Assert.That(actions.Single().Title)
+            .IsEqualTo("Replace [UnionId] on property 'Subject' with [UnionId<Customer, Order>]");
+
+        var fixedSource = await ApplyFix(source, "SIA010");
+
+        await Contains(fixedSource, "[UnionId<Customer, Order>]");
+        await DoesNotContain(fixedSource, "[UnionId(\"Customer\", \"Order\")]");
+    }
+
+    [Test]
     public async Task Provider_Exposes_AllFixableDiagnosticIds()
     {
         var ids = new AddIdCodeFixProvider().FixableDiagnosticIds.OrderBy(_ => _).ToArray();
-        var expected = new[] { "SIA001", "SIA002", "SIA003", "SIA005", "SIA006", "SIA009" };
+        var expected = new[] { "SIA001", "SIA002", "SIA003", "SIA005", "SIA006", "SIA009", "SIA010" };
         await Assert.That(ids.Length).IsEqualTo(expected.Length);
         for (var i = 0; i < expected.Length; i++)
         {
@@ -1915,7 +1943,7 @@ public class AddIdCodeFixProviderTests
         var analyzerOptions = options is null
             ? null
             : new AnalyzerOptions([], new TestAnalyzerConfigOptionsProvider(options));
-        if (id != "SIA009")
+        if (id is not ("SIA009" or "SIA010"))
         {
             compilation = compilation.SuppressStringTagHint();
         }

@@ -118,8 +118,18 @@ static class Rules
         description: "The string tag matches a type in scope. The generic form carries the same tag but is checked by the compiler, so renaming the type updates it rather than leaving a stale string behind. Apply mechanically with: dotnet format analyzers --diagnostics SIA009.",
         helpLinkUri: helpRoot + "SIA009.md");
 
+    static readonly DiagnosticDescriptor stringTagsNameTypes = new(
+        id: "SIA010",
+        title: "[UnionId(\"X\", \"Y\")] names types and should be [UnionId<X, Y>]",
+        messageFormat: "{0} on {1} names the types {2}. Fix: replace it with {3}.",
+        category: "IdAttribute.Usage",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Every string tag matches a type in scope. The generic form carries the same tags but is checked by the compiler, so renaming a type updates it rather than leaving a stale string behind. Apply mechanically with: dotnet format analyzers --diagnostics SIA010.",
+        helpLinkUri: helpRoot + "SIA010.md");
+
     public static readonly ImmutableArray<DiagnosticDescriptor> All =
-        [idMismatch, missingSourceId, droppedId, ambiguousConvention, redundantId, singletonUnion, emptyTag, externalIdInvalid, stringTagNamesType];
+        [idMismatch, missingSourceId, droppedId, ambiguousConvention, redundantId, singletonUnion, emptyTag, externalIdInvalid, stringTagNamesType, stringTagsNameTypes];
 
     // SIA001. Both declarations ride along as additional locations so the code fix can
     // offer to fix either side — slot 0 is always the target, slot 1 the source. Slots
@@ -338,6 +348,25 @@ static class Rules
             location,
             properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, value),
             messageArgs: [value, Describe(owner)]));
+
+    // SIA010. On the attribute itself. The tags travel pipe-delimited, in the order written,
+    // so the fixer rewrites to the generic form without re-reading the arguments.
+    public static void ReportStringTagsNameTypes(
+        SyntaxNodeAnalysisContext context,
+        Location location,
+        IReadOnlyList<string> values,
+        ISymbol? owner) =>
+        context.ReportDiagnostic(Diagnostic.Create(
+            stringTagsNameTypes,
+            location,
+            properties: ImmutableDictionary<string, string?>.Empty.Add(ValueKey, string.Join("|", values)),
+            messageArgs:
+            [
+                $"[UnionId({string.Join(", ", values.Select(_ => $"\"{_}\""))})]",
+                Describe(owner),
+                string.Join(", ", values.Select(_ => $"'{_}'")),
+                $"[UnionId<{string.Join(", ", values)}>]"
+            ]));
 
     // SIA007. No codefix — an empty tag doesn't say what the user meant.
     public static void ReportEmptyTag(
