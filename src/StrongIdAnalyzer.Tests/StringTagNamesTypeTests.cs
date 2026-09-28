@@ -181,6 +181,143 @@ public class StringTagNamesTypeTests
         await Assert.That(await GetDiagnostics(source, LanguageVersion.CSharp10)).IsEmpty();
     }
 
+    [Test]
+    public async Task UnionOfTypes_Fires()
+    {
+        var source =
+            """
+            using System;
+
+            public class Customer;
+
+            public class Order;
+
+            public class Holder
+            {
+                [UnionId("Customer", nameof(Order))]
+                public Guid Subject { get; set; }
+            }
+            """;
+
+        var diagnostic = (await GetDiagnostics(source)).Single();
+        await Assert.That(diagnostic.Id).IsEqualTo("SIA010");
+        await Assert.That(diagnostic.GetMessage()).IsEqualTo(
+            "[UnionId(\"Customer\", \"Order\")] on property 'Holder.Subject' names the types 'Customer', 'Order'. Fix: replace it with [UnionId<Customer, Order>].");
+    }
+
+    [Test]
+    public async Task UnionOfFiveTypes_Fires()
+    {
+        var source =
+            """
+            using System;
+
+            public class A;
+            public class B;
+            public class C;
+            public class D;
+            public class E;
+
+            public class Holder
+            {
+                [UnionId("A", "B", "C", "D", "E")]
+                public Guid Subject { get; set; }
+            }
+            """;
+
+        await Assert.That((await GetDiagnostics(source)).Select(_ => _.Id)).IsEquivalentTo(["SIA010"]);
+    }
+
+    // There is no six-type generic form to move to.
+    [Test]
+    public async Task UnionOfSixTypes_NoDiagnostic()
+    {
+        var source =
+            """
+            using System;
+
+            public class A;
+            public class B;
+            public class C;
+            public class D;
+            public class E;
+            public class F;
+
+            public class Holder
+            {
+                [UnionId("A", "B", "C", "D", "E", "F")]
+                public Guid Subject { get; set; }
+            }
+            """;
+
+        await Assert.That(await GetDiagnostics(source)).IsEmpty();
+    }
+
+    [Test]
+    public async Task UnionWithATagThatIsNotAType_NoDiagnostic()
+    {
+        var source =
+            """
+            using System;
+
+            public class Customer;
+
+            public class Holder
+            {
+                [UnionId("Customer", "Warehouse")]
+                public Guid Subject { get; set; }
+            }
+            """;
+
+        await Assert.That(await GetDiagnostics(source)).IsEmpty();
+    }
+
+    [Test]
+    public async Task GenericUnion_NoDiagnostic()
+    {
+        var source =
+            """
+            using System;
+
+            public class Customer;
+
+            public class Order;
+
+            public class Holder
+            {
+                [UnionId<Customer, Order>]
+                public Guid Subject { get; set; }
+            }
+            """;
+
+        await Assert.That(await GetDiagnostics(source)).IsEmpty();
+    }
+
+    [Test]
+    public async Task UnionBeforeCSharp11_NoDiagnostic()
+    {
+        var source =
+            """
+            using System;
+
+            public class Customer
+            {
+            }
+
+            public class Order
+            {
+            }
+
+            public class Holder
+            {
+                [UnionId("Customer", "Order")]
+                public Guid Subject { get; set; }
+            }
+            """;
+
+        await Assert.That(await GetDiagnostics(source, LanguageVersion.CSharp10)).IsEmpty();
+    }
+
     static async Task<ImmutableArray<Diagnostic>> GetDiagnostics(
         string source,
         LanguageVersion version = LanguageVersion.Latest)
@@ -206,6 +343,6 @@ public class StringTagNamesTypeTests
         var diagnostics = await updated
             .WithAnalyzers([new IdMismatchAnalyzer()])
             .GetAnalyzerDiagnosticsAsync();
-        return [..diagnostics.Where(_ => _.Id == "SIA009")];
+        return [..diagnostics.Where(_ => _.Id is "SIA009" or "SIA010")];
     }
 }

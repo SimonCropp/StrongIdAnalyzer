@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Roslyn analyzer + code fix + source generator that prevents primitive ID values (`Guid`, `int`, `string`, ...) being crossed between domain types at compile time. Users tag declarations with `[Id("Customer")]` / `[UnionId("Customer","Product")]` and the analyzer flags cross-domain flows. No runtime wrapper type; the primitive stays a primitive.
 
-Diagnostic prefix `SIA` — SIA001 (mismatch, fix: change attr or rename target), SIA002 (source missing, fix), SIA003 (target missing, fix), SIA004 (ambiguous convention, error, compilation-end), SIA005 (redundant `[Id]`, fix, compilation-end), SIA006 (single-option `[UnionId]`, fix; return attributes included), SIA007 (empty tag — `""`, whitespace or `null`, on either the whole array or one option — error), SIA008 (`[assembly: ExternalId]` names a missing member or no id, error, compilation-end).
+Diagnostic prefix `SIA` — SIA001 (mismatch, fix: change attr or rename target), SIA002 (source missing, fix), SIA003 (target missing, fix), SIA004 (ambiguous convention, error, compilation-end), SIA005 (redundant `[Id]`, fix, compilation-end), SIA006 (single-option `[UnionId]`, fix; return attributes included), SIA007 (empty tag — `""`, whitespace or `null`, on either the whole array or one option — error), SIA008 (`[assembly: ExternalId]` names a missing member or no id, error, compilation-end), SIA009 (`[Id("X")]` where `X` is a type in scope, fix to `[Id<X>]`), SIA010 (`[UnionId("X", "Y")]` with 2–5 tags that are all types in scope, fix to `[UnionId<X, Y>]`; same `GenericTag.Compiles` check and syntax action as SIA009).
 
 ## Build & test
 

@@ -139,7 +139,7 @@ The `IdAttribute` is source-generated into the consuming compilation — no runt
 The generated declarations are written in syntax any C# compiler accepts, so a project on an older `LangVersion` — including the C# 7.3 that `netstandard2.0` and .NET Framework target frameworks default to — compiles as-is. Two conveniences are language-version gated:
 
  * **C# 10+** gets a `global using StrongIdAnalyzer;`. Below that, add `using StrongIdAnalyzer;` to the files that tag declarations.
- * **C# 11+** gets the generic attribute forms, `[Id<Customer>]` and `[UnionId<Customer, Order>]`. These are the preferred forms: the compiler checks the type exists, and renaming it updates every tag. [SIA009](docs/SIA009.md) flags a string tag that names a type in scope.
+ * **C# 11+** gets the generic attribute forms, `[Id<Customer>]` and `[UnionId<Customer, Order>]`. These are the preferred forms: the compiler checks the type exists, and renaming it updates every tag. [SIA009](docs/SIA009.md) and [SIA010](docs/SIA010.md) flag string tags that name types in scope.
 
 The string forms, `[Id("Customer")]` and `[UnionId("Customer", "Order")]`, work at every language version. Use them below C# 11, or for a domain that has no type to name (an id from an external system, or a tag like `"Person"` deliberately broader than any one type).
 
@@ -416,6 +416,7 @@ Each rule has its own page with the message anatomy, every fix option, and the c
 | [SIA007](docs/SIA007.md)  | Error    | —        | `[Id]` / `[UnionId]` tag is empty or whitespace                         |
 | [SIA008](docs/SIA008.md)  | Error    | —        | `[assembly: ExternalId]` names a missing member or supplies no id       |
 | [SIA009](docs/SIA009.md)  | Warning  | Yes      | `[Id("X")]` names a type in scope and should be `[Id<X>]`               |
+| [SIA010](docs/SIA010.md)  | Warning  | Yes      | `[UnionId("X", "Y")]` names types in scope and should be `[UnionId<X, Y>]` |
 
 
 ### Reading a diagnostic
@@ -431,7 +432,7 @@ The location in the `Fix:` clause is the *declaration* to edit, which is often n
 The mechanically-fixable rules can be applied across a project from the command line, without an IDE, because the code fixes ship inside the analyzer package:
 
 ```
-dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006 SIA009
+dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006 SIA009 SIA010
 ```
 
 SIA001 is left out on purpose: it has two competing fixes (retag the target, or pass a different value) and only a human can tell which one is the bug. See [SIA001](docs/SIA001.md).
@@ -442,7 +443,7 @@ SIA001 is left out on purpose: it has two competing fixes (retag the target, or 
 The messages and the per-rule pages are written so an agent reading a build log can act without further context. The failure mode to guard against is an agent making a warning disappear rather than fixing the bug it reports: suppressing with `#pragma`, deleting the `[Id]` from the tagged side, or widening to `[UnionId]`. The block below is ready to paste into a consumer repository's `AGENTS.md` or `CLAUDE.md` to head that off:
 
 ```md
-## StrongIdAnalyzer (SIA001–SIA009)
+## StrongIdAnalyzer (SIA001–SIA010)
 
 This project uses StrongIdAnalyzer to stop primitive ids (Guid/int/string) from
 being mixed between domains. Ids are tagged with `[Id<Customer>]` (or
@@ -468,10 +469,11 @@ https://github.com/SimonCropp/StrongIdAnalyzer/blob/main/docs/<ID>.md.
 - SIA008 (`[assembly: ExternalId]` cannot apply): fix the member name (prefer
   `nameof`) or supply the domain name.
 - SIA009 (`[Id("X")]` where `X` is a type): replace with `[Id<X>]`.
+- SIA010 (`[UnionId("X", "Y")]` where each is a type): replace with `[UnionId<X, Y>]`.
 
 Apply the mechanical fixes without an IDE:
 
-    dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006 SIA009
+    dotnet format analyzers --diagnostics SIA002 SIA003 SIA005 SIA006 SIA009 SIA010
 
 Literals, locals, and untagged method results (`Guid.NewGuid()`, `Guid.Empty`)
 are deliberately not tracked; do not add tags to make them tracked.

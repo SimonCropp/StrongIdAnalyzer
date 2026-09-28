@@ -196,13 +196,16 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     // instead of silently leaving the string behind. Only offered when the generic form is
     // emitted (C# 11+) and would compile at this position: exactly one non-generic,
     // non-static type of that name — the same test the fixer's ShouldUseGenericAsync makes.
+    //
+    // SIA010 is the same for `[UnionId("Customer", "Order")]` → `[UnionId<Customer, Order>]`:
+    // every option has to name such a type, and there must be 2–5 of them, because those are
+    // the generic arities emitted. A single option is SIA006's to report.
     static void AnalyzeStringTagNamingType(SyntaxNodeAnalysisContext context)
     {
         var attribute = (AttributeSyntax) context.Node;
         if (attribute.Name is GenericNameSyntax or QualifiedNameSyntax { Right: GenericNameSyntax } ||
-            attribute.ArgumentList is not { Arguments.Count: 1 } arguments ||
-            arguments.Arguments[0].NameEquals is not null ||
-            arguments.Arguments[0].NameColon is not null)
+            attribute.ArgumentList is not { Arguments.Count: > 0 } arguments ||
+            arguments.Arguments.Any(_ => _.NameEquals is not null || _.NameColon is not null))
         {
             return;
         }
@@ -214,31 +217,55 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
 
         var model = context.SemanticModel;
         var cancel = context.CancellationToken;
-        if (model.GetSymbolInfo(attribute, cancel).Symbol is not IMethodSymbol constructor ||
-            !IsIdAttributeType(constructor.ContainingType))
+        if (model.GetSymbolInfo(attribute, cancel).Symbol is not IMethodSymbol constructor)
         {
             return;
         }
 
-        if (model.GetConstantValue(arguments.Arguments[0].Expression, cancel).Value is not string { Length: > 0 } value ||
-            !GenericTag.Compiles(model, attribute.SpanStart, value))
+        if (IsIdAttributeType(constructor.ContainingType, IdAttributeExtensions.IdMetadataName))
+        {
+            if (arguments.Arguments.Count != 1 ||
+                model.GetConstantValue(arguments.Arguments[0].Expression, cancel).Value is not string { Length: > 0 } value ||
+                !GenericTag.Compiles(model, attribute.SpanStart, value))
+            {
+                return;
+            }
+
+            Rules.ReportStringTagNamesType(context, attribute.GetLocation(), value, FindAttributeOwner(attribute, model, cancel));
+            return;
+        }
+
+        if (!IsIdAttributeType(constructor.ContainingType, IdAttributeExtensions.UnionIdMetadataName) ||
+            arguments.Arguments.Count is < 2 or > 5)
         {
             return;
         }
 
-        Rules.ReportStringTagNamesType(context, attribute.GetLocation(), value, FindAttributeOwner(attribute, model, cancel));
+        var values = new List<string>(arguments.Arguments.Count);
+        foreach (var argument in arguments.Arguments)
+        {
+            if (model.GetConstantValue(argument.Expression, cancel).Value is not string { Length: > 0 } value ||
+                !GenericTag.Compiles(model, attribute.SpanStart, value))
+            {
+                return;
+            }
+
+            values.Add(value);
+        }
+
+        Rules.ReportStringTagsNameTypes(context, attribute.GetLocation(), values, FindAttributeOwner(attribute, model, cancel));
     }
 
-    static bool IsIdAttributeType(INamedTypeSymbol? type) =>
+    static bool IsIdAttributeType(INamedTypeSymbol? type, string metadataName) =>
         type is
         {
-            MetadataName: IdAttributeExtensions.IdMetadataName,
             ContainingNamespace:
             {
                 Name: "StrongIdAnalyzer",
                 ContainingNamespace.IsGlobalNamespace: true
             }
-        };
+        } &&
+        type.MetadataName == metadataName;
 
     static ISymbol? FindAttributeOwner(AttributeSyntax attribute, SemanticModel model, Cancel cancel)
     {

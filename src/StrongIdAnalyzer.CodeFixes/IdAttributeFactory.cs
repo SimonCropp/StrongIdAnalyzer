@@ -33,6 +33,12 @@ static class IdAttributeFactory
             .WithTriviaFrom(existing)
             .WithAdditionalAnnotations(Formatter.Annotation);
 
+    // `[UnionId<X, Y>]` in place of an existing attribute, keeping its trivia (SIA010).
+    public static AttributeSyntax BuildGenericUnionReplacement(string[] values, AttributeSyntax existing) =>
+        BuildUnionId(values, useGeneric: true)
+            .WithTriviaFrom(existing)
+            .WithAdditionalAnnotations(Formatter.Annotation);
+
     public static bool IsGenericAttribute(AttributeSyntax attribute) =>
         attribute.Name switch
         {
