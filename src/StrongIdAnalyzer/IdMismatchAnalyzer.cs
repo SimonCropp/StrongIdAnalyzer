@@ -516,15 +516,8 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return IdInfo.NotPresent;
     }
 
-    static string? OnlyTag(ImmutableArray<string> tags)
-    {
-        if (tags is [var single])
-        {
-            return single;
-        }
-
-        return null;
-    }
+    static string? OnlyTag(ImmutableArray<string> tags) =>
+        tags is [var single] ? single : null;
 
     static void ReportConventionDiagnostics(
         CompilationAnalysisContext context,
@@ -1772,12 +1765,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         if (TryGetFromIndex(symbol, config, out var indexed))
         {
-            if (indexed.IsDefaultOrEmpty)
-            {
-                return IdInfo.NotPresent;
-            }
-
-            return IdInfo.Present(indexed);
+            return indexed.IsDefaultOrEmpty ? IdInfo.NotPresent : IdInfo.Present(indexed);
         }
 
         if (symbol is IMethodSymbol method)
@@ -2130,12 +2118,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         if (TryGetFromIndex(method, config, out var indexed))
         {
-            if (indexed.IsDefaultOrEmpty)
-            {
-                return IdInfo.Unknown;
-            }
-
-            return IdInfo.Present(indexed);
+            return indexed.IsDefaultOrEmpty ? IdInfo.Unknown : IdInfo.Present(indexed);
         }
 
         var direct = GetIdFromAttributes(method.GetReturnTypeAttributes());
@@ -2880,12 +2863,9 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        if (tags.Count == 0)
-        {
-            return IdInfo.NotPresent;
-        }
-
-        return IdInfo.PresentExplicit(tags.ToImmutable());
+        return tags.Count == 0
+            ? IdInfo.NotPresent
+            : IdInfo.PresentExplicit(tags.ToImmutable());
     }
 
     // A wrapper-typed member, a wrapper's value member or a wrapper's constructor /

@@ -196,14 +196,7 @@ public class IdAttributeGenerator : IIncrementalGenerator
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var languageVersion = context.ParseOptionsProvider.Select((options, _) =>
-        {
-            if (options is CSharpParseOptions parse)
-            {
-                return parse.LanguageVersion;
-            }
-
-            return LanguageVersion.Default;
-        });
+            options is CSharpParseOptions parse ? parse.LanguageVersion : LanguageVersion.Default);
 
         // If a referenced assembly already exposes StrongIdAnalyzer.IdAttribute to us
         // (e.g. an upstream project that grants InternalsVisibleTo), skip emitting to

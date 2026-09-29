@@ -51,15 +51,8 @@ static class IdAttributeFactory
         AttributeList(SingletonSeparatedList(attribute))
             .WithAdditionalAnnotations(Formatter.Annotation);
 
-    static AttributeSyntax BuildIdAttribute(string value, bool useGeneric)
-    {
-        if (useGeneric && IsValidIdentifier(value))
-        {
-            return BuildIdGeneric(value);
-        }
-
-        return BuildId(value);
-    }
+    static AttributeSyntax BuildIdAttribute(string value, bool useGeneric) =>
+        useGeneric && IsValidIdentifier(value) ? BuildIdGeneric(value) : BuildId(value);
 
     static AttributeSyntax BuildId(string value) =>
         Attribute(IdentifierName("Id"))
@@ -71,15 +64,10 @@ static class IdAttributeFactory
                 .WithTypeArgumentList(
                     TypeArgumentList(SingletonSeparatedList<TypeSyntax>(IdentifierName(value)))));
 
-    static AttributeSyntax BuildUnionId(string[] values, bool useGeneric)
-    {
-        if (useGeneric && values.Length >= 2 && values.All(IsValidIdentifier))
-        {
-            return BuildUnionIdGeneric(values);
-        }
-
-        return BuildUnionIdString(values);
-    }
+    static AttributeSyntax BuildUnionId(string[] values, bool useGeneric) =>
+        useGeneric && values.Length >= 2 && values.All(IsValidIdentifier)
+            ? BuildUnionIdGeneric(values)
+            : BuildUnionIdString(values);
 
     static AttributeSyntax BuildUnionIdString(string[] values) =>
         Attribute(IdentifierName("UnionId"))

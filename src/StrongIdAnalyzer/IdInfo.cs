@@ -27,50 +27,24 @@ readonly struct IdInfo
     public static IdInfo Present(string tag) =>
         new(IdState.Present, [tag], ImmutableArray<string>.Empty);
 
-    public static IdInfo Present(ImmutableArray<string> tags)
-    {
-        if (tags.IsDefaultOrEmpty)
-        {
-            return NotPresent;
-        }
+    public static IdInfo Present(ImmutableArray<string> tags) =>
+        tags.IsDefaultOrEmpty
+            ? NotPresent
+            : new(IdState.Present, tags, ImmutableArray<string>.Empty);
 
-        return new(IdState.Present, tags, ImmutableArray<string>.Empty);
-    }
+    public static IdInfo Present(ImmutableArray<string> tags, ImmutableArray<string> explicitTags) =>
+        tags.IsDefaultOrEmpty
+            ? NotPresent
+            : new(IdState.Present, tags, explicitTags.IsDefault ? ImmutableArray<string>.Empty : explicitTags);
 
-    public static IdInfo Present(ImmutableArray<string> tags, ImmutableArray<string> explicitTags)
-    {
-        if (tags.IsDefaultOrEmpty)
-        {
-            return NotPresent;
-        }
-
-        return new(IdState.Present, tags, explicitTags.IsDefault ? ImmutableArray<string>.Empty : explicitTags);
-    }
-
-    public static IdInfo PresentExplicit(ImmutableArray<string> tags)
-    {
-        if (tags.IsDefaultOrEmpty)
-        {
-            return NotPresent;
-        }
-
-        return new(IdState.Present, tags, tags);
-    }
+    public static IdInfo PresentExplicit(ImmutableArray<string> tags) =>
+        tags.IsDefaultOrEmpty
+            ? NotPresent
+            : new(IdState.Present, tags, tags);
 
     // Single-value accessor for the fixer (which needs one string to write back).
     // Picks the first tag — callers that care about multi-tag must use Tags directly.
-    public string? FirstValue
-    {
-        get
-        {
-            if (Tags.IsDefaultOrEmpty)
-            {
-                return null;
-            }
-
-            return Tags[0];
-        }
-    }
+    public string? FirstValue => Tags.IsDefaultOrEmpty ? null : Tags[0];
 
     // Set intersection — the source and target are compatible if they share at least
     // one tag. This is the natural rule for both covariant sources (receiver walk:

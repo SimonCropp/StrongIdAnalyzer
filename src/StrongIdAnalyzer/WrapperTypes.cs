@@ -255,12 +255,7 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
             }
         }
 
-        if (count == 1)
-        {
-            return single;
-        }
-
-        return conventional;
+        return count == 1 ? single : conventional;
     }
 
     // Accessibility rather than IsImplicitlyDeclared: a metadata record struct reports its
