@@ -19,42 +19,31 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             // ambiguity). Matching attributes by fully-qualified name instead of symbol
             // identity keeps cross-assembly usage working — e.g. messages assembly tags
             // a property with [Id("Customer")] and the consumer assembly assigns it.
-            var suppression = Suppression.Read(
-                start.Options.AnalyzerConfigOptionsProvider,
-                start.Compilation);
-            var inferSuffixTags = SuffixInference.Read(
-                start.Options.AnalyzerConfigOptionsProvider,
-                start.Compilation);
-            // Built before Config because the known-tags computation consults them too.
-            var wrappers = new WrapperTypes(
-                WrapperTypes.Read(start.Options.AnalyzerConfigOptionsProvider, start.Compilation),
-                suppression);
+            // .editorconfig options are per tree, so each action takes the Config for the
+            // tree it is analysing (see Configs).
             var externalIds = ExternalIds.Read(start.Compilation);
-            var config = new Config(
-                suppression,
-                inferSuffixTags,
-                wrappers,
-                externalIds,
+            var configs = new Configs(
+                start.Options.AnalyzerConfigOptionsProvider,
                 start.Compilation,
-                new(() => CollectKnownTags(start.Compilation, suppression, wrappers, externalIds)));
+                externalIds);
 
             start.RegisterOperationAction(
-                _ => AnalyzeArgument(_, config),
+                _ => AnalyzeArgument(_, configs.For(_.Operation.Syntax.SyntaxTree)),
                 OperationKind.Argument);
             start.RegisterOperationAction(
-                _ => AnalyzeSimpleAssignment(_, config),
+                _ => AnalyzeSimpleAssignment(_, configs.For(_.Operation.Syntax.SyntaxTree)),
                 OperationKind.SimpleAssignment);
             start.RegisterOperationAction(
-                _ => AnalyzePropertyInitializer(_, config),
+                _ => AnalyzePropertyInitializer(_, configs.For(_.Operation.Syntax.SyntaxTree)),
                 OperationKind.PropertyInitializer);
             start.RegisterOperationAction(
-                _ => AnalyzeFieldInitializer(_, config),
+                _ => AnalyzeFieldInitializer(_, configs.For(_.Operation.Syntax.SyntaxTree)),
                 OperationKind.FieldInitializer);
             start.RegisterOperationAction(
-                _ => AnalyzeBinaryOperator(_, config),
+                _ => AnalyzeBinaryOperator(_, configs.For(_.Operation.Syntax.SyntaxTree)),
                 OperationKind.Binary);
             start.RegisterOperationAction(
-                _ => AnalyzeLoop(_, config),
+                _ => AnalyzeLoop(_, configs.For(_.Operation.Syntax.SyntaxTree)),
                 OperationKind.Loop);
 
             // Track convention-derived Id names across the whole compilation so we can
@@ -70,7 +59,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
                 (ISymbol Symbol, string Value, RedundancyReason Reason, SyntaxReference Reference, bool JoinsAmbiguity)>();
 
             start.RegisterSymbolAction(
-                _ => CollectConvention(_, config, ambiguity, redundantCandidates),
+                _ => CollectConvention(_, configs.For(_.Symbol), ambiguity, redundantCandidates),
                 SymbolKind.Property,
                 SymbolKind.Field,
                 SymbolKind.Parameter);
@@ -516,8 +505,15 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
         return IdInfo.NotPresent;
     }
 
-    static string? OnlyTag(ImmutableArray<string> tags) =>
-        tags is [var single] ? single : null;
+    static string? OnlyTag(ImmutableArray<string> tags)
+    {
+        if (tags is [var single])
+        {
+            return single;
+        }
+
+        return null;
+    }
 
     static void ReportConventionDiagnostics(
         CompilationAnalysisContext context,
@@ -1765,7 +1761,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         if (TryGetFromIndex(symbol, config, out var indexed))
         {
-            return indexed.IsDefaultOrEmpty ? IdInfo.NotPresent : IdInfo.Present(indexed);
+            if (indexed.IsDefaultOrEmpty)
+            {
+                return IdInfo.NotPresent;
+            }
+
+            return IdInfo.Present(indexed);
         }
 
         if (symbol is IMethodSymbol method)
@@ -2118,7 +2119,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     {
         if (TryGetFromIndex(method, config, out var indexed))
         {
-            return indexed.IsDefaultOrEmpty ? IdInfo.Unknown : IdInfo.Present(indexed);
+            if (indexed.IsDefaultOrEmpty)
+            {
+                return IdInfo.Unknown;
+            }
+
+            return IdInfo.Present(indexed);
         }
 
         var direct = GetIdFromAttributes(method.GetReturnTypeAttributes());
@@ -2566,7 +2572,7 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
     //       a half-migrated codebase's `Guid sourceUserId` should resolve to "User" while
     //       the `UserId` wrapper still exists. Counted as a type tag so SIA005's
     //       "without my own attribute" probe keeps it.
-    static TagIndex CollectKnownTags(
+    internal static TagIndex CollectKnownTags(
         Compilation compilation,
         Suppression suppression,
         WrapperTypes wrappers,
@@ -2863,9 +2869,12 @@ public class IdMismatchAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        return tags.Count == 0
-            ? IdInfo.NotPresent
-            : IdInfo.PresentExplicit(tags.ToImmutable());
+        if (tags.Count == 0)
+        {
+            return IdInfo.NotPresent;
+        }
+
+        return IdInfo.PresentExplicit(tags.ToImmutable());
     }
 
     // A wrapper-typed member, a wrapper's value member or a wrapper's constructor /

@@ -27,6 +27,8 @@ Three source projects, all in `src/`:
 - `StrongIdAnalyzer.CodeFixes/` — code fixes for SIA002/SIA003/SIA005/SIA006. Built by a `BeforeTargets="Build"` MSBuild target in the analyzer csproj, then the produced DLL is packed into the same `analyzers/dotnet/cs` folder of the analyzer nupkg via the `PackAnalyzer` target. Do **not** ship the CodeFixes project as a separate package.
 - `StrongIdAnalyzer.Tests/` — TUnit tests with a hand-rolled harness (no `Microsoft.CodeAnalysis.Testing`): each test builds a `CSharpCompilation` from a source string, runs `IdAttributeGenerator`, then `WithAnalyzers(...)`. `.editorconfig` options are passed through `TestAnalyzerConfigOptionsProvider` (its own file, shared by the analyzer, index, wrapper and code-fix tests). `IdMismatchAnalyzerTests.GetDiagnosticsWithOptions` does not check compiler errors in the snippet; `WrapperTests` and `IndexTests` do, and throw. `Samples.cs` contains mdsnippet-tagged snippets that the README pulls in — edits to those snippets flow to `readme.md` via mdsnippets.
 
+**`.editorconfig` options are per tree.** `Configs` builds one `Config` per distinct set of option values and maps each tree to one; operation actions take `configs.For(operation tree)`, symbol actions `configs.For(symbol)`. Never read a key from `compilation.SyntaxTrees.First()` — TUnit 1.71+ injects a file from the NuGet cache as the first tree, outside the project's `.editorconfig`. New keys go into `Configs.Read` via `ConfigOptions.Get`.
+
 `IntegrationTests/` is a separate solution with its own `nuget.config` pointing at `../nugets/` to consume the just-built package rather than project references.
 
 ### Diagnostic messages and docs

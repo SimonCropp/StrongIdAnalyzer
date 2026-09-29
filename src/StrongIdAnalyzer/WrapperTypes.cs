@@ -16,23 +16,11 @@
 // to an explicit [Id] / [UnionId].
 sealed class WrapperTypes(bool enabled, Suppression suppression)
 {
-    const string optionKey = "strongidanalyzer.infer_wrapper_ids";
+    public const string OptionKey = "strongidanalyzer.infer_wrapper_ids";
     const string idSuffix = "Id";
 
-    public static bool Read(
-        AnalyzerConfigOptionsProvider options,
-        Compilation compilation)
-    {
-        var tree = compilation.SyntaxTrees.FirstOrDefault();
-        if (tree is null ||
-            !options.GetOptions(tree)
-                .TryGetValue(optionKey, out var raw))
-        {
-            return false;
-        }
-
-        return bool.TryParse(raw, out var value) && value;
-    }
+    public static bool Parse(string? raw) =>
+        bool.TryParse(raw, out var value) && value;
 
     public bool Enabled { get; } = enabled;
 
@@ -255,7 +243,12 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
             }
         }
 
-        return count == 1 ? single : conventional;
+        if (count == 1)
+        {
+            return single;
+        }
+
+        return conventional;
     }
 
     // Accessibility rather than IsImplicitlyDeclared: a metadata record struct reports its
