@@ -1,33 +1,29 @@
-// Reads a project-level .editorconfig key. `[*.cs]` entries are per-tree and never surface
-// via GlobalOptions, so the trees are sampled — but not just the first one: a compilation
-// can open with a file outside the project's .editorconfig scope (TUnit 1.71+ injects
-// TUnit.Core.GeneratedNamespace.cs from the NuGet cache ahead of the project's own files),
-// and that tree carries none of the keys. The first tree that has the key wins; the value
-// is project-uniform in practice. GlobalOptions (.globalconfig) is the fallback.
+// Reads an .editorconfig key for one syntax tree: the tree's own options (`[*.cs]`
+// sections, with any .globalconfig already merged in by the compiler), falling back to
+// GlobalOptions when there is no tree. Null means the key is not set.
+//
+// Options are per tree, not per compilation: a compilation can contain files outside the
+// project's .editorconfig scope (TUnit 1.71+ injects TUnit.Core.GeneratedNamespace.cs from
+// the NuGet cache), and different folders can set different values. Configs maps each
+// tree to the Config built for its option values.
 static class ConfigOptions
 {
-    public static bool TryGetValue(
+    public static string? Get(
         AnalyzerConfigOptionsProvider options,
-        Compilation compilation,
-        string key,
-        out string value)
+        SyntaxTree? tree,
+        string key)
     {
-        foreach (var tree in compilation.SyntaxTrees)
+        if (tree is not null &&
+            options.GetOptions(tree).TryGetValue(key, out var value))
         {
-            if (options.GetOptions(tree).TryGetValue(key, out var found))
-            {
-                value = found;
-                return true;
-            }
+            return value;
         }
 
         if (options.GlobalOptions.TryGetValue(key, out var global))
         {
-            value = global;
-            return true;
+            return global;
         }
 
-        value = "";
-        return false;
+        return null;
     }
 }

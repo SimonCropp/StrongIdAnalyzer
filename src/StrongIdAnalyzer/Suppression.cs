@@ -11,8 +11,8 @@
 // covers `Microsoft.Graph` and `Microsoft.Graph.Core` without covering `Microsoft.Graphics`.
 sealed class Suppression(ImmutableArray<NamePattern> namespaces, ImmutableArray<NamePattern> assemblies)
 {
-    const string namespacesKey = "strongidanalyzer.suppressed_namespaces";
-    const string assembliesKey = "strongidanalyzer.suppressed_assemblies";
+    public const string NamespacesKey = "strongidanalyzer.suppressed_namespaces";
+    public const string AssembliesKey = "strongidanalyzer.suppressed_assemblies";
 
     // Library namespaces whose members we can't realistically tag. Noise for SIA002/SIA003
     // when a tagged id flows into BCL / framework APIs (e.g. logging, serialization,
@@ -28,19 +28,16 @@ sealed class Suppression(ImmutableArray<NamePattern> namespaces, ImmutableArray<
     // Assembly verdicts are per assembly, not per symbol, so the name split happens once.
     ConcurrentDictionary<IAssemblySymbol, bool> assemblyCache = new(SymbolEqualityComparer.Default);
 
-    public static Suppression Read(
-        AnalyzerConfigOptionsProvider options,
-        Compilation compilation)
+    // Null means the key is not set; an empty value is an explicit "disable this list".
+    public static Suppression Create(string? rawNamespaces, string? rawAssemblies)
     {
-        var hasNamespaces = ConfigOptions.TryGetValue(options, compilation, namespacesKey, out var rawNamespaces);
-        var hasAssemblies = ConfigOptions.TryGetValue(options, compilation, assembliesKey, out var rawAssemblies);
-        if (!hasNamespaces && !hasAssemblies)
+        if (rawNamespaces is null && rawAssemblies is null)
         {
             return @default;
         }
 
-        var namespaces = hasNamespaces ? Parse(rawNamespaces) : defaultNamespaces;
-        var assemblies = hasAssemblies ? Parse(rawAssemblies) : [];
+        var namespaces = rawNamespaces is null ? defaultNamespaces : Parse(rawNamespaces);
+        var assemblies = rawAssemblies is null ? [] : Parse(rawAssemblies);
         return new(namespaces, assemblies);
     }
 

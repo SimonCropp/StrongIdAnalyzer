@@ -6,19 +6,10 @@
 // constraint this rule would over-tag common names like `hashedId`, `rawId`, `validId`.
 static class SuffixInference
 {
-    const string optionKey = "strongidanalyzer.infer_suffix_ids";
+    public const string OptionKey = "strongidanalyzer.infer_suffix_ids";
 
-    public static bool Read(
-        AnalyzerConfigOptionsProvider options,
-        Compilation compilation)
-    {
-        if (!ConfigOptions.TryGetValue(options, compilation, optionKey, out var raw))
-        {
-            return false;
-        }
-
-        return bool.TryParse(raw, out var value) && value;
-    }
+    public static bool Parse(string? raw) =>
+        bool.TryParse(raw, out var value) && value;
 
     // Matches `[prefix][Word]Id` where `Word` is a suffix starting at an upper-case
     // boundary before the trailing `Id`. Walks longest-first: the whole prefix is

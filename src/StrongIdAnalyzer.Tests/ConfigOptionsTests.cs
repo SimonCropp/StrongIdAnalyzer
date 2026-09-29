@@ -1,7 +1,7 @@
-// The .editorconfig keys must be read from a tree the project's .editorconfig covers, not
-// just the compilation's first tree. TUnit 1.71+ injects TUnit.Core.GeneratedNamespace.cs
+// The .editorconfig keys are read per tree, so a tree outside the project's .editorconfig
+// cannot hide them from the rest. TUnit 1.71+ injects TUnit.Core.GeneratedNamespace.cs
 // from the NuGet cache ahead of the project's own files; that tree sits outside the
-// project's .editorconfig, so reading only the first tree silently dropped every setting.
+// project's .editorconfig; reading only the first tree silently dropped every setting.
 // Each test here opens the compilation with such an out-of-scope tree.
 public class ConfigOptionsTests
 {
@@ -124,14 +124,66 @@ public class ConfigOptionsTests
         await Assert.That(diagnostics.Select(_ => _.Id)).Contains("SIA001");
     }
 
-    static Task<ImmutableArray<Diagnostic>> Run(string source, Dictionary<string, string> options)
+    // Options are per tree: a folder whose .editorconfig enables wrappers gets them, a
+    // sibling folder without it does not, in the same compilation.
+    [Test]
+    public async Task OptionsApplyPerTree()
+    {
+        var wrapper =
+            """
+            public readonly record struct UserId(System.Guid Value);
+            """;
+        var parents =
+            """
+            public class Parents{0}
+            {{
+                public UserId momUserId;
+                public UserId dadUserId;
+
+                public void Swap() =>
+                    momUserId = dadUserId;
+            }}
+            """;
+
+        var diagnostics = await Run(
+            [
+                ("/project/UserId.cs", wrapper),
+                ("/project/enabled/Parents.cs", string.Format(parents, "Enabled")),
+                ("/project/disabled/Parents.cs", string.Format(parents, "Disabled"))
+            ],
+            new()
+            {
+                ["/project/enabled/"] = new()
+                {
+                    ["strongidanalyzer.infer_wrapper_ids"] = "true"
+                }
+            });
+
+        var paths = diagnostics
+            .Where(_ => _.Id == "SIA001")
+            .Select(_ => _.Location.SourceTree!.FilePath)
+            .Distinct();
+        await Assert.That(paths).IsEquivalentTo(["/project/disabled/Parents.cs"]);
+    }
+
+    static Task<ImmutableArray<Diagnostic>> Run(string source, Dictionary<string, string> options) =>
+        Run(
+            [
+                ("/nuget/tunit.core/TUnit.Core.GeneratedNamespace.cs", outOfScope),
+                ("/project/Sample.cs", source)
+            ],
+            new()
+            {
+                ["/project/"] = options
+            });
+
+    static Task<ImmutableArray<Diagnostic>> Run(
+        (string Path, string Source)[] files,
+        Dictionary<string, Dictionary<string, string>> optionsByFolder)
     {
         var compilation = CSharpCompilation.Create(
             "Tests",
-            [
-                CSharpSyntaxTree.ParseText(outOfScope, path: "/nuget/tunit.core/TUnit.Core.GeneratedNamespace.cs"),
-                CSharpSyntaxTree.ParseText(source, path: "/project/Sample.cs")
-            ],
+            files.Select(_ => CSharpSyntaxTree.ParseText(_.Source, path: _.Path)),
             TrustedReferences.All,
             new(OutputKind.DynamicallyLinkedLibrary));
 
@@ -144,28 +196,31 @@ public class ConfigOptionsTests
             throw new(string.Join(Environment.NewLine, errors.Select(_ => _.ToString())));
         }
 
-        var analyzerOptions = new AnalyzerOptions([], new ScopedOptionsProvider(options));
+        var analyzerOptions = new AnalyzerOptions([], new ScopedOptionsProvider(optionsByFolder));
         return updated
             .SuppressStringTagHint()
             .WithAnalyzers([new IdMismatchAnalyzer()], analyzerOptions)
             .GetAnalyzerDiagnosticsAsync();
     }
 
-    // Mirrors a project .editorconfig at /project: trees under it get the keys, every other
-    // tree (and GlobalOptions, as `[*.cs]` entries never reach it) gets nothing.
-    sealed class ScopedOptionsProvider(Dictionary<string, string> options) :
+    // Mirrors per-folder .editorconfig files: a tree gets the options of the folder it sits
+    // under, every other tree (and GlobalOptions, as `[*.cs]` entries never reach it) gets
+    // nothing.
+    sealed class ScopedOptionsProvider(Dictionary<string, Dictionary<string, string>> optionsByFolder) :
         AnalyzerConfigOptionsProvider
     {
-        readonly TestAnalyzerConfigOptions scoped = new(options);
         readonly TestAnalyzerConfigOptions empty = new(new Dictionary<string, string>());
 
         public override AnalyzerConfigOptions GlobalOptions => empty;
 
         public override AnalyzerConfigOptions GetOptions(SyntaxTree tree)
         {
-            if (tree.FilePath.StartsWith("/project/", StringComparison.Ordinal))
+            foreach (var (folder, options) in optionsByFolder)
             {
-                return scoped;
+                if (tree.FilePath.StartsWith(folder, StringComparison.Ordinal))
+                {
+                    return new TestAnalyzerConfigOptions(options);
+                }
             }
 
             return empty;

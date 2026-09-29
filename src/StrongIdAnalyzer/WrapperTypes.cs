@@ -16,20 +16,11 @@
 // to an explicit [Id] / [UnionId].
 sealed class WrapperTypes(bool enabled, Suppression suppression)
 {
-    const string optionKey = "strongidanalyzer.infer_wrapper_ids";
+    public const string OptionKey = "strongidanalyzer.infer_wrapper_ids";
     const string idSuffix = "Id";
 
-    public static bool Read(
-        AnalyzerConfigOptionsProvider options,
-        Compilation compilation)
-    {
-        if (!ConfigOptions.TryGetValue(options, compilation, optionKey, out var raw))
-        {
-            return false;
-        }
-
-        return bool.TryParse(raw, out var value) && value;
-    }
+    public static bool Parse(string? raw) =>
+        bool.TryParse(raw, out var value) && value;
 
     public bool Enabled { get; } = enabled;
 
