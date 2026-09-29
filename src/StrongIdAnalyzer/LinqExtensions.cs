@@ -58,7 +58,12 @@ static class LinqExtensions
             return null;
         }
 
-        return arguments.Length > index ? arguments[index].Value : null;
+        if (arguments.Length > index)
+        {
+            return arguments[index].Value;
+        }
+
+        return null;
     }
 
     // `SelectMany(source, collectionSelector, resultSelector)` — the shape is recognised
