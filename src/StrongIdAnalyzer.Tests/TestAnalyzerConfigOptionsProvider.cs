@@ -1,6 +1,7 @@
 // Feeds .editorconfig-style options to the analyzer under test. The same dictionary is
 // returned for global options and for every tree, which matches how the analyzer reads
-// its keys (from the first syntax tree's options).
+// its keys (ConfigOptions: the first tree that has the key, then GlobalOptions).
+// ConfigOptionsTests uses its own provider to give trees different options.
 sealed class TestAnalyzerConfigOptions(IDictionary<string, string> options)
     : AnalyzerConfigOptions
 {

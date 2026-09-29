@@ -32,23 +32,15 @@ sealed class Suppression(ImmutableArray<NamePattern> namespaces, ImmutableArray<
         AnalyzerConfigOptionsProvider options,
         Compilation compilation)
     {
-        // Read from any syntax tree's options rather than GlobalOptions — `[*.cs]`
-        // editorconfig entries are per-tree and never surface via GlobalOptions.
-        // The value is project-uniform in practice, so a single tree sample is
-        // sufficient and keeps this a one-time read at CompilationStart.
-        var tree = compilation.SyntaxTrees.FirstOrDefault();
-        if (tree is null)
+        var hasNamespaces = ConfigOptions.TryGetValue(options, compilation, namespacesKey, out var rawNamespaces);
+        var hasAssemblies = ConfigOptions.TryGetValue(options, compilation, assembliesKey, out var rawAssemblies);
+        if (!hasNamespaces && !hasAssemblies)
         {
             return @default;
         }
 
-        var treeOptions = options.GetOptions(tree);
-        var namespaces = treeOptions.TryGetValue(namespacesKey, out var rawNamespaces)
-            ? Parse(rawNamespaces)
-            : defaultNamespaces;
-        var assemblies = treeOptions.TryGetValue(assembliesKey, out var rawAssemblies)
-            ? Parse(rawAssemblies)
-            : [];
+        var namespaces = hasNamespaces ? Parse(rawNamespaces) : defaultNamespaces;
+        var assemblies = hasAssemblies ? Parse(rawAssemblies) : [];
         return new(namespaces, assemblies);
     }
 

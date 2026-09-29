@@ -23,10 +23,7 @@ sealed class WrapperTypes(bool enabled, Suppression suppression)
         AnalyzerConfigOptionsProvider options,
         Compilation compilation)
     {
-        var tree = compilation.SyntaxTrees.FirstOrDefault();
-        if (tree is null ||
-            !options.GetOptions(tree)
-                .TryGetValue(optionKey, out var raw))
+        if (!ConfigOptions.TryGetValue(options, compilation, optionKey, out var raw))
         {
             return false;
         }
