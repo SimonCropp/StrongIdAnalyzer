@@ -160,6 +160,36 @@ public class IdAttributeGeneratorTests
         await Assert.That(string.Join("\n", errors.Select(_ => _.ToString()))).IsEqualTo("");
     }
 
+    // A consumer that sets GenerateDocumentationFile parses the generated source with doc
+    // comments checked, so a broken one there is a warning in their build, and an error
+    // under TreatWarningsAsErrors. ExternalIdAttribute's summary once named its constructor
+    // parameters with paramref, which is CS1734 on a class. Dummy is internal so that it
+    // does not raise CS1591 itself.
+    [Test]
+    [Arguments(LanguageVersion.CSharp7_3)]
+    [Arguments(LanguageVersion.CSharp10)]
+    [Arguments(LanguageVersion.CSharp11)]
+    public async Task GeneratedDocComments_AreValid(LanguageVersion version)
+    {
+        var parseOptions = new CSharpParseOptions(version, DocumentationMode.Diagnose);
+        var compilation = CSharpCompilation.Create(
+            "Tests",
+            [CSharpSyntaxTree.ParseText("class Dummy { }", parseOptions)],
+            TrustedReferences.All,
+            new(OutputKind.DynamicallyLinkedLibrary));
+        var driver = CSharpGeneratorDriver.Create(
+            [new IdAttributeGenerator().AsSourceGenerator()],
+            parseOptions: parseOptions);
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var updated, out var generatorDiagnostics);
+
+        await Assert.That(generatorDiagnostics.Length).IsEqualTo(0);
+
+        var warnings = updated.GetDiagnostics()
+            .Where(_ => _.Severity >= DiagnosticSeverity.Warning)
+            .ToArray();
+        await Assert.That(string.Join("\n", warnings.Select(_ => _.ToString()))).IsEqualTo("");
+    }
+
     [Test]
     public async Task GlobalUsing_OnlyEmittedFromCSharp10()
     {

@@ -96,9 +96,9 @@ public class IdAttributeGenerator : IIncrementalGenerator
 
             /// <summary>
             /// Tags a property or field declared in a referenced assembly, which cannot carry
-            /// <see cref="IdAttribute"/> itself. Read or written through <paramref name="type"/>
-            /// or any type derived from it, <paramref name="member"/> carries <paramref name="ids"/>
-            /// exactly as if the attribute were on the declaration:
+            /// <see cref="IdAttribute"/> itself. Read or written through the given type or any
+            /// type derived from it, the named member carries the given ids exactly as if the
+            /// attribute were on the declaration:
             /// <c>[assembly: ExternalId(typeof(DirectoryObject), nameof(DirectoryObject.Id), "EntraObject")]</c>.
             /// Several attributes for the same member union their ids.
             /// </summary>
@@ -108,6 +108,13 @@ public class IdAttributeGenerator : IIncrementalGenerator
             sealed class ExternalIdAttribute : Attribute
             {
                 // All three are read by the analyzer via metadata, not at runtime
+                /// <summary>
+                /// Tags <paramref name="member"/>, read or written through <paramref name="type"/>
+                /// or any type derived from it, with <paramref name="ids"/>.
+                /// </summary>
+                /// <param name="type">The type the member is accessed through. Derived types are covered too.</param>
+                /// <param name="member">The property or field name. Use <c>nameof</c> so the compiler checks it.</param>
+                /// <param name="ids">The ids the member carries. At least one is required.</param>
                 public ExternalIdAttribute(Type type, string member, params string[] ids)
                 {
                 }
