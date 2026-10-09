@@ -969,7 +969,7 @@ Ids flow through three categories of call, classified by signature rather than b
    * `Aggregate`
 
    The `*Async` counterparts from EF Core (`FirstAsync`, `SingleAsync`, …) are recognised by shape: any element-returning name + `Async` whose return type is `Task<T>` / `ValueTask<T>` over the receiver's element type flows the same way, so `await q.Select(_ => _.Tagged).SingleAsync()` is treated as a tagged scalar.
- * **Element-preserving** — the following methods pass the element id through unchanged, so chains like `ids.Where(x => x != Guid.Empty).First()` work:
+ * **Element-preserving** — the following methods pass the element id through unchanged, so chains like `ids.Where(_ => _ != Guid.Empty).First()` work:
    * `Where`
    * `OrderBy` / `OrderByDescending`
    * `ThenBy` / `ThenByDescending`
@@ -988,7 +988,7 @@ Ids flow through three categories of call, classified by signature rather than b
    * Identity lambda `x => x` keeps the receiver's element id.
    * Method group `Select(Converter)` reads `[return: Id(...)]` on the target method.
    * Expression-bodied lambda with a tagged body (`Select(x => GetTagged(x))`) adopts the body's resolved id.
-   * `SelectMany(x => x.TaggedCollection)` takes the id of the **inner collection's** elements. The three-argument overload takes it from the result selector instead, which is the one that decides what the call produces.
+   * `SelectMany(_ => _.TaggedCollection)` takes the id of the **inner collection's** elements. The three-argument overload takes it from the result selector instead, which is the one that decides what the call produces.
    * Any other selector shape drops the id.
 
 A method's own `[return: Id(...)]` always wins over the shape rules above — a helper that maps one domain to another says so on its signature.
